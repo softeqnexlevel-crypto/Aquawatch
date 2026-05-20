@@ -1,4 +1,4 @@
-import Navbar from "./components/Navbar";
+
 import LiveTicker from "./components/LiveTicker";
 import Hero from "./components/Hero";
 import StatsBar from "./components/StatsBar";
@@ -26,17 +26,7 @@ export default function App() {
       <LiveTicker />
       <Footer />
       </AppLayout>
-      {/* <Navbar />
-      <Hero />
-      <StatsBar />
-      <Features />
-      <StationShowcase />
-      <Pricing />
-      <Testimonials />
-      <CTA />
-      <LiveTicker />
-      <Footer /> */}
-
+      
     
     </>
   );
