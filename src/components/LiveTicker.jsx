@@ -1,5 +1,5 @@
 import { TICKER } from "../data";
-import '../app.css'
+import '../App.css'
 export default function LiveTicker() {
   // Map parameters to exact Tailwind colors and glow rings based on structural health
   const alertTheme = {
