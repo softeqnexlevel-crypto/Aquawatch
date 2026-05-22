@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 
 const stations = [
   {
-    name: "Intake A — Nairobi River",
+    name: "Intake A — Rift valley osmotic",
     type: "Intake",
     status: "Normal",
     prefilterDP: 0.42,
