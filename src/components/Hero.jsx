@@ -40,7 +40,7 @@ export default function Hero() {
           </h1>
 
           <p className="max-w-xl text-base sm:text-lg text-slate-400 font-normal leading-relaxed">
-            AquaWatch gives utilities, municipalities, and engineers real-time visibility into water quality across their entire distribution network.
+            Aqua system monitor gives utilities, municipalities, and engineers real-time visibility into water quality across their entire distribution network.
           </p>
 
           {/* CTA Buttons */}

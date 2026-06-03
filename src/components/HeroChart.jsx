@@ -29,7 +29,7 @@ export default function HeroChart() {
         
         {/* Title Center String */}
         <div className="text-xs font-medium text-slate-400 tracking-wide select-none">
-          AquaWatch · Live Dashboard
+          Aqua system monitor · Live Dashboard
         </div>
         
         {/* Live Alarm Indicator Badge */}
