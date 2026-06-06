@@ -1,29 +1,28 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, AreaChart, Area, BarChart, Bar, ReferenceLine,
+  LineChart, Line, AreaChart, Area, BarChart, Bar,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine,
 } from 'recharts';
 
-// ─── DATA ────────────────────────────────────────────────────────────────────
-
+// ─── DATA ───────────────────────────────────────────────────────────────────
 const performanceData = [
-  { day: 'Mon', recovery: 78, production: 2450, antiscalant: 12.4 },
-  { day: 'Tue', recovery: 81, production: 2680, antiscalant: 13.1 },
-  { day: 'Wed', recovery: 76, production: 2390, antiscalant: 11.8 },
-  { day: 'Thu', recovery: 83, production: 2750, antiscalant: 13.5 },
-  { day: 'Fri', recovery: 79, production: 2580, antiscalant: 12.7 },
-  { day: 'Sat', recovery: 82, production: 2690, antiscalant: 13.0 },
-  { day: 'Sun', recovery: 80, production: 2520, antiscalant: 12.5 },
+  { day: 'Mon', recovery: 78, production: 2450, antiscalant: 12.4, pressure: 6.8 },
+  { day: 'Tue', recovery: 81, production: 2680, antiscalant: 13.1, pressure: 6.5 },
+  { day: 'Wed', recovery: 76, production: 2390, antiscalant: 11.8, pressure: 7.1 },
+  { day: 'Thu', recovery: 83, production: 2750, antiscalant: 13.5, pressure: 6.3 },
+  { day: 'Fri', recovery: 79, production: 2580, antiscalant: 12.7, pressure: 6.9 },
+  { day: 'Sat', recovery: 82, production: 2690, antiscalant: 13.0, pressure: 6.6 },
+  { day: 'Sun', recovery: 80, production: 2520, antiscalant: 12.5, pressure: 6.8 },
 ];
 
 const monthlyData = [
-  { month: 'Jan', antiscalant: 380 },
-  { month: 'Feb', antiscalant: 395 },
-  { month: 'Mar', antiscalant: 365 },
-  { month: 'Apr', antiscalant: 420 },
+  { month: 'Jan', antiscalant: 380, production: 72000, recovery: 79 },
+  { month: 'Feb', antiscalant: 395, production: 76500, recovery: 81 },
+  { month: 'Mar', antiscalant: 365, production: 69800, recovery: 77 },
+  { month: 'Apr', antiscalant: 420, production: 81200, recovery: 83 },
 ];
 
-const liveStations = [
+const stationFeed = [
   { id: 'STN-001', name: 'River Delta Alpha', ph: 7.2, turbidity: 3.1,  temp: 22.4, status: 'normal', last: '2m ago' },
   { id: 'STN-002', name: 'Reservoir Beta',    ph: 6.8, turbidity: 8.7,  temp: 19.1, status: 'warn',   last: '1m ago' },
   { id: 'STN-003', name: 'Coastal Gamma',     ph: 7.9, turbidity: 2.0,  temp: 24.8, status: 'normal', last: '3m ago' },
@@ -37,329 +36,347 @@ const pressureStages = [
   { label: '2nd Stage ΔP',  pct: 28, val: '0.31 bar', color: '#3b82f6', warn: false },
 ];
 
-// ─── PALETTE ─────────────────────────────────────────────────────────────────
-
-const C = {
-  bg:     '#060D18',
-  panel:  '#0B1628',
-  card:   '#0F1E30',
+// ─── THEME ──────────────────────────────────────────────────────────────────
+const T = {
+  bg:     '#07101E',
+  panel:  '#0C1829',
+  panel2: '#0F1E30',
   border: '#162336',
-  borderHi: '#1E3347',
-  text:   '#94b8d0',
-  hi:     '#cde4f0',
-  dim:    '#3d6070',
+  text:   '#94a3b8',
+  hi:     '#e2e8f0',
   teal:   '#14b8a6',
   cyan:   '#22d3ee',
   blue:   '#3b82f6',
   amber:  '#f59e0b',
-  red:    '#ef4444',
   green:  '#22c55e',
+  red:    '#ef4444',
   orange: '#f97316',
 };
 
-// ─── SHARED STYLES ────────────────────────────────────────────────────────────
-
-const tt = {
-  contentStyle: {
-    background: '#0B1628', border: '1px solid #1E3347',
-    borderRadius: 8, color: '#94b8d0', fontSize: 11,
-    fontFamily: "'DM Mono','Courier New',monospace",
-  },
-  labelStyle: { color: '#3d6070', fontSize: 10 },
-  itemStyle:  { color: '#cde4f0' },
+const tip = {
+  contentStyle: { background: T.panel, border: `1px solid ${T.border}`, borderRadius: 8, color: T.hi, fontSize: 12, fontFamily: 'inherit' },
+  labelStyle:   { color: T.text, marginBottom: 4 },
+  cursor:       { stroke: T.border },
 };
 
-// ─── SUB-COMPONENTS ───────────────────────────────────────────────────────────
+// ─── SUB-COMPONENTS ──────────────────────────────────────────────────────────
 
-function SectionLabel({ children }) {
+function PulsingDot({ color }) {
   return (
-    <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.18em', color: C.dim, marginBottom: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
-      <span style={{ display: 'inline-block', width: 16, height: 1, background: C.borderHi }} />
-      {children}
-      <span style={{ display: 'inline-block', flex: 1, height: 1, background: C.border }} />
-    </div>
-  );
-}
-
-function KpiCard({ label, value, sub, subColor, valueColor, accent, icon }) {
-  return (
-    <div style={{
-      background: C.card, border: `1px solid ${C.border}`,
-      borderTop: `2px solid ${accent}`, borderRadius: 12,
-      padding: '18px 20px', position: 'relative', overflow: 'hidden',
-    }}>
-      <div style={{
-        position: 'absolute', top: 14, right: 16,
-        fontSize: 20, opacity: 0.08, color: accent,
-      }}>{icon}</div>
-      <div style={{ fontSize: 10, color: C.dim, letterSpacing: '0.12em', marginBottom: 10 }}>{label.toUpperCase()}</div>
-      <div style={{ fontSize: 30, fontWeight: 700, color: valueColor || C.hi, lineHeight: 1, marginBottom: 8, letterSpacing: '-0.02em' }}>{value}</div>
-      <div style={{ fontSize: 11, color: subColor || C.dim }}>{sub}</div>
-    </div>
-  );
-}
-
-function GaugeArc({ pct, color, size = 100 }) {
-  const r = 38, cx = 50, cy = 54;
-  const circ = Math.PI * r;
-  const dash = (pct / 100) * circ;
-  return (
-    <svg width={size} height={size * 0.62} viewBox="0 0 100 62" style={{ overflow: 'visible' }}>
-      <path d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`}
-        fill="none" stroke={C.border} strokeWidth="7" strokeLinecap="round" />
-      <path d={`M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`}
-        fill="none" stroke={color} strokeWidth="7" strokeLinecap="round"
-        strokeDasharray={`${dash} ${circ}`} style={{ transition: 'stroke-dasharray 0.6s ease' }} />
-    </svg>
-  );
-}
-
-function StatusDot({ status }) {
-  const col = status === 'normal' ? C.green : status === 'warn' ? C.amber : C.red;
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+    <span style={{ position: 'relative', display: 'inline-flex', width: 10, height: 10 }}>
       <span style={{
-        width: 7, height: 7, borderRadius: '50%', background: col,
-        boxShadow: status === 'alarm' ? `0 0 6px ${col}` : 'none',
-        animation: status === 'alarm' ? 'pulse 1.5s infinite' : 'none',
+        position: 'absolute', inset: 0, borderRadius: '50%',
+        background: color, opacity: 0.4,
+        animation: 'ping 1.4s cubic-bezier(0,0,0.2,1) infinite',
       }} />
-      <span style={{ fontSize: 10, letterSpacing: '0.1em', fontWeight: 700, color: col }}>
-        {status.toUpperCase()}
-      </span>
+      <span style={{ position: 'relative', borderRadius: '50%', width: 10, height: 10, background: color }} />
     </span>
   );
 }
 
-// ─── MAIN ─────────────────────────────────────────────────────────────────────
-
-export default function Dashboard() {
-  const [time, setTime] = useState(new Date());
-  useEffect(() => { const id = setInterval(() => setTime(new Date()), 1000); return () => clearInterval(id); }, []);
-
-  const timeStr = time.toTimeString().slice(0, 8);
+function RadialGauge({ value, min = 0, max = 100, color, size = 120, label, unit = '%' }) {
+  const r = 46, cx = 60, cy = 60;
+  const circumference = 2 * Math.PI * r;
+  const pct = (value - min) / (max - min);
+  const arc = circumference * 0.75;
+  const offset = arc - pct * arc;
+  const rotation = -225;
 
   return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+      <svg width={size} height={size} viewBox="0 0 120 120">
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke={T.border} strokeWidth={10}
+          strokeDasharray={`${arc} ${circumference - arc}`}
+          strokeDashoffset={0} strokeLinecap="round"
+          transform={`rotate(${rotation} ${cx} ${cy})`} />
+        <circle cx={cx} cy={cy} r={r} fill="none" stroke={color} strokeWidth={10}
+          strokeDasharray={`${arc} ${circumference - arc}`}
+          strokeDashoffset={offset} strokeLinecap="round"
+          transform={`rotate(${rotation} ${cx} ${cy})`}
+          style={{ transition: 'stroke-dashoffset 0.6s ease' }} />
+        <text x={cx} y={cy - 4} textAnchor="middle" fill={color} fontSize={18} fontWeight={700} fontFamily="inherit">
+          {value}{unit}
+        </text>
+        <text x={cx} y={cy + 14} textAnchor="middle" fill={T.text} fontSize={10} fontFamily="inherit">
+          {label}
+        </text>
+      </svg>
+    </div>
+  );
+}
+
+function StatusBadge({ status }) {
+  const map = { normal: [T.green, 'NORMAL'], warn: [T.amber, 'WARN'], alarm: [T.red, 'ALARM'] };
+  const [color, label] = map[status] || [T.text, status];
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, letterSpacing: '0.1em', fontWeight: 700, color }}>
+      <PulsingDot color={color} />
+      {label}
+    </span>
+  );
+}
+
+function SectionLabel({ children }) {
+  return (
+    <div style={{ fontSize: 10, color: T.text, letterSpacing: '0.16em', marginBottom: 14, fontWeight: 500 }}>
+      {children}
+    </div>
+  );
+}
+
+function KpiCard({ label, value, sub, subColor, accent, children }) {
+  return (
     <div style={{
-      background: C.bg, minHeight: '100vh', color: C.text,
-      fontFamily: "'DM Mono','Courier New',monospace",
+      background: T.panel, border: `1px solid ${T.border}`,
+      borderRadius: 14, padding: '20px 22px',
+      borderTop: `2px solid ${accent}`,
+      display: 'flex', flexDirection: 'column', gap: 6,
     }}>
+      <div style={{ fontSize: 10, color: T.text, letterSpacing: '0.12em' }}>{label}</div>
+      {children || (
+        <>
+          <div style={{ fontSize: 30, fontWeight: 700, color: accent, lineHeight: 1.1 }}>{value}</div>
+          <div style={{ fontSize: 11, color: subColor || T.text }}>{sub}</div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── MAIN ────────────────────────────────────────────────────────────────────
+export default function Dashboard() {
+  const [time, setTime] = useState(new Date());
+  const [activeChart, setActiveChart] = useState('recovery');
+
+  useEffect(() => {
+    const id = setInterval(() => setTime(new Date()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const chartMetrics = {
+    recovery:   { key: 'recovery',   color: T.cyan,  label: 'Recovery %',    unit: '%' },
+    production: { key: 'production', color: T.blue,  label: 'Production m³', unit: ' m³' },
+    antiscalant:{ key: 'antiscalant',color: T.amber, label: 'Antiscalant L', unit: ' L' },
+  };
+  const cm = chartMetrics[activeChart];
+
+  return (
+    <div style={{ background: T.bg, minHeight: '100%', color: T.hi, fontFamily: "'DM Mono','Courier New',monospace" }}>
       <style>{`
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
-        @keyframes blink { 0%,100%{opacity:1} 49%{opacity:1} 50%{opacity:0} 99%{opacity:0} }
+        @keyframes ping {
+          75%, 100% { transform: scale(2); opacity: 0; }
+        }
+        .row-hover:hover { background: rgba(255,255,255,0.025) !important; }
       `}</style>
 
-      {/* ── Top bar ── */}
-      <div style={{
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        marginBottom: 28, paddingBottom: 20, borderBottom: `1px solid ${C.border}`,
-      }}>
+      {/* ── Page header ── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 28 }}>
         <div>
-          <div style={{ fontSize: 9, color: C.dim, letterSpacing: '0.18em', marginBottom: 6 }}>
-            AQUASYNC SCADA · WATER MONITORING SYSTEM
-          </div>
-          <h1 style={{ fontSize: 26, fontWeight: 700, color: C.hi, margin: 0, letterSpacing: '-0.02em' }}>
-            System Overview
-          </h1>
+          <div style={{ fontSize: 10, color: T.text, letterSpacing: '0.16em', marginBottom: 6 }}>OPERATIONS CENTER</div>
+          <h1 style={{ fontSize: 26, fontWeight: 700, color: '#fff', margin: 0, letterSpacing: '-0.01em' }}>System Overview</h1>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: 22, fontWeight: 700, color: C.cyan, letterSpacing: '0.04em', fontVariantNumeric: 'tabular-nums' }}>
-              {timeStr}
+            <div style={{ fontSize: 18, fontWeight: 700, color: T.cyan, letterSpacing: '0.04em', fontVariantNumeric: 'tabular-nums' }}>
+              {time.toLocaleTimeString()}
             </div>
-            <div style={{ fontSize: 9, color: C.dim, letterSpacing: '0.12em' }}>UTC+03:00 · LIVE</div>
+            <div style={{ fontSize: 10, color: T.text, letterSpacing: '0.1em', marginTop: 2 }}>
+              {time.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }).toUpperCase()}
+            </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)', borderRadius: 8, padding: '8px 14px' }}>
-            <span style={{ width: 7, height: 7, borderRadius: '50%', background: C.green, boxShadow: `0 0 6px ${C.green}` }} />
-            <span style={{ fontSize: 10, color: C.green, letterSpacing: '0.1em' }}>ALL SYSTEMS NOMINAL</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)', borderRadius: 8, padding: '7px 14px', fontSize: 11, color: T.green, letterSpacing: '0.08em' }}>
+            <PulsingDot color={T.green} /> ALL SYSTEMS OPERATIONAL
           </div>
         </div>
       </div>
 
-      {/* ── KPI Row ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginBottom: 24 }}>
-        <KpiCard label="System Recovery Rate"    value="81.4%"    sub="↑ 2.3% from yesterday" subColor={C.green}  valueColor={C.teal}  accent={C.teal}   icon="◈" />
-        <KpiCard label="Total Production Today"  value="2,680 m³" sub="Borehole 3 · 1,240 m³"  subColor={C.dim}   valueColor={C.hi}    accent={C.blue}   icon="⬡" />
-        <KpiCard label="Antiscalant Consumption" value="13.1 L"   sub="Today · 395 L this month" subColor={C.dim}  valueColor={C.amber} accent={C.amber}  icon="◬" />
-        <KpiCard label="System Runtime"          value="142 hrs"  sub="⚠ Maintenance in 18 hrs" subColor={C.red}  valueColor={C.hi}    accent={C.red}    icon="◉" />
+      {/* ── KPI row ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginBottom: 20 }}>
+        <KpiCard label="SYSTEM RECOVERY RATE" value="81.4%" sub="↑ 2.3% from yesterday" subColor={T.green} accent={T.teal} />
+        <KpiCard label="TOTAL PRODUCTION TODAY" value="2,680 m³" sub="Borehole 3 · 1,240 m³" accent={T.blue} />
+        <KpiCard label="ANTISCALANT CONSUMPTION" value="13.1 L" sub="Today · 395 L this month" accent={T.amber} />
+        <KpiCard label="SYSTEM RUNTIME" accent={T.red}>
+          <div style={{ fontSize: 30, fontWeight: 700, color: '#fff', lineHeight: 1.1 }}>142 hrs</div>
+          <div style={{ fontSize: 11, color: T.red }}>⚠ Maintenance due in 18 hrs</div>
+          <div style={{ marginTop: 10, height: 4, background: T.border, borderRadius: 2, overflow: 'hidden' }}>
+            <div style={{ height: '100%', width: '88%', background: `linear-gradient(90deg, ${T.amber}, ${T.red})`, borderRadius: 2 }} />
+          </div>
+          <div style={{ fontSize: 10, color: T.text, marginTop: 4 }}>160 hr maintenance cycle · 88% elapsed</div>
+        </KpiCard>
       </div>
 
-      {/* ── Recovery + Production ── */}
-      <SectionLabel>PERFORMANCE CHARTS</SectionLabel>
-      <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 14, marginBottom: 24 }}>
+      {/* ── Gauges + switchable area chart ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 14, marginBottom: 20 }}>
+        {/* Gauge column */}
+        <div style={{ background: T.panel, border: `1px solid ${T.border}`, borderRadius: 14, padding: '20px 22px' }}>
+          <SectionLabel>KEY METRICS · LIVE</SectionLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 20 }}>
+            <RadialGauge value={81.4} min={60} max={100} color={T.cyan}  label="Recovery" size={130} />
+            <RadialGauge value={68}   min={0}  max={100} color={T.blue}  label="Capacity"  size={110} />
+            <RadialGauge value={88}   min={0}  max={100} color={T.amber} label="Runtime"   size={110} unit="%" />
+          </div>
+        </div>
 
-        {/* Area chart: production */}
-        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: '20px 20px 12px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-            <div style={{ fontSize: 10, color: C.dim, letterSpacing: '0.12em' }}>DAILY PRODUCTION · m³</div>
-            <div style={{ display: 'flex', gap: 16, fontSize: 10 }}>
-              <span style={{ color: C.teal }}>— Recovery %</span>
-              <span style={{ color: C.blue }}>▪ Production</span>
+        {/* Switchable chart */}
+        <div style={{ background: T.panel, border: `1px solid ${T.border}`, borderRadius: 14, padding: '20px 22px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18 }}>
+            <SectionLabel>DAILY PERFORMANCE TREND</SectionLabel>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {Object.entries(chartMetrics).map(([k, { label, color }]) => (
+                <button key={k} onClick={() => setActiveChart(k)} style={{
+                  background: activeChart === k ? `${color}18` : 'transparent',
+                  border: `1px solid ${activeChart === k ? color : T.border}`,
+                  borderRadius: 6, color: activeChart === k ? color : T.text,
+                  padding: '5px 12px', cursor: 'pointer', fontSize: 10,
+                  fontFamily: 'inherit', letterSpacing: '0.08em', transition: 'all 0.15s',
+                }}>{label.toUpperCase()}</button>
+              ))}
             </div>
           </div>
-          <ResponsiveContainer width="100%" height={240}>
-            <AreaChart data={performanceData}>
+          <ResponsiveContainer width="100%" height={300}>
+            <AreaChart data={performanceData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
               <defs>
-                <linearGradient id="prodGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor={C.blue} stopOpacity={0.18} />
-                  <stop offset="95%" stopColor={C.blue} stopOpacity={0} />
+                <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor={cm.color} stopOpacity={0.25} />
+                  <stop offset="95%" stopColor={cm.color} stopOpacity={0} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="2 4" stroke={C.border} />
-              <XAxis dataKey="day" stroke={C.dim} tick={{ fontSize: 10, fill: C.dim }} axisLine={false} tickLine={false} />
-              <YAxis stroke={C.dim} tick={{ fontSize: 10, fill: C.dim }} axisLine={false} tickLine={false} />
-              <Tooltip {...tt} />
-              <Area type="monotone" dataKey="production" stroke={C.blue} strokeWidth={2} fill="url(#prodGrad)" dot={false} name="Production m³" />
-              <Line type="monotone" dataKey="recovery"   stroke={C.teal} strokeWidth={2} dot={false} name="Recovery %" />
+              <CartesianGrid strokeDasharray="2 4" stroke={T.border} vertical={false} />
+              <XAxis dataKey="day" stroke="transparent" tick={{ fill: T.text, fontSize: 11 }} />
+              <YAxis stroke="transparent" tick={{ fill: T.text, fontSize: 11 }} />
+              <Tooltip {...tip} formatter={(v) => [`${v}${cm.unit}`, cm.label]} />
+              <Area type="monotoneX" dataKey={cm.key} stroke={cm.color} strokeWidth={2.5}
+                fill="url(#areaGrad)" dot={{ r: 4, fill: cm.color, strokeWidth: 0 }}
+                activeDot={{ r: 6, fill: cm.color, stroke: T.bg, strokeWidth: 2 }} />
             </AreaChart>
           </ResponsiveContainer>
         </div>
-
-        {/* Recovery rate trend with reference band */}
-        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: '20px 20px 12px' }}>
-          <div style={{ fontSize: 10, color: C.dim, letterSpacing: '0.12em', marginBottom: 20 }}>RECOVERY RATE TREND · %</div>
-          <ResponsiveContainer width="100%" height={240}>
-            <LineChart data={performanceData}>
-              <CartesianGrid strokeDasharray="2 4" stroke={C.border} />
-              <XAxis dataKey="day" stroke={C.dim} tick={{ fontSize: 10, fill: C.dim }} axisLine={false} tickLine={false} />
-              <YAxis domain={[70, 90]} stroke={C.dim} tick={{ fontSize: 10, fill: C.dim }} axisLine={false} tickLine={false} />
-              <Tooltip {...tt} />
-              <ReferenceLine y={85} stroke={C.red}   strokeDasharray="3 3" label={{ value: 'MAX', fill: C.red,   fontSize: 9, position: 'right' }} />
-              <ReferenceLine y={78} stroke={C.green} strokeDasharray="3 3" label={{ value: 'MIN', fill: C.green, fontSize: 9, position: 'right' }} />
-              <Line type="monotone" dataKey="recovery" stroke={C.cyan} strokeWidth={2.5}
-                dot={{ r: 4, fill: C.cyan, stroke: C.bg, strokeWidth: 2 }} name="Recovery %" />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
       </div>
 
-      {/* ── Antiscalant + Pressure + Gauges ── */}
-      <SectionLabel>CHEMICAL & PRESSURE MONITORING</SectionLabel>
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: 14, marginBottom: 24 }}>
-
-        {/* Antiscalant bar */}
-        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: '20px 20px 12px' }}>
-          <div style={{ fontSize: 10, color: C.dim, letterSpacing: '0.12em', marginBottom: 20 }}>ANTISCALANT DOSING · L / MONTH</div>
-          <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={monthlyData} barSize={36}>
-              <CartesianGrid strokeDasharray="2 4" stroke={C.border} vertical={false} />
-              <XAxis dataKey="month" stroke={C.dim} tick={{ fontSize: 10, fill: C.dim }} axisLine={false} tickLine={false} />
-              <YAxis stroke={C.dim} tick={{ fontSize: 10, fill: C.dim }} axisLine={false} tickLine={false} domain={[340, 440]} />
-              <Tooltip {...tt} />
-              <Bar dataKey="antiscalant" fill={C.amber} radius={[5,5,0,0]} name="Antiscalant L" />
+      {/* ── Antiscalant bar chart + pressure + recovery trend ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px 220px', gap: 14, marginBottom: 20 }}>
+        {/* Antiscalant */}
+        <div style={{ background: T.panel, border: `1px solid ${T.border}`, borderRadius: 14, padding: '20px 22px' }}>
+          <SectionLabel>ANTISCALANT CONSUMPTION — MONTHLY</SectionLabel>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={monthlyData} margin={{ left: -20, right: 0, top: 4, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="2 4" stroke={T.border} vertical={false} />
+              <XAxis dataKey="month" stroke="transparent" tick={{ fill: T.text, fontSize: 11 }} />
+              <YAxis stroke="transparent" tick={{ fill: T.text, fontSize: 11 }} />
+              <Tooltip {...tip} formatter={(v) => [`${v} L`, 'Antiscalant']} />
+              <Bar dataKey="antiscalant" fill={T.amber} radius={[5, 5, 0, 0]} maxBarSize={40} />
             </BarChart>
           </ResponsiveContainer>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', borderTop: `1px solid ${C.border}`, paddingTop: 16, marginTop: 10, textAlign: 'center', gap: 8 }}>
-            {[['13.1 L','Today'],['395 L','This Month'],['4,820 L','Projected Yearly']].map(([v,l]) => (
-              <div key={l}>
-                <div style={{ fontSize: 18, fontWeight: 700, color: C.amber, letterSpacing: '-0.01em' }}>{v}</div>
-                <div style={{ fontSize: 10, color: C.dim, marginTop: 3 }}>{l}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 0, marginTop: 18, borderTop: `1px solid ${T.border}`, paddingTop: 18, textAlign: 'center' }}>
+            {[['13.1 L', 'Today'], ['395 L', 'This Month'], ['4,820 L', 'Projected Yearly']].map(([v, l]) => (
+              <div key={l} style={{ borderRight: l !== 'Projected Yearly' ? `1px solid ${T.border}` : 'none' }}>
+                <div style={{ fontSize: 20, fontWeight: 700, color: T.amber }}>{v}</div>
+                <div style={{ fontSize: 10, color: T.text, marginTop: 4, letterSpacing: '0.08em' }}>{l.toUpperCase()}</div>
               </div>
             ))}
           </div>
         </div>
 
         {/* Differential pressure */}
-        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 20 }}>
-          <div style={{ fontSize: 10, color: C.dim, letterSpacing: '0.12em', marginBottom: 22 }}>DIFFERENTIAL PRESSURE</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+        <div style={{ background: T.panel, border: `1px solid ${T.border}`, borderRadius: 14, padding: '20px 22px' }}>
+          <SectionLabel>DIFFERENTIAL PRESSURE</SectionLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 22, marginTop: 8 }}>
             {pressureStages.map(({ label, pct, val, color, warn }) => (
               <div key={label}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 7 }}>
-                  <span style={{ fontSize: 11, color: C.text }}>{label}</span>
-                  {warn && <span style={{ fontSize: 9, color: C.orange, letterSpacing: '0.1em', fontWeight: 700 }}>HIGH</span>}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <span style={{ fontSize: 11, color: T.text }}>{label}</span>
+                  {warn && <span style={{ fontSize: 9, color: T.orange, background: 'rgba(249,115,22,0.12)', border: '1px solid rgba(249,115,22,0.3)', borderRadius: 3, padding: '1px 6px', letterSpacing: '0.08em' }}>HIGH</span>}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <div style={{ flex: 1, height: 6, background: C.border, borderRadius: 3, overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: 3, transition: 'width 0.5s' }} />
+                  <div style={{ flex: 1, height: 6, background: T.border, borderRadius: 3, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${pct}%`, background: color, borderRadius: 3 }} />
                   </div>
-                  <span style={{ fontSize: 12, color, fontFamily: 'monospace', minWidth: 56, textAlign: 'right' }}>{val}</span>
+                  <span style={{ fontSize: 12, color, fontVariantNumeric: 'tabular-nums', minWidth: 56, textAlign: 'right' }}>{val}</span>
                 </div>
               </div>
             ))}
           </div>
+
+          <div style={{ marginTop: 28, paddingTop: 18, borderTop: `1px solid ${T.border}` }}>
+            <div style={{ fontSize: 10, color: T.text, letterSpacing: '0.1em', marginBottom: 12 }}>BOREHOLE #3</div>
+            <div style={{ fontSize: 32, fontWeight: 700, color: '#fff' }}>1,240 m³</div>
+            <div style={{ fontSize: 12, color: T.teal, marginTop: 4 }}>Active · Daily avg 1,180 m³</div>
+          </div>
         </div>
 
-        {/* Recovery gauge */}
-        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-          <div style={{ fontSize: 10, color: C.dim, letterSpacing: '0.12em', marginBottom: 12, alignSelf: 'flex-start' }}>RECOVERY RATE</div>
-          <GaugeArc pct={81.4} color={C.cyan} size={140} />
-          <div style={{ textAlign: 'center', marginTop: -4 }}>
-            <div style={{ fontSize: 40, fontWeight: 700, color: C.cyan, letterSpacing: '-0.03em', lineHeight: 1 }}>81.4%</div>
-            <div style={{ fontSize: 10, color: C.dim, marginTop: 6 }}>Target: 78 – 85 %</div>
+        {/* Recovery rate big display */}
+        <div style={{ background: T.panel, border: `1px solid ${T.border}`, borderRadius: 14, padding: '20px 22px', display: 'flex', flexDirection: 'column' }}>
+          <SectionLabel>RECOVERY RATE</SectionLabel>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            <div style={{ fontSize: 64, fontWeight: 700, color: T.cyan, lineHeight: 1, letterSpacing: '-0.02em' }}>81.4</div>
+            <div style={{ fontSize: 22, color: T.text, marginTop: -4 }}>%</div>
+            <div style={{ fontSize: 10, color: T.text, letterSpacing: '0.1em', marginTop: 6 }}>TARGET 78–85%</div>
+            <div style={{ marginTop: 12, width: '100%' }}>
+              {/* target band indicator */}
+              <div style={{ position: 'relative', height: 8, background: T.border, borderRadius: 4, overflow: 'visible' }}>
+                <div style={{ position: 'absolute', left: '78%', width: '7%', top: 0, height: '100%', background: 'rgba(34,211,238,0.15)', border: `1px solid ${T.cyan}` }} />
+                <div style={{ position: 'absolute', left: `${(81.4 - 60) / 40 * 100}%`, top: -3, width: 3, height: 14, background: T.cyan, borderRadius: 2 }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: T.text, marginTop: 5 }}>
+                <span>60%</span><span style={{ color: T.cyan }}>78–85%</span><span>100%</span>
+              </div>
+            </div>
           </div>
-          <div style={{ display: 'flex', gap: 16, marginTop: 20, fontSize: 10 }}>
-            <span style={{ color: C.green }}>▼ MIN 78%</span>
-            <span style={{ color: C.red }}>▲ MAX 85%</span>
+          <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 14, fontSize: 11 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <span style={{ color: T.text }}>7-day avg</span>
+              <span style={{ color: T.hi }}>80.1%</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6 }}>
+              <span style={{ color: T.text }}>Monthly avg</span>
+              <span style={{ color: T.hi }}>80.8%</span>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* ── Borehole + Runtime ── */}
-      <SectionLabel>BOREHOLE & RUNTIME</SectionLabel>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 24 }}>
-        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 24 }}>
-          <div style={{ fontSize: 10, color: C.dim, letterSpacing: '0.12em', marginBottom: 14 }}>BOREHOLE PRODUCTION</div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 6 }}>
-            <span style={{ fontSize: 44, fontWeight: 700, color: C.hi, letterSpacing: '-0.03em' }}>1,240</span>
-            <span style={{ fontSize: 18, color: C.dim }}>m³</span>
-          </div>
-          <div style={{ color: C.teal, fontSize: 12, marginBottom: 18 }}>Borehole #3 · Active</div>
-          <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 16, display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
-            <div><div style={{ color: C.dim, marginBottom: 3 }}>Daily Avg</div><div style={{ color: C.hi }}>1,180 m³</div></div>
-            <div><div style={{ color: C.dim, marginBottom: 3 }}>This Month</div><div style={{ color: C.hi }}>36,400 m³</div></div>
-            <div><div style={{ color: C.dim, marginBottom: 3 }}>Efficiency</div><div style={{ color: C.green }}>94.8%</div></div>
+      {/* ── Live station feed ── */}
+      <div style={{ background: T.panel, border: `1px solid ${T.border}`, borderRadius: 14, padding: '20px 22px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <SectionLabel>LIVE STATION FEED</SectionLabel>
+          <div style={{ display: 'flex', gap: 10, fontSize: 10, color: T.text }}>
+            <span style={{ color: T.green }}>● NORMAL ×3</span>
+            <span style={{ color: T.amber }}>● WARN ×1</span>
+            <span style={{ color: T.red }}>● ALARM ×1</span>
           </div>
         </div>
-
-        <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `3px solid ${C.red}`, borderRadius: 12, padding: 24 }}>
-          <div style={{ fontSize: 10, color: C.dim, letterSpacing: '0.12em', marginBottom: 14 }}>SYSTEM RUNTIME</div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 6 }}>
-            <span style={{ fontSize: 44, fontWeight: 700, color: C.hi, letterSpacing: '-0.03em' }}>142</span>
-            <span style={{ fontSize: 18, color: C.dim }}>hrs</span>
-          </div>
-          <div style={{ color: C.dim, fontSize: 12, marginBottom: 18 }}>This Month</div>
-          <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-              <span style={{ fontSize: 14, animation: 'blink 1s infinite' }}>⚠</span>
-              <span style={{ fontSize: 12, color: C.red, fontWeight: 700 }}>Maintenance due in 18 hours</span>
-            </div>
-            <div style={{ height: 6, background: C.border, borderRadius: 3, overflow: 'hidden' }}>
-              <div style={{ height: '100%', width: '88%', background: `linear-gradient(90deg, ${C.amber}, ${C.red})`, borderRadius: 3 }} />
-            </div>
-            <div style={{ fontSize: 10, color: C.dim, marginTop: 5, textAlign: 'right' }}>142 / 160 hrs cycle</div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── Live Station Feed ── */}
-      <SectionLabel>LIVE STATION FEED</SectionLabel>
-      <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
-            <tr style={{ background: C.panel }}>
-              {['STATION ID','NAME','pH','TURBIDITY NTU','TEMP °C','STATUS','LAST PING'].map(h => (
-                <th key={h} style={{ textAlign: 'left', padding: '12px 16px', color: C.dim, fontWeight: 400, letterSpacing: '0.1em', fontSize: 9, borderBottom: `1px solid ${C.border}` }}>{h}</th>
+            <tr style={{ borderBottom: `1px solid ${T.border}` }}>
+              {['ID', 'STATION NAME', 'pH', 'TURBIDITY NTU', 'TEMP °C', 'STATUS', 'UPDATED'].map(h => (
+                <th key={h} style={{ textAlign: 'left', padding: '8px 14px', color: T.text, fontWeight: 400, fontSize: 10, letterSpacing: '0.1em' }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {liveStations.map((s, i) => (
-              <tr key={s.id} style={{ borderBottom: i < liveStations.length - 1 ? `1px solid ${C.border}` : 'none', transition: 'background 0.15s' }}
-                onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.02)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                <td style={{ padding: '13px 16px', color: C.dim, fontFamily: 'monospace', fontSize: 11 }}>{s.id}</td>
-                <td style={{ padding: '13px 16px', color: C.hi, fontWeight: 600 }}>{s.name}</td>
-                <td style={{ padding: '13px 16px', color: s.ph < 6.5 || s.ph > 8.5 ? C.red : C.green, fontFamily: 'monospace' }}>{s.ph}</td>
-                <td style={{ padding: '13px 16px', color: s.turbidity > 10 ? C.red : s.turbidity > 6 ? C.amber : C.text, fontFamily: 'monospace' }}>{s.turbidity}</td>
-                <td style={{ padding: '13px 16px', fontFamily: 'monospace' }}>{s.temp}</td>
-                <td style={{ padding: '13px 16px' }}><StatusDot status={s.status} /></td>
-                <td style={{ padding: '13px 16px', color: C.dim }}>{s.last}</td>
-              </tr>
-            ))}
+            {stationFeed.map(s => {
+              const rowAccent = s.status === 'alarm' ? 'rgba(239,68,68,0.06)' : s.status === 'warn' ? 'rgba(245,158,11,0.06)' : 'transparent';
+              return (
+                <tr key={s.id} className="row-hover" style={{ borderBottom: `1px solid ${T.border}`, background: rowAccent, cursor: 'default' }}>
+                  <td style={{ padding: '12px 14px', color: T.text, fontSize: 11 }}>{s.id}</td>
+                  <td style={{ padding: '12px 14px', color: T.hi, fontWeight: 500 }}>{s.name}</td>
+                  <td style={{ padding: '12px 14px', color: s.ph < 6.5 || s.ph > 8.5 ? T.red : T.green, fontVariantNumeric: 'tabular-nums' }}>
+                    {s.ph}
+                    {(s.ph < 6.5 || s.ph > 8.5) && <span style={{ marginLeft: 6, fontSize: 10 }}>⚠</span>}
+                  </td>
+                  <td style={{ padding: '12px 14px', color: s.turbidity > 10 ? T.red : s.turbidity > 6 ? T.amber : T.hi, fontVariantNumeric: 'tabular-nums' }}>
+                    {s.turbidity}
+                    {s.turbidity > 10 && <span style={{ marginLeft: 6, fontSize: 10 }}>⚠</span>}
+                  </td>
+                  <td style={{ padding: '12px 14px', fontVariantNumeric: 'tabular-nums' }}>{s.temp}</td>
+                  <td style={{ padding: '12px 14px' }}><StatusBadge status={s.status} /></td>
+                  <td style={{ padding: '12px 14px', color: T.text, fontSize: 11 }}>{s.last}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
-
     </div>
   );
 }

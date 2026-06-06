@@ -1,65 +1,63 @@
-import { TESTIMONIALS } from "../data";
+const testimonials = [
+  {
+    quote: 'AquaWatch cut our compliance reporting time from two days to 20 minutes. The chlorine alarm saved a district last April.',
+    name: 'Amara Osei',
+    role: 'Chief Water Engineer, Accra Water',
+    initials: 'AO',
+    color: '#14b8a6',
+  },
+  {
+    quote: 'We monitor 340 nodes across the county. The map view and bulk alarm acknowledge are indispensable for our team.',
+    name: 'Dr. Wanjiru Kamau',
+    role: 'Operations Director, Nairobi City Water',
+    initials: 'WK',
+    color: '#3b82f6',
+  },
+  {
+    quote: 'The REST API let us integrate with our SCADA in a weekend. Documentation is excellent.',
+    name: 'Samuel Adeyemi',
+    role: 'IT Lead, Lagos State Water Corporation',
+    initials: 'SA',
+    color: '#8b5cf6',
+  },
+];
 
 export default function Testimonials() {
   return (
-    <section className="w-full bg-[#0A0F1D] text-slate-200 py-12 md:py-20 overflow-hidden">
-      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        
-        {/* Section Header */}
-        <div className="flex flex-col items-start text-left space-y-4 mb-12 max-w-2xl">
-          <div className="inline-flex items-center gap-2 rounded-full bg-blue-500/10 border border-blue-500/20 px-3.5 py-1 text-xs font-semibold text-blue-400 uppercase tracking-wider">
-            Trusted by water utilities
-          </div>
-          <h2 className="text-3xl sm:text-4xl font-extrabold text-white tracking-tight">
+    <section style={{ background:'#080F1C', padding:'100px 6vw',
+      borderTop:'1px solid #1e3a5f', fontFamily:"'DM Mono','Courier New',monospace" }}>
+      <div style={{ maxWidth:1100, margin:'0 auto' }}>
+        <div style={{ marginBottom:52 }}>
+          <div style={{ display:'inline-flex', alignItems:'center', gap:8,
+            background:'rgba(37,99,235,.10)', border:'1px solid rgba(37,99,235,.3)',
+            borderRadius:999, padding:'5px 16px', marginBottom:18, fontSize:11,
+            color:'#60a5fa', letterSpacing:'0.12em' }}>TRUSTED BY WATER UTILITIES</div>
+          <h2 style={{ fontSize:'clamp(26px,3vw,40px)', fontWeight:800, color:'#fff',
+            margin:0, letterSpacing:'-0.02em', fontFamily:"'DM Sans','DM Mono',sans-serif" }}>
             What engineers say
           </h2>
         </div>
 
-        {/* Testimonials Responsive Grid Matrix */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
-          {TESTIMONIALS.map((t, i) => (
-            <div 
-              key={i} 
-              className="group relative flex flex-col justify-between p-6 rounded-2xl bg-[#0E1626] border border-slate-800/80 hover:border-slate-700 transition-all duration-300 shadow-xl shadow-black/20 text-left hover:-translate-y-1"
-            >
-              {/* Background Accent Decorative Quote Icon */}
-              <div className="absolute top-4 right-6 text-slate-800/40 text-4xl pointer-events-none select-none">
-                <i className="ti ti-quote" />
-              </div>
-
-              {/* Quote Description Text Copy */}
-              <p className="text-sm sm:text-base text-slate-300 font-normal leading-relaxed italic relative z-10 mb-6">
-                "{t.text}"
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:16 }}>
+          {testimonials.map(({ quote, name, role, initials, color }) => (
+            <div key={name} style={{ background:'#0C1829', border:'1px solid #1e3a5f',
+              borderRadius:14, padding:'28px 26px', display:'flex', flexDirection:'column', gap:24 }}>
+              <p style={{ fontSize:14, color:'#94a3b8', lineHeight:1.75, margin:0, fontStyle:'italic' }}>
+                "{quote}"
               </p>
-
-              {/* Author Attribution Meta Block */}
-              <div className="flex items-center gap-3 pt-4 border-t border-slate-800/40">
-                
-                {/* Responsive Avatar Container */}
-                <div className="h-10 w-10 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-xs font-bold text-white uppercase shrink-0 overflow-hidden">
-                  {t.avatar && t.avatar.length <= 3 ? (
-                    <span>{t.avatar}</span>
-                  ) : (
-                    <img src={t.avatar} alt={t.name} className="h-full w-full object-cover" />
-                  )}
+              <div style={{ display:'flex', alignItems:'center', gap:12, marginTop:'auto' }}>
+                <div style={{ width:40, height:40, borderRadius:'50%',
+                  background:`${color}22`, border:`1px solid ${color}44`,
+                  display:'flex', alignItems:'center', justifyContent:'center',
+                  fontSize:13, fontWeight:700, color, flexShrink:0 }}>{initials}</div>
+                <div>
+                  <div style={{ fontSize:13, fontWeight:700, color:'#e2e8f0' }}>{name}</div>
+                  <div style={{ fontSize:11, color:'#475569', marginTop:2 }}>{role}</div>
                 </div>
-
-                {/* Name & Technical Professional Roles */}
-                <div className="min-w-0">
-                  <div className="text-sm font-bold text-white tracking-tight truncate">
-                    {t.name}
-                  </div>
-                  <div className="text-xs font-medium text-slate-500 truncate mt-0.5">
-                    {t.role}
-                  </div>
-                </div>
-
               </div>
-
             </div>
           ))}
         </div>
-
       </div>
     </section>
   );

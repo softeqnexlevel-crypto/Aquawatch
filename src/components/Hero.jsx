@@ -1,88 +1,185 @@
-import HeroChart from "./HeroChart";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+
+const READINGS = [
+  { label: 'pH Level',   value: '7.34',      unit: '',      status: 'NORMAL',  color: '#22c55e' },
+  { label: 'Chlorine',   value: '0.28',       unit: 'mg/L',  status: 'NORMAL',  color: '#22c55e' },
+  { label: 'Turbidity',  value: '4.21',       unit: 'NTU',   status: 'WARNING', color: '#f59e0b' },
+  { label: 'Pressure',   value: '3.10',       unit: 'bar',   status: 'NORMAL',  color: '#22c55e' },
+];
+
+const PH_SPARK = [7.18,7.22,7.19,7.25,7.21,7.24,7.20,7.26,7.23,7.24,7.21,7.25,7.22,7.28,7.24];
+
+function SparkLine({ data, color = '#3b82f6' }) {
+  const w = 300, h = 48;
+  const min = Math.min(...data), max = Math.max(...data);
+  const pts = data.map((v, i) =>
+    `${(i / (data.length - 1)) * w},${h - ((v - min) / (max - min || 1)) * (h - 8) - 4}`
+  ).join(' ');
+  return (
+    <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="sg" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.3" />
+          <stop offset="100%" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <polygon points={`0,${h} ${pts} ${w},${h}`} fill="url(#sg)" />
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
 
 export default function Hero() {
   const navigate = useNavigate();
+  const [tick, setTick] = useState(0);
+  const [mounted, setMounted] = useState(false);
 
-  const handleLaunchConsole = () => {
-    navigate("/admin/dashboard");
-  };
+  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 2800);
+    return () => clearInterval(id);
+  }, []);
+
+  const liveVal = (7.20 + Math.sin(tick * 0.7) * 0.06).toFixed(2);
 
   return (
-    <section className="relative min-h-[85vh] w-full bg-[#0A0F1D] text-slate-200 overflow-hidden flex items-center px-4 sm:px-6 lg:px-8 py-12 md:py-20">
-      
-      {/* Background Decorative Matrix — Mapped to Canvas Token Tokens */}
-      <div className="absolute top-[-10%] left-[-10%] w-[500px] h-[500px] rounded-full bg-blue-600/10 blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[400px] h-[400px] rounded-full bg-teal-500/10 blur-[100px] pointer-events-none" />
-      
-      <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)] opacity-20 pointer-events-none" />
+    <section style={{
+      minHeight: '100vh', background: '#060D1A',
+      display: 'flex', alignItems: 'center',
+      padding: '0 6vw', gap: '6vw',
+      fontFamily: "'DM Mono','Courier New',monospace",
+      position: 'relative', overflow: 'hidden',
+    }}>
+      <style>{`
+        @keyframes fadeUp { from { opacity:0; transform:translateY(24px); } to { opacity:1; transform:translateY(0); } }
+        @keyframes ping { 75%,100% { transform:scale(2.2); opacity:0; } }
+        @keyframes scroll-x { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+        .hero-btn-primary:hover { opacity:.88; transform:translateY(-1px); }
+        .hero-btn-secondary:hover { background:rgba(255,255,255,.06); }
+      `}</style>
 
-      <div className="relative w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-8 items-center z-10">
-        
-        {/* Left Column */}
-        <div className="lg:col-span-7 flex flex-col items-start space-y-6 text-left animate-[slideUp_0.6s_ease-out]">
-          
-          <div className="inline-flex items-center gap-2.5 rounded-full bg-blue-500/10 border border-blue-500/20 px-4 py-1 text-xs font-medium text-blue-400 tracking-wide uppercase">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
-            </span>
-            Water quality intelligence platform
-          </div>
+      {/* BG radial glow */}
+      <div style={{ position:'absolute', inset:0, pointerEvents:'none', zIndex:0,
+        background:'radial-gradient(ellipse 70% 60% at 70% 50%, rgba(37,99,235,0.10) 0%, transparent 70%), radial-gradient(ellipse 40% 40% at 20% 80%, rgba(6,182,212,0.07) 0%, transparent 60%)' }} />
 
-          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight text-white leading-[1.15]">
-            Monitor every<br />
-            <span className="text-[#5A1FFF] bg-gradient-to-r from-blue-400 to-teal-400 bg-clip-text text-transparent">
-              drop
-            </span>{" "}
-            in your<br />
-            water network
-          </h1>
+      {/* ── LEFT ── */}
+      <div style={{ flex:'0 0 auto', maxWidth:580, zIndex:1,
+        opacity: mounted ? 1 : 0, animation: mounted ? 'fadeUp .7s ease both' : 'none' }}>
 
-          <p className="max-w-xl text-base sm:text-lg text-slate-400 font-normal leading-relaxed">
-            Aqua system monitor gives utilities, municipalities, and engineers real-time visibility into water quality across their entire distribution network.
-          </p>
-
-          {/* CTA Buttons */}
-          <div className="w-full sm:w-auto flex flex-col sm:flex-row gap-4 pt-2">
-            <button 
-              onClick={handleLaunchConsole}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-8 py-4 text-base font-semibold text-white hover:bg-blue-500 transition-all shadow-md shadow-blue-900/30 active:scale-95"
-            >
-              <i className="ti ti-rocket text-lg" /> 
-              Launch Console
-            </button>
-
-            <button className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-700 bg-slate-900/50 backdrop-blur-sm px-6 py-4 text-base font-medium text-slate-300 hover:bg-slate-800 hover:text-white transition-all active:scale-95">
-              <i className="ti ti-player-play text-base" /> Watch demo
-            </button>
-          </div>
-
-          {/* Metrics */}
-          <div className="w-full max-w-xl border-t border-slate-800/80 pt-6 grid grid-cols-3 gap-4 text-left">
-            <div>
-              <p className="text-2xl font-bold text-white tracking-tight">9/9</p>
-              <p className="text-xs text-slate-500 font-medium uppercase tracking-wider mt-0.5">Stations Live</p>
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-teal-400 tracking-tight">&lt; 30s</p>
-              <p className="text-xs text-slate-500 font-medium uppercase tracking-wider mt-0.5">Refresh Rate</p>
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-amber-500 tracking-tight">3</p>
-              <p className="text-xs text-slate-500 font-medium uppercase tracking-wider mt-0.5">Active Alarms</p>
-            </div>
-          </div>
-
+        <div style={{ display:'inline-flex', alignItems:'center', gap:8,
+          background:'rgba(37,99,235,0.12)', border:'1px solid rgba(37,99,235,0.35)',
+          borderRadius:999, padding:'5px 14px', marginBottom:32, fontSize:11,
+          color:'#60a5fa', letterSpacing:'0.12em' }}>
+          <span style={{ width:6,height:6,borderRadius:'50%',background:'#3b82f6',
+            position:'relative',display:'inline-block' }}>
+            <span style={{ position:'absolute',inset:0,borderRadius:'50%',background:'#3b82f6',
+              animation:'ping 1.6s ease infinite' }} />
+          </span>
+          WATER QUALITY INTELLIGENCE PLATFORM
         </div>
 
-        {/* Right Column - Chart Area */}
-        <div className="lg:col-span-5 w-full flex items-center justify-center animate-[fadeIn_0.8s_ease-out]">
-          <div className="w-full bg-[#0E1626]/40 border border-slate-800/80 rounded-2xl p-4 sm:p-6 backdrop-blur-sm shadow-xl shadow-black/40">
-            <HeroChart />
-          </div>
+        <h1 style={{ fontSize:'clamp(36px,4.5vw,62px)', fontWeight:800, lineHeight:1.08,
+          color:'#fff', margin:'0 0 20px', letterSpacing:'-0.02em',
+          fontFamily:"'DM Sans','DM Mono',sans-serif" }}>
+          Monitor every{' '}
+          <span style={{ background:'linear-gradient(135deg,#22d3ee,#3b82f6)', WebkitBackgroundClip:'text', WebkitTextFillColor:'transparent' }}>drop</span>
+          {' '}in your<br />water network
+        </h1>
+
+        <p style={{ fontSize:16, color:'#94a3b8', lineHeight:1.7, margin:'0 0 36px', maxWidth:460 }}>
+          Aqua system monitor gives utilities, municipalities, and engineers real-time visibility into water quality across their entire distribution network.
+        </p>
+
+        <div style={{ display:'flex', gap:12, marginBottom:52 }}>
+          <button className="hero-btn-primary" onClick={() => navigate('/admin/dashboard')} style={{
+            background:'linear-gradient(135deg,#2563eb,#1d4ed8)', color:'#fff', border:'none',
+            borderRadius:10, padding:'14px 30px', fontSize:15, fontWeight:700,
+            cursor:'pointer', fontFamily:'inherit', transition:'all .18s', letterSpacing:'0.02em',
+          }}>Launch Console →</button>
+          <button className="hero-btn-secondary" style={{
+            background:'transparent', color:'#e2e8f0', border:'1px solid rgba(255,255,255,.15)',
+            borderRadius:10, padding:'14px 26px', fontSize:15, cursor:'pointer',
+            fontFamily:'inherit', transition:'all .18s',
+          }}>Watch demo</button>
         </div>
 
+        <div style={{ display:'flex', gap:40, borderTop:'1px solid rgba(255,255,255,.07)', paddingTop:28 }}>
+          {[['9/9','STATIONS LIVE','#22c55e'],['< 30s','REFRESH RATE','#22d3ee'],['3','ACTIVE ALARMS','#f59e0b']].map(([v,l,c]) => (
+            <div key={l}>
+              <div style={{ fontSize:24, fontWeight:700, color:c, fontVariantNumeric:'tabular-nums' }}>{v}</div>
+              <div style={{ fontSize:10, color:'#64748b', letterSpacing:'0.12em', marginTop:3 }}>{l}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── RIGHT: Dashboard mockup ── */}
+      <div style={{ flex:1, minWidth:0, zIndex:1, display:'flex', justifyContent:'center',
+        opacity: mounted ? 1 : 0, animation: mounted ? 'fadeUp .7s .2s ease both' : 'none' }}>
+        <div style={{
+          width:'100%', maxWidth:520,
+          background:'#0C1829', border:'1px solid #1e3a5f',
+          borderRadius:18, overflow:'hidden',
+          boxShadow:'0 32px 80px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.04)',
+        }}>
+          {/* Title bar */}
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
+            padding:'12px 16px', borderBottom:'1px solid #1e3a5f', background:'#0A1624' }}>
+            <div style={{ display:'flex', gap:7 }}>
+              {['#ef4444','#f59e0b','#22c55e'].map(c => (
+                <div key={c} style={{ width:11,height:11,borderRadius:'50%',background:c }} />
+              ))}
+            </div>
+            <div style={{ fontSize:12, color:'#64748b' }}>Aqua system monitor · Live Dashboard</div>
+            <div style={{ fontSize:11, color:'#ef4444', background:'rgba(239,68,68,.12)',
+              border:'1px solid rgba(239,68,68,.3)', borderRadius:5, padding:'2px 8px' }}>● 3 alarms</div>
+          </div>
+
+          {/* Stats row */}
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)',
+            borderBottom:'1px solid #1e3a5f' }}>
+            {[['9/9','ONLINE','#22c55e'],['3','ALARMS','#ef4444'],['87','TAGS','#e2e8f0'],['98.7%','UPTIME','#22c55e']].map(([v,l,c]) => (
+              <div key={l} style={{ padding:'16px 14px', borderRight:'1px solid #1e3a5f' }}>
+                <div style={{ fontSize:22, fontWeight:700, color:c }}>{v}</div>
+                <div style={{ fontSize:9, color:'#475569', letterSpacing:'0.12em', marginTop:3 }}>{l}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Readings */}
+          <div style={{ padding:'16px 16px 0' }}>
+            <div style={{ fontSize:10, color:'#475569', letterSpacing:'0.12em', marginBottom:12 }}>LIVE SENSOR READINGS · INTAKE A</div>
+            {READINGS.map(({ label, value, unit, status, color }) => (
+              <div key={label} style={{ display:'flex', alignItems:'center', justifyContent:'space-between',
+                padding:'11px 0', borderBottom:'1px solid rgba(30,58,95,.5)' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:9, fontSize:13, color:'#cbd5e1' }}>
+                  <span style={{ width:8,height:8,borderRadius:'50%',background:color,display:'inline-block' }} />
+                  {label}
+                </div>
+                <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                  <span style={{ fontSize:14, fontWeight:700, color, fontVariantNumeric:'tabular-nums' }}>
+                    {value} <span style={{ fontSize:10, fontWeight:400, color:'#64748b' }}>{unit}</span>
+                  </span>
+                  <span style={{ fontSize:9, padding:'2px 7px', borderRadius:4, fontWeight:700, letterSpacing:'0.08em',
+                    color: status === 'WARNING' ? '#f59e0b' : '#22c55e',
+                    background: status === 'WARNING' ? 'rgba(245,158,11,.12)' : 'rgba(34,197,94,.10)',
+                    border: `1px solid ${status === 'WARNING' ? 'rgba(245,158,11,.3)' : 'rgba(34,197,94,.25)'}`,
+                  }}>{status}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Sparkline */}
+          <div style={{ padding:'12px 16px 16px' }}>
+            <div style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:'#475569', marginBottom:6 }}>
+              <span>pH trend — 24h</span>
+              <span style={{ color:'#22d3ee' }}>{liveVal} avg</span>
+            </div>
+            <SparkLine data={PH_SPARK} color="#3b82f6" />
+          </div>
+        </div>
       </div>
     </section>
   );
