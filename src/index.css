@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 
-@import "tailwindcss";
+/* @import "tailwindcss"; */
 
 :root {
   --font-size: 16px;
