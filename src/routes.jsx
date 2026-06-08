@@ -1,4 +1,4 @@
-import { createBrowserRouter, Outlet, Navigate } from "react-router";
+import { createBrowserRouter, Outlet } from "react-router";
 import { useState, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { RouterProvider } from "react-router";
@@ -21,52 +21,49 @@ import LandingPage from "./components/LandingPage";
 import { alerts } from "./data/mockData";
 
 const pageTitles = {
-  "/dashboard": "Executive Dashboard",
-  "/dashboard/boreholes": "Borehole Management",
-  "/dashboard/production": "Production Monitoring",
-  "/dashboard/antiscalant": "Antiscalant Dosing",
-  "/dashboard/filtration": "Filtration Monitoring",
-  "/dashboard/recovery": "System Recovery",
-  "/dashboard/maintenance": "Maintenance Management",
-  "/dashboard/analytics": "Analytics",
-  "/dashboard/reports": "Reports",
-  "/dashboard/alerts": "Alerts Center",
-  "/dashboard/settings": "Settings",
+  "/": "Executive Dashboard",
+  "/boreholes": "Borehole Management",
+  "/production": "Production Monitoring",
+  "/antiscalant": "Antiscalant Dosing",
+  "/filtration": "Filtration Monitoring",
+  "/recovery": "System Recovery",
+  "/maintenance": "Maintenance Management",
+  "/analytics": "Analytics",
+  "/reports": "Reports",
+  "/alerts": "Alerts Center",
+  "/settings": "Settings",
 };
 
 const pathToPage = {
-  "/dashboard": "dashboard",
-  "/dashboard/boreholes": "boreholes",
-  "/dashboard/production": "production",
-  "/dashboard/antiscalant": "antiscalant",
-  "/dashboard/filtration": "filtration",
-  "/dashboard/recovery": "recovery",
-  "/dashboard/maintenance": "maintenance",
-  "/dashboard/analytics": "analytics",
-  "/dashboard/reports": "reports",
-  "/dashboard/alerts": "alerts",
-  "/dashboard/settings": "settings",
+  "/": "dashboard",
+  "/boreholes": "boreholes",
+  "/production": "production",
+  "/antiscalant": "antiscalant",
+  "/filtration": "filtration",
+  "/recovery": "recovery",
+  "/maintenance": "maintenance",
+  "/analytics": "analytics",
+  "/reports": "reports",
+  "/alerts": "alerts",
+  "/settings": "settings",
 };
 
 const pageToPath = {
-  dashboard: "/dashboard",
-  boreholes: "/dashboard/boreholes",
-  production: "/dashboard/production",
-  antiscalant: "/dashboard/antiscalant",
-  filtration: "/dashboard/filtration",
-  recovery: "/dashboard/recovery",
-  maintenance: "/dashboard/maintenance",
-  analytics: "/dashboard/analytics",
-  reports: "/dashboard/reports",
-  alerts: "/dashboard/alerts",
-  settings: "/dashboard/settings",
+  dashboard: "/",
+  boreholes: "/boreholes",
+  production: "/production",
+  antiscalant: "/antiscalant",
+  filtration: "/filtration",
+  recovery: "/recovery",
+  maintenance: "/maintenance",
+  analytics: "/analytics",
+  reports: "/reports",
+  alerts: "/alerts",
+  settings: "/settings",
 };
 
 function Root() {
-  const [darkMode, setDarkMode] = useState(() => {
-    const saved = localStorage.getItem("aquaDarkMode");
-    return saved !== null ? saved === "true" : true;
-  });
+  const [darkMode, setDarkMode] = useState(true);
   const [, forceUpdate] = useState(0);
   const location = useLocation();
   const navigate = useNavigate();
@@ -128,58 +125,10 @@ function Root() {
   );
 }
 
-// Landing page wrapper with dark mode
-function LandingPageWrapper() {
-  const [darkMode, setDarkMode] = useState(() => {
-    const saved = localStorage.getItem("aquaDarkMode");
-    return saved !== null ? saved === "true" : true;
-  });
-
-  const handleToggleDark = () => {
-    setDarkMode((d) => !d);
-    localStorage.setItem("aquaDarkMode", !darkMode);
-  };
-
-  const handleGetStarted = () => {
-    localStorage.setItem("aquaDashboardVisited", "true");
-    window.location.href = "/dashboard";
-  };
-
-  return (
-    <div className={darkMode ? "dark" : ""}>
-      <LandingPage 
-        onGetStarted={handleGetStarted}
-        darkMode={darkMode}
-        onToggleDark={handleToggleDark}
-      />
-    </div>
-  );
-}
-
-// Protected route wrapper
-function ProtectedRoute({ children }) {
-  const hasVisited = localStorage.getItem("aquaDashboardVisited") === "true";
-  
-  if (!hasVisited) {
-    return <Navigate to="/" replace />;
-  }
-  
-  return children;
-}
-
-// Main router
 const router = createBrowserRouter([
   {
     path: "/",
-    element: <LandingPageWrapper />,
-  },
-  {
-    path: "/dashboard",
-    element: (
-      <ProtectedRoute>
-        <Root />
-      </ProtectedRoute>
-    ),
+    Component: Root,
     children: [
       { index: true, Component: Dashboard },
       { path: "boreholes", Component: BoreholeManagement },
@@ -197,5 +146,35 @@ const router = createBrowserRouter([
 ]);
 
 export function AppRouter() {
+  const [darkMode, setDarkMode] = useState(() => {
+    const saved = localStorage.getItem("aquaDarkMode");
+    return saved !== null ? saved === "true" : true;
+  });
+  const [showDashboard, setShowDashboard] = useState(() => {
+    return localStorage.getItem("aquaDashboardVisited") === "true";
+  });
+
+  const handleToggleDark = () => {
+    setDarkMode((d) => !d);
+    localStorage.setItem("aquaDarkMode", !darkMode);
+  };
+
+  const handleGetStarted = () => {
+    localStorage.setItem("aquaDashboardVisited", "true");
+    setShowDashboard(true);
+  };
+
+  if (!showDashboard) {
+    return (
+      <div className={darkMode ? "dark" : ""}>
+        <LandingPage 
+          onGetStarted={handleGetStarted}
+          darkMode={darkMode}
+          onToggleDark={handleToggleDark}
+        />
+      </div>
+    );
+  }
+
   return <RouterProvider router={router} />;
 }
