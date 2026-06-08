@@ -1,76 +1,142 @@
-import { NavLink } from "react-router-dom";
+import { useState } from "react";
+import {
+  LayoutDashboard, Droplets, Activity, FlaskConical, Filter,
+  RotateCcw, Wrench, BarChart3, FileText, Bell, Settings,
+  ChevronLeft, ChevronRight, Zap
+} from "lucide-react";
 
-export default function Sidebar() {
-  // Hardcoded option list mapped to explicit URLs matching your router structure
-  const navItems = [
-    { id: "dashboard", label: "Dashboard", icon: "ti-layout-dashboard", path: "/admin/dashboard" },
-    { id: "stations", label: "Stations / Machines", icon: "ti-building-factory", path: "/admin/stations" },
-    { id: "tags", label: "Tag Rules", icon: "ti-tags", path: "/admin/tags" },
-    { id: "alarms", label: "Alarms", icon: "ti-bell-ringing", path: "/admin/alarms" },
-    { id: "analytics", label: "Analytics", icon: "ti-chart-bar", path: "/admin/analytics" },
-    { id: "billing", label: "Billing", icon: "ti-credit-card", path: "/admin/billing" },
-  ];
+const navItems = [
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, group: "Operations" },
+  { id: "boreholes", label: "Boreholes", icon: Droplets, group: "Operations" },
+  { id: "production", label: "Production", icon: Activity, group: "Operations" },
+  { id: "antiscalant", label: "Antiscalant", icon: FlaskConical, group: "Operations" },
+  { id: "filtration", label: "Filtration", icon: Filter, group: "Operations" },
+  { id: "recovery", label: "Recovery", icon: RotateCcw, group: "Operations" },
+  { id: "maintenance", label: "Maintenance", icon: Wrench, group: "Management" },
+  { id: "analytics", label: "Analytics", icon: BarChart3, group: "Management" },
+  { id: "reports", label: "Reports", icon: FileText, group: "Management" },
+  { id: "alerts", label: "Alerts", icon: Bell, group: "System" },
+  { id: "settings", label: "Settings", icon: Settings, group: "System" },
+];
+
+export function Sidebar({ activePage, onNavigate, alertCount = 0 }) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  const groups = ["Operations", "Management", "System"];
 
   return (
-    <aside className="w-64 border-r border-slate-800 bg-[#0E1626] flex flex-col justify-between p-4 h-screen shrink-0">
-      {/* Top Section: Brand Logo & App Modules */}
-      <div className="space-y-6">
-        {/* Retained Branding from your Landing Page Navbar */}
-        <div className="flex items-center gap-3 px-2 py-1">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#5A1FFF] text-[#0A0F1D]">
-            <i className="ti ti-droplet text-lg font-bold"></i>
-          </div>
-          <span className="font-semibold text-lg tracking-wide text-white">AquaWatch</span>
+    <aside
+      className="flex flex-col h-full transition-all duration-300"
+      style={{
+        width: collapsed ? 56 : 220,
+        background: "var(--sidebar)",
+        borderRight: "1px solid rgba(14,165,233,0.08)",
+      }}
+    >
+      {/* Logo */}
+      <div 
+        className="flex items-center px-3 py-4 gap-2" 
+        style={{ borderBottom: "1px solid rgba(14,165,233,0.08)", minHeight: 56 }}
+      >
+        <div 
+          className="flex items-center justify-center rounded" 
+          style={{ width: 30, height: 30, background: "linear-gradient(135deg, #0ea5e9 0%, #06b6d4 100%)" }}
+        >
+          <Zap size={16} color="#020810" strokeWidth={2.5} />
         </div>
-
-        {/* Management Module Links */}
-        <nav className="space-y-1">
-          {navItems.map((item) => {
-            return (
-              <NavLink
-                key={item.id}
-                to={item.path}
-                // NavLink exposes an `isActive` boolean parameter in its class callback
-                className={({ isActive }) =>
-                  `flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${
-                    isActive
-                      ? "bg-[#5A1FFF]/10 text-[#5A1FFF]"
-                      : "text-slate-400 hover:bg-slate-800/50 hover:text-slate-200"
-                  }`
-                }
-              >
-                <i className={`ti ${item.icon} text-lg`}></i>
-                <span>{item.label}</span>
-              </NavLink>
-            );
-          })}
-        </nav>
+        {!collapsed && (
+          <div>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 700, color: "#0ea5e9", letterSpacing: "0.08em", lineHeight: 1 }}>
+              AQUAOPS
+            </div>
+            <div style={{ fontSize: 9, color: "var(--muted-foreground)", letterSpacing: "0.12em", lineHeight: 1.2, marginTop: 1 }}>
+              WATER MANAGEMENT
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Bottom Section: Operations Monitor & Profile Context */}
-      <div className="border-t border-slate-800 pt-4">
-        {/* Machine Status Counter Block */}
-        <div className="rounded-lg bg-slate-800/40 p-3 mb-4 border border-slate-700/30">
-          <div className="flex items-center justify-between text-xs mb-1">
-            <span className="text-slate-400">Current Plan</span>
-            <span className="rounded bg-teal-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-teal-400 uppercase tracking-wider">
-              Pro Plan
-            </span>
-          </div>
-          <p className="text-xs text-slate-300 font-medium">9 / 15 Stations Online</p>
-        </div>
-        
-        {/* Logged-in Operator Profile */}
-        <div className="flex items-center gap-3 px-2">
-          <div className="h-8 w-8 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold text-white border border-slate-600">
-            EM
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-medium text-slate-200 truncate">Workspace Admin</p>
-            <p className="text-[10px] text-slate-500 truncate">admin@aquawatch.io</p>
-          </div>
-        </div>
-      </div>
+      {/* Navigation */}
+      <nav className="flex-1 py-2 overflow-y-auto" style={{ scrollbarWidth: "none" }}>
+        {groups.map((group) => {
+          const items = navItems.filter((i) => i.group === group);
+          return (
+            <div key={group} className="mb-1">
+              {!collapsed && (
+                <div style={{ 
+                  fontSize: 9, 
+                  fontWeight: 600, 
+                  color: "var(--muted-foreground)", 
+                  letterSpacing: "0.12em", 
+                  padding: "8px 12px 4px", 
+                  textTransform: "uppercase" 
+                }}>
+                  {group}
+                </div>
+              )}
+              {collapsed && <div style={{ height: 4 }} />}
+              
+              {items.map((item) => {
+                const active = activePage === item.id;
+                const Icon = item.icon;
+                const isAlerts = item.id === "alerts";
+
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => onNavigate(item.id)}
+                    className="w-full flex items-center gap-2.5 transition-all duration-150 relative"
+                    style={{
+                      padding: collapsed ? "8px 0" : "7px 12px",
+                      justifyContent: collapsed ? "center" : "flex-start",
+                      background: active ? "rgba(14,165,233,0.1)" : "transparent",
+                      borderLeft: active ? "2px solid #0ea5e9" : "2px solid transparent",
+                      color: active ? "#0ea5e9" : "var(--sidebar-foreground)",
+                      opacity: active ? 1 : 0.7,
+                    }}
+                  >
+                    <Icon size={15} strokeWidth={1.8} />
+                    {!collapsed && (
+                      <span style={{ fontSize: 12.5, fontWeight: active ? 500 : 400 }}>
+                        {item.label}
+                      </span>
+                    )}
+                    {isAlerts && alertCount > 0 && (
+                      <span
+                        className="absolute"
+                        style={{
+                          right: collapsed ? 6 : 10,
+                          top: collapsed ? 4 : "50%",
+                          transform: collapsed ? "none" : "translateY(-50%)",
+                          background: "#ef4444",
+                          color: "#fff",
+                          fontSize: 9,
+                          fontWeight: 700,
+                          borderRadius: 10,
+                          padding: "1px 5px",
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        {alertCount}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          );
+        })}
+      </nav>
+
+      {/* Collapse toggle */}
+      <button
+        onClick={() => setCollapsed(!collapsed)}
+        className="flex items-center justify-center py-3 transition-colors"
+        style={{ borderTop: "1px solid rgba(14,165,233,0.08)", color: "var(--muted-foreground)" }}
+      >
+        {collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
+        {!collapsed && <span style={{ fontSize: 11, marginLeft: 6 }}>Collapse</span>}
+      </button>
     </aside>
   );
 }
