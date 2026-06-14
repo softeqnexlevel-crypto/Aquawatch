@@ -2,12 +2,16 @@ import { useState } from "react";
 import {
   LayoutDashboard, Droplets, Activity, FlaskConical, Filter,
   RotateCcw, Wrench, BarChart3, FileText, Bell, Settings,
-  ChevronLeft, ChevronRight, Zap
+  ChevronLeft, ChevronRight, Zap,
+  Tags,
+  Receipt,
+  UserPenIcon
 } from "lucide-react";
 
 const navItems = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, group: "Operations" },
-  { id: "boreholes", label: "Boreholes", icon: Droplets, group: "Operations" },
+  { id: "boreholes", label: "Tank level", icon: Droplets, group: "Operations" },
+
   { id: "production", label: "Production", icon: Activity, group: "Operations" },
   { id: "antiscalant", label: "Antiscalant", icon: FlaskConical, group: "Operations" },
   { id: "filtration", label: "Filtration", icon: Filter, group: "Operations" },
@@ -17,12 +21,18 @@ const navItems = [
   { id: "reports", label: "Reports", icon: FileText, group: "Management" },
   { id: "alerts", label: "Alerts", icon: Bell, group: "System" },
   { id: "settings", label: "Settings", icon: Settings, group: "System" },
+  { id: "Tagmanager", label: "Tag Manager", icon: Tags, group: "Configuration" },
+  { id: "billing", label: "Billing", icon: Receipt, group: "Configuration" },
+  { id: "user", label: "User", icon: UserPenIcon, group: "Configuration" },
+
+
+
 ];
 
 export function Sidebar({ activePage, onNavigate, alertCount = 0 }) {
   const [collapsed, setCollapsed] = useState(false);
 
-  const groups = ["Operations", "Management", "System"];
+  const groups = ["Operations", "Management", "System", "Configuration"];
 
   return (
     <aside
