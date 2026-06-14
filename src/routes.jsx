@@ -1,4 +1,4 @@
-import { createBrowserRouter, Outlet, Navigate } from "react-router"
+import { createBrowserRouter, Outlet, Navigate } from "react-router";
 import { useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { RouterProvider } from "react-router";
@@ -134,9 +134,18 @@ function ProtectedRoute({ children }) {
   return children;
 }
 
-// Landing Page Wrapper
+// Landing Page Wrapper - FIXED
 function LandingPageWrapper() {
-  const [darkMode] = useState(() => localStorage.getItem("aquaDarkMode") !== "false");
+  const [darkMode, setDarkMode] = useState(() => {
+    const saved = localStorage.getItem("aquaDarkMode");
+    return saved !== null ? saved === "true" : true;
+  });
+
+  const handleToggleDark = () => {
+    const newMode = !darkMode;
+    setDarkMode(newMode);
+    localStorage.setItem("aquaDarkMode", newMode);
+  };
 
   const handleGetStarted = () => {
     localStorage.setItem("aquaDashboardVisited", "true");
@@ -144,10 +153,13 @@ function LandingPageWrapper() {
   };
 
   return (
-    <LandingPage 
-      onGetStarted={handleGetStarted}
-      darkMode={darkMode}
-    />
+    <div className={darkMode ? "dark" : ""}>
+      <LandingPage 
+        onGetStarted={handleGetStarted}
+        darkMode={darkMode}
+        onToggleDark={handleToggleDark}
+      />
+    </div>
   );
 }
 
@@ -177,8 +189,6 @@ const router = createBrowserRouter([
       { path: "reports", Component: Reports },
       { path: "alerts", Component: AlertsCenter },
       { path: "settings", Component: Settings },
-
-      // Configuration Routes
       { path: "billing", Component: Billing },
       { path: "user", Component: UserManagement },
     ],

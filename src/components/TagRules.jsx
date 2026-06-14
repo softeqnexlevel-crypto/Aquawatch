@@ -293,7 +293,10 @@ export default function TagManager() {
               
               <div style={{ marginBottom: 20,  display: "grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
               <div style={S.label}>STATUS</div>
-              <div>{selectedTag.status}</div>
+            <div style={{display:"flex", alignItems: "center", gap: 4}}>
+              <div style={{ background:'#22FF88', borderRadius:' 45%', padding:"4px 4px", }}> </div>
+               <div style={{padding: '2px 10px'}}>{selectedTag.status}</div>
+               </div>
             </div>
 
             
@@ -301,7 +304,7 @@ export default function TagManager() {
               <div style={S.label}>QUALITY</div>
               <div style={{display:"flex", alignItems: "center", gap:2}}>
               <div style={{ background:'#22FF88', borderRadius:' 45%', padding:"4px 4px", }}> </div>
-               <div style={{  color: '#22FF88', padding: '2px 10px', borderRadius:9, fontSize: 16, fontWeight: 700 }}>Good</div>
+               <div style={{  color: '#22FF88', padding: '2px 10px', fontSize: 16, fontWeight: 700 }}>Good</div>
                </div>
             </div>
 
