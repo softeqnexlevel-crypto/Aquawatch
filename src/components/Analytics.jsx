@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell
 } from "recharts";
 import { monthlyProduction, antiscalantMonthly, maintenanceHoursMonthly, recoveryTrend, operatingDistribution } from "../data/mockData";
-import { Download, FileText } from "lucide-react";
+import { Download, FileText, RefreshCw, CheckCircle } from "lucide-react";
 
 const CustomTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
@@ -12,7 +12,9 @@ const CustomTooltip = ({ active, payload, label }) => {
     <div style={{ background: "#0a1828", border: "1px solid rgba(14,165,233,0.2)", borderRadius: 4, padding: "6px 10px" }}>
       <p style={{ fontSize: 10, color: "#4d7a9e", marginBottom: 2 }}>{label}</p>
       {payload.map((p, idx) => (
-        <p key={idx} style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: p.color || "#d4e4f7" }}>{p.name}: {typeof p.value === "number" ? p.value.toLocaleString() : p.value}</p>
+        <p key={idx} style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: p.color || "#d4e4f7" }}>
+          {p.name}: {typeof p.value === "number" ? p.value.toLocaleString() : p.value}
+        </p>
       ))}
     </div>
   );
@@ -20,12 +22,84 @@ const CustomTooltip = ({ active, payload, label }) => {
 
 const periods = ["Daily", "Weekly", "Monthly"];
 
-function ReportCard({ title, items }) {
+// ── Toast ──────────────────────────────────────────────────────────────────────
+function Toast({ toast }) {
+  if (!toast) return null;
+  return (
+    <div style={{
+      position: "fixed", bottom: 20, right: 20, zIndex: 999,
+      background: "var(--card)", border: "1px solid var(--border)",
+      borderRadius: 8, padding: "10px 14px", minWidth: 240, maxWidth: 280,
+      boxShadow: "0 2px 12px rgba(0,0,0,0.1)",
+      display: "flex", alignItems: "flex-start", gap: 8,
+      opacity: toast.visible ? 1 : 0, transition: "opacity 0.3s",
+    }}>
+      <div style={{ marginTop: 1 }}>
+        {toast.done
+          ? <CheckCircle size={16} style={{ color: "#22c55e" }} />
+          : <RefreshCw size={16} style={{ color: toast.iconColor, animation: "spin 1s linear infinite" }} />
+        }
+      </div>
+      <div style={{ flex: 1 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>{toast.title}</div>
+        <div style={{ fontSize: 10, color: "var(--muted-foreground)", marginTop: 2 }}>
+          {toast.done ? "File downloaded" : toast.sub}
+        </div>
+        <div style={{ height: 3, borderRadius: 2, background: "var(--border)", marginTop: 6, overflow: "hidden" }}>
+          <div style={{ height: "100%", borderRadius: 2, background: "#0ea5e9", width: `${toast.progress}%`, transition: "width 0.05s linear" }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Download helper ────────────────────────────────────────────────────────────
+function downloadCSV(filename, label) {
+  const content = `Report: ${label}\nGenerated: ${new Date().toISOString()}\n\nID,Timestamp,Value\n1,2026-06-01,100\n2,2026-06-02,120\n3,2026-06-03,115`;
+  const blob = new Blob([content], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── useToast hook ──────────────────────────────────────────────────────────────
+function useToast() {
+  const [toast, setToast] = useState(null);
+  const timerRef = useRef(null);
+  const intervalRef = useRef(null);
+
+  function showToast(title, sub, iconColor, onComplete) {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (intervalRef.current) clearInterval(intervalRef.current);
+    setToast({ title, sub, iconColor, progress: 0, done: false, visible: true });
+    let progress = 0;
+    intervalRef.current = setInterval(() => {
+      progress = Math.min(progress + 2, 100);
+      setToast(prev => prev ? { ...prev, progress } : prev);
+      if (progress >= 100) {
+        clearInterval(intervalRef.current);
+        onComplete?.();
+        setToast(prev => prev ? { ...prev, done: true } : prev);
+        timerRef.current = setTimeout(() => setToast(null), 2000);
+      }
+    }, 30);
+  }
+
+  return { toast, showToast };
+}
+
+// ── ReportCard ─────────────────────────────────────────────────────────────────
+function ReportCard({ title, items, onExport }) {
   return (
     <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
       <div className="flex items-center justify-between mb-3">
         <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>{title}</span>
-        <button className="flex items-center gap-1" style={{ fontSize: 9, color: "#0ea5e9" }}>
+        <button
+          onClick={onExport}
+          className="flex items-center gap-1"
+          style={{ fontSize: 9, color: "#0ea5e9", cursor: "pointer", background: "none", border: "none", padding: 0 }}
+        >
           <Download size={10} />Export
         </button>
       </div>
@@ -44,11 +118,23 @@ function ReportCard({ title, items }) {
   );
 }
 
+// ── Analytics ──────────────────────────────────────────────────────────────────
 export function Analytics() {
   const [period, setPeriod] = useState("Monthly");
+  const { toast, showToast } = useToast();
+
+  function handleExport(label, filename) {
+    showToast(`Exporting ${label}…`, "Preparing CSV", "#0ea5e9", () => downloadCSV(filename, label));
+  }
+
+  function handleGenerateReport() {
+    showToast("Generating Report…", "Compiling analytics data", "#a78bfa", () => downloadCSV(`analytics_${period.toLowerCase()}_report.csv`, `${period} Analytics Report`));
+  }
 
   return (
     <div className="flex flex-col gap-4 p-4 overflow-auto h-full" style={{ scrollbarWidth: "none" }}>
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+
       {/* Period selector */}
       <div className="flex items-center gap-2">
         <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>Analytics & Reports</span>
@@ -59,19 +145,22 @@ export function Analytics() {
               key={p}
               onClick={() => setPeriod(p)}
               style={{
-                padding: "5px 12px",
-                fontSize: 10,
+                padding: "5px 12px", fontSize: 10, cursor: "pointer",
                 fontWeight: period === p ? 600 : 400,
                 color: period === p ? "#020810" : "var(--muted-foreground)",
                 background: period === p ? "#0ea5e9" : "var(--card)",
-                borderRight: "1px solid var(--border)",
+                borderRight: "1px solid var(--border)", border: "none",
               }}
             >
               {p}
             </button>
           ))}
         </div>
-        <button className="flex items-center gap-1.5 px-3 py-1.5 rounded" style={{ background: "var(--secondary)", border: "1px solid var(--border)", fontSize: 10, color: "var(--foreground)" }}>
+        <button
+          onClick={handleGenerateReport}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded"
+          style={{ background: "var(--secondary)", border: "1px solid var(--border)", fontSize: 10, color: "var(--foreground)", cursor: "pointer" }}
+        >
           <FileText size={12} />Generate Report
         </button>
       </div>
@@ -86,6 +175,7 @@ export function Analytics() {
             { label: "Peak Day", value: "4,350", unit: "m³" },
             { label: "vs Target", value: "+2.1%", unit: "" },
           ]}
+          onExport={() => handleExport("Production Summary", "production_summary.csv")}
         />
         <ReportCard
           title="Recovery Summary"
@@ -95,6 +185,7 @@ export function Analytics() {
             { label: "Worst Day", value: "74.1%", unit: "" },
             { label: "vs Target", value: "+0.6%", unit: "" },
           ]}
+          onExport={() => handleExport("Recovery Summary", "recovery_summary.csv")}
         />
         <ReportCard
           title="Chemical Usage"
@@ -104,6 +195,7 @@ export function Analytics() {
             { label: "pH Adj.", value: "4.2", unit: "kg" },
             { label: "Cost", value: "KES 62,400", unit: "" },
           ]}
+          onExport={() => handleExport("Chemical Usage", "chemical_usage.csv")}
         />
         <ReportCard
           title="Maintenance Summary"
@@ -113,12 +205,12 @@ export function Analytics() {
             { label: "Downtime", value: "6.5h", unit: "" },
             { label: "Cost", value: "KES 48,000", unit: "" },
           ]}
+          onExport={() => handleExport("Maintenance Summary", "maintenance_summary.csv")}
         />
       </div>
 
       {/* Charts grid */}
       <div className="grid gap-4" style={{ gridTemplateColumns: "2fr 1fr" }}>
-        {/* Production trend */}
         <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
           <div className="flex items-center justify-between mb-3">
             <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>Production & Recovery — 2026 YTD</span>
@@ -141,7 +233,6 @@ export function Analytics() {
           </ResponsiveContainer>
         </div>
 
-        {/* Operating time distribution */}
         <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
           <div className="mb-3">
             <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>Operating Time Distribution</span>
@@ -168,7 +259,7 @@ export function Analytics() {
         </div>
       </div>
 
-      {/* Chemical + Maintenance charts */}
+      {/* Chemical + KPI charts */}
       <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
         <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
           <div className="flex items-center justify-between mb-3">
@@ -210,6 +301,8 @@ export function Analytics() {
           </div>
         </div>
       </div>
+
+      <Toast toast={toast} />
     </div>
   );
 }

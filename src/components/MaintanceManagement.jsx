@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { maintenanceWorkOrders, maintenanceHoursMonthly } from "../data/mockData";
-import { Clock, CheckCircle, AlertTriangle, Calendar, Wrench, Plus } from "lucide-react";
+import { Clock, CheckCircle, AlertTriangle, Calendar, Wrench, Plus, X } from "lucide-react";
 
 const StatusBadge = ({ status }) => {
   const cfg = {
@@ -65,11 +65,34 @@ const maintenanceDays = {
 
 export function MaintenanceManagement() {
   const [tab, setTab] = useState("workorders");
+  const [showNewDrawer, setShowNewDrawer] = useState(false);
+
+  // New Work Order Form State
+  const [newWO, setNewWO] = useState({
+    equipment: "",
+    assetId: "",
+    type: "",
+    technician: "",
+    priority: "Medium",
+    dueDate: "",
+  });
 
   const open = maintenanceWorkOrders.filter(w => w.status !== "Completed").length;
   const overdue = maintenanceWorkOrders.filter(w => w.status === "Overdue").length;
   const completed = maintenanceWorkOrders.filter(w => w.status === "Completed").length;
   const scheduled = maintenanceWorkOrders.filter(w => w.status === "Scheduled").length;
+
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setNewWO(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    alert("✅ New Work Order Created Successfully! (Demo)");
+    setShowNewDrawer(false);
+    setNewWO({ equipment: "", assetId: "", type: "", technician: "", priority: "Medium", dueDate: "" });
+  };
 
   return (
     <div className="flex flex-col gap-4 p-4 overflow-auto h-full" style={{ scrollbarWidth: "none" }}>
@@ -82,38 +105,19 @@ export function MaintenanceManagement() {
           { label: "Completed (June)", value: completed, icon: CheckCircle, color: "#22c55e" },
           { label: "Downtime Hours (June)", value: "6.5h", icon: Clock, color: "#eab308" },
         ].map(c => (
-          <div 
-            key={c.label} 
-            className="rounded p-3 flex gap-3 items-start" 
-            style={{ background: "var(--card)", border: "1px solid var(--border)" }}
-          >
+          <div key={c.label} className="rounded p-3 flex gap-3 items-start" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
             <div className="rounded p-1.5 mt-0.5" style={{ background: `${c.color}15` }}>
               <c.icon size={14} style={{ color: c.color }} />
             </div>
             <div>
-              <div style={{ 
-                fontSize: 9, 
-                color: "var(--muted-foreground)", 
-                textTransform: "uppercase", 
-                letterSpacing: "0.06em" 
-              }}>
-                {c.label}
-              </div>
-              <div style={{ 
-                fontFamily: "var(--font-mono)", 
-                fontSize: 20, 
-                fontWeight: 700, 
-                color: c.color, 
-                lineHeight: 1.2 
-              }}>
-                {c.value}
-              </div>
+              <div style={{ fontSize: 9, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{c.label}</div>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 20, fontWeight: 700, color: c.color, lineHeight: 1.2 }}>{c.value}</div>
             </div>
           </div>
         ))}
       </div>
 
-      {/* Tab bar */}
+      {/* Tab Bar + New Button */}
       <div className="flex items-center gap-1" style={{ borderBottom: "1px solid var(--border)" }}>
         {[
           { id: "workorders", label: "Work Orders" },
@@ -124,7 +128,7 @@ export function MaintenanceManagement() {
             onClick={() => setTab(t.id)}
             className="px-3 py-2 transition-colors"
             style={{
-              fontSize: 11, 
+              fontSize: 11,
               fontWeight: tab === t.id ? 600 : 400,
               color: tab === t.id ? "#0ea5e9" : "var(--muted-foreground)",
               borderBottom: tab === t.id ? "2px solid #0ea5e9" : "2px solid transparent",
@@ -134,101 +138,54 @@ export function MaintenanceManagement() {
             {t.label}
           </button>
         ))}
+
         <div className="flex-1" />
-        <button 
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded mb-1" 
+
+        <button
+          onClick={() => setShowNewDrawer(true)}
+          className="flex items-center gap-1.5 px-4 py-2 rounded mb-1 hover:bg-cyan-600 transition-colors"
           style={{ background: "#0ea5e9", color: "#020810", fontSize: 11, fontWeight: 600 }}
         >
-          <Plus size={12} /> New Work Order
+          <Plus size={14} /> New Work Order
         </button>
       </div>
 
+      {/* Main Content */}
       {tab === "workorders" ? (
         <>
-          {/* Work orders table */}
+          {/* Work Orders Table */}
           <div className="rounded overflow-hidden" style={{ border: "1px solid var(--border)" }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ background: "var(--muted)" }}>
                   {["WO #", "Equipment", "Asset ID", "Type", "Technician", "Status", "Priority", "Due Date"].map(h => (
-                    <th 
-                      key={h} 
-                      style={{ 
-                        padding: "8px 10px", 
-                        textAlign: "left", 
-                        fontSize: 9, 
-                        fontWeight: 600, 
-                        color: "var(--muted-foreground)", 
-                        letterSpacing: "0.08em", 
-                        textTransform: "uppercase", 
-                        borderBottom: "1px solid var(--border)" 
-                      }}
-                    >
-                      {h}
-                    </th>
+                    <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.08em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {maintenanceWorkOrders.map((w, i) => (
-                  <tr 
-                    key={w.id} 
-                    style={{ background: i % 2 === 0 ? "var(--card)" : "var(--muted)" }}
-                  >
-                    <td style={{ padding: "8px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: "#0ea5e9", borderBottom: "1px solid var(--border)" }}>
-                      {w.id}
-                    </td>
-                    <td style={{ padding: "8px 10px", fontSize: 11, fontWeight: 500, color: "var(--foreground)", borderBottom: "1px solid var(--border)" }}>
-                      {w.equipment}
-                    </td>
-                    <td style={{ padding: "8px 10px", fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>
-                      {w.assetId}
-                    </td>
-                    <td style={{ padding: "8px 10px", fontSize: 10, color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>
-                      {w.type}
-                    </td>
-                    <td style={{ padding: "8px 10px", fontSize: 10, color: "var(--foreground)", borderBottom: "1px solid var(--border)" }}>
-                      {w.technician}
-                    </td>
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
-                      <StatusBadge status={w.status} />
-                    </td>
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
-                      <PriorityBadge priority={w.priority} />
-                    </td>
-                    <td style={{ 
-                      padding: "8px 10px", 
-                      fontSize: 10, 
-                      fontFamily: "var(--font-mono)", 
-                      color: w.status === "Overdue" ? "#ef4444" : "var(--muted-foreground)", 
-                      borderBottom: "1px solid var(--border)" 
-                    }}>
-                      {w.dueDate}
-                    </td>
+                  <tr key={w.id} style={{ background: i % 2 === 0 ? "var(--card)" : "var(--muted)" }}>
+                    <td style={{ padding: "8px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: "#0ea5e9", borderBottom: "1px solid var(--border)" }}>{w.id}</td>
+                    <td style={{ padding: "8px 10px", fontSize: 11, fontWeight: 500, color: "var(--foreground)", borderBottom: "1px solid var(--border)" }}>{w.equipment}</td>
+                    <td style={{ padding: "8px 10px", fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>{w.assetId}</td>
+                    <td style={{ padding: "8px 10px", fontSize: 10, color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>{w.type}</td>
+                    <td style={{ padding: "8px 10px", fontSize: 10, color: "var(--foreground)", borderBottom: "1px solid var(--border)" }}>{w.technician}</td>
+                    <td style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}><StatusBadge status={w.status} /></td>
+                    <td style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}><PriorityBadge priority={w.priority} /></td>
+                    <td style={{ padding: "8px 10px", fontSize: 10, fontFamily: "var(--font-mono)", color: w.status === "Overdue" ? "#ef4444" : "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>{w.dueDate}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
 
-          {/* Maintenance hours chart */}
+          {/* Maintenance Hours Chart */}
           <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
             <div className="flex items-center justify-between mb-3">
               <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
                 Maintenance Hours by Month
               </span>
-              <div className="flex gap-3">
-                {[
-                  { color: "#ef4444", label: "Corrective" }, 
-                  { color: "#0ea5e9", label: "Preventive" }, 
-                  { color: "#22c55e", label: "Inspection" }
-                ].map(l => (
-                  <div key={l.label} className="flex items-center gap-1.5">
-                    <div style={{ width: 8, height: 8, borderRadius: 1, background: l.color }} />
-                    <span style={{ fontSize: 9, color: "var(--muted-foreground)" }}>{l.label}</span>
-                  </div>
-                ))}
-              </div>
             </div>
             <ResponsiveContainer width="100%" height={150}>
               <BarChart data={maintenanceHoursMonthly} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
@@ -244,76 +201,93 @@ export function MaintenanceManagement() {
           </div>
         </>
       ) : (
-        /* Calendar view */
+        /* Calendar View */
         <div className="rounded p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-          <div style={{ 
-            fontSize: 11, 
-            fontWeight: 600, 
-            color: "var(--muted-foreground)", 
-            textTransform: "uppercase", 
-            letterSpacing: "0.1em", 
-            marginBottom: 12 
-          }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 12 }}>
             June 2026 — Maintenance Schedule
           </div>
+          {/* Calendar grid code remains the same as before */}
           <div className="grid gap-1" style={{ gridTemplateColumns: "repeat(7, 1fr)" }}>
             {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(d => (
-              <div 
-                key={d} 
-                style={{ 
-                  padding: "4px 0", 
-                  textAlign: "center", 
-                  fontSize: 9, 
-                  fontWeight: 600, 
-                  color: "var(--muted-foreground)", 
-                  letterSpacing: "0.08em" 
-                }}
-              >
-                {d}
-              </div>
+              <div key={d} style={{ padding: "4px 0", textAlign: "center", fontSize: 9, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.08em" }}>{d}</div>
             ))}
-
             {calendarDays.map(day => {
               const events = maintenanceDays[day] || [];
               const isToday = day === 6;
               return (
-                <div
-                  key={day}
-                  className="rounded flex flex-col gap-1 cursor-pointer transition-colors"
-                  style={{
-                    minHeight: 52,
-                    padding: "4px 5px",
-                    background: isToday ? "rgba(14,165,233,0.12)" : "var(--muted)",
-                    border: isToday ? "1px solid #0ea5e9" : "1px solid var(--border)",
-                  }}
-                >
-                  <span style={{ 
-                    fontSize: 10, 
-                    fontFamily: "var(--font-mono)", 
-                    color: isToday ? "#0ea5e9" : "var(--muted-foreground)", 
-                    fontWeight: isToday ? 700 : 400 
-                  }}>
-                    {day}
-                  </span>
+                <div key={day} className="rounded flex flex-col gap-1 cursor-pointer transition-colors" style={{ minHeight: 52, padding: "4px 5px", background: isToday ? "rgba(14,165,233,0.12)" : "var(--muted)", border: isToday ? "1px solid #0ea5e9" : "1px solid var(--border)" }}>
+                  <span style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: isToday ? "#0ea5e9" : "var(--muted-foreground)", fontWeight: isToday ? 700 : 400 }}>{day}</span>
                   {events.map(e => (
-                    <div 
-                      key={e.label} 
-                      style={{ 
-                        fontSize: 8, 
-                        fontWeight: 600, 
-                        color: e.color, 
-                        background: `${e.color}18`, 
-                        borderRadius: 2, 
-                        padding: "0 3px", 
-                        lineHeight: 1.6 
-                      }}
-                    >
-                      {e.label}
-                    </div>
+                    <div key={e.label} style={{ fontSize: 8, fontWeight: 600, color: e.color, background: `${e.color}18`, borderRadius: 2, padding: "0 3px", lineHeight: 1.6 }}>{e.label}</div>
                   ))}
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* ==================== NEW WORK ORDER DRAWER ==================== */}
+      {showNewDrawer && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="absolute inset-0 bg-black/70" onClick={() => setShowNewDrawer(false)} />
+          
+          <div className="relative w-96 h-full bg-[#0a1828] border-l border-cyan-900 shadow-2xl overflow-auto" style={{ background: "var(--card)" }}>
+            <div className="p-5 border-b border-gray-700 flex items-center justify-between sticky top-0 bg-[#0a1828]">
+              <h2 className="text-lg font-semibold">Create New Work Order</h2>
+              <button onClick={() => setShowNewDrawer(false)} className="p-2 hover:bg-gray-700 rounded">
+                <X size={20} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="p-5 space-y-5">
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Equipment</label>
+                <input name="equipment" value={newWO.equipment} onChange={handleInputChange} required className="w-full bg-[#121e2f] border border-gray-700 rounded px-3 py-2 text-sm" placeholder="e.g. BH-003 Pump Assembly" />
+              </div>
+
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Asset ID</label>
+                <input name="assetId" value={newWO.assetId} onChange={handleInputChange} required className="w-full bg-[#121e2f] border border-gray-700 rounded px-3 py-2 text-sm font-mono" placeholder="PMP-003" />
+              </div>
+
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Type</label>
+                <select name="type" value={newWO.type} onChange={handleInputChange} required className="w-full bg-[#121e2f] border border-gray-700 rounded px-3 py-2 text-sm">
+                  <option value="">Select Type</option>
+                  <option value="Corrective">Corrective</option>
+                  <option value="Preventive">Preventive</option>
+                  <option value="Inspection">Inspection</option>
+                  <option value="Calibration">Calibration</option>
+                  <option value="Replacement">Replacement</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs text-gray-400 mb-1">Technician</label>
+                <input name="technician" value={newWO.technician} onChange={handleInputChange} required className="w-full bg-[#121e2f] border border-gray-700 rounded px-3 py-2 text-sm" placeholder="Peter Ochieng" />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Priority</label>
+                  <select name="priority" value={newWO.priority} onChange={handleInputChange} className="w-full bg-[#121e2f] border border-gray-700 rounded px-3 py-2 text-sm">
+                    <option value="Low">Low</option>
+                    <option value="Medium">Medium</option>
+                    <option value="High">High</option>
+                    <option value="Critical">Critical</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Due Date</label>
+                  <input name="dueDate" type="date" value={newWO.dueDate} onChange={handleInputChange} required className="w-full bg-[#121e2f] border border-gray-700 rounded px-3 py-2 text-sm" />
+                </div>
+              </div>
+
+              <button type="submit" className="w-full py-3 rounded font-medium text-sm mt-6" style={{ background: "#0ea5e9", color: "#020810" }}>
+                Create Work Order
+              </button>
+            </form>
           </div>
         </div>
       )}
