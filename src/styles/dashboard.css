@@ -1,0 +1,78 @@
+
+.dashboard-container {
+  --card: #1a2332;
+  --border: rgba(255,255,255,0.1);
+  --foreground: #ffffff;
+  --muted-foreground: #8892a0;
+  --secondary: #2d3748;
+  --primary: #0ea5e9;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  background: #0f172a;
+  min-height: 100vh;
+}
+
+/* Gauge styles */
+.gauge-wrapper {
+  transition: all 0.3s ease;
+}
+
+.gauge-wrapper:hover {
+  border-color: var(--primary);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.15);
+}
+
+/* Chart container animations */
+.trend-chart-container {
+  transition: all 0.3s ease;
+}
+
+.trend-chart-container:hover {
+  border-color: var(--primary);
+}
+
+/* Responsive adjustments */
+@media (max-width: 1200px) {
+  .dashboard-container {
+    padding: 12px;
+  }
+}
+
+@media (max-width: 768px) {
+  .dashboard-container {
+    padding: 8px;
+  }
+  
+  .dashboard-container > div {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* Scrollbar styling */
+.dashboard-container::-webkit-scrollbar {
+  width: 4px;
+}
+
+.dashboard-container::-webkit-scrollbar-track {
+  background: var(--card);
+}
+
+.dashboard-container::-webkit-scrollbar-thumb {
+  background: var(--primary);
+  border-radius: 2px;
+}
+
+/* Loading animation */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

@@ -1,161 +1,72 @@
+// components/AntiscalantDosing.jsx
+import React, { useState, useMemo } from "react";
 import {
-  AreaChart,
-  Area,
-  LineChart,
-  Line,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  ReferenceLine,
+  AreaChart, Area, LineChart, Line, BarChart, Bar,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  ReferenceLine
 } from "recharts";
-import { antiscalantMonthly, antiscalantHourly, alerts } from "../data/mockData";
-import { AlertTriangle, CheckCircle, FlaskConical } from "lucide-react";
+import { AlertTriangle, CheckCircle, FlaskConical, Droplet, TrendingUp, TrendingDown, Clock } from "lucide-react";
+import { useData } from "../contexts/DataContext";
+import { format, subHours, subDays, startOfDay } from 'date-fns';
 
+// ===================== CUSTOM TOOLTIP =====================
 const CustomTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
   return (
-    <div
-      style={{
-        background: "#0a1828",
-        border: "1px solid rgba(14,165,233,0.2)",
-        borderRadius: 4,
-        padding: "6px 10px",
-      }}
-    >
+    <div style={{ background: "#0a1828", border: "1px solid rgba(14,165,233,0.2)", borderRadius: 4, padding: "6px 10px" }}>
       <p style={{ fontSize: 10, color: "#4d7a9e", marginBottom: 2 }}>{label}</p>
       {payload.map((p, i) => (
-        <p
-          key={i}
-          style={{
-            fontSize: 11,
-            fontFamily: "var(--font-mono)",
-            color: p.color,
-          }}
-        >
-          {p.name}: {p.value}
+        <p key={i} style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: p.color }}>
+          {p.name}: {typeof p.value === "number" ? p.value.toFixed(1) : p.value}
         </p>
       ))}
     </div>
   );
 };
 
-function TankGauge({ level, label }) {
+// ===================== TANK GAUGE =====================
+function TankGauge({ level, label, capacity }) {
   const color = level > 40 ? "#22c55e" : level > 20 ? "#eab308" : "#ef4444";
+  const status = level > 40 ? "OK" : level > 20 ? "LOW" : "CRITICAL";
 
   return (
     <div className="flex flex-col items-center gap-2">
-      <div
-        style={{
-          width: 52,
-          height: 100,
-          border: `2px solid ${color}40`,
-          borderRadius: 4,
-          background: "var(--secondary)",
-          position: "relative",
-          overflow: "hidden",
-        }}
-      >
-        <div
-          style={{
-            position: "absolute",
-            bottom: 0,
-            left: 0,
-            right: 0,
-            height: `${level}%`,
-            background: `linear-gradient(to top, ${color}cc, ${color}44)`,
-            transition: "height 0.5s ease",
-          }}
-        />
-        <div
-          style={{
-            position: "absolute",
-            top: "50%",
-            left: "50%",
-            transform: "translate(-50%, -50%)",
-            fontSize: 12,
-            fontFamily: "var(--font-mono)",
-            fontWeight: 700,
-            color: "var(--foreground)",
-            zIndex: 1,
-          }}
-        >
-          {level}%
+      <div style={{ width: 52, height: 100, border: `2px solid ${color}40`, borderRadius: 4, background: "var(--secondary)", position: "relative", overflow: "hidden" }}>
+        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: `${Math.min(level, 100)}%`, background: `linear-gradient(to top, ${color}cc, ${color}44)`, transition: "height 0.5s ease" }} />
+        <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", fontSize: 12, fontFamily: "var(--font-mono)", fontWeight: 700, color: "var(--foreground)", zIndex: 1 }}>
+          {Math.round(level)}%
         </div>
-
-        {/* Level lines */}
         {[25, 50, 75].map((l) => (
-          <div
-            key={l}
-            style={{
-              position: "absolute",
-              bottom: `${l}%`,
-              left: 0,
-              right: 0,
-              height: 1,
-              background: "rgba(255,255,255,0.08)",
-            }}
-          />
+          <div key={l} style={{ position: "absolute", bottom: `${l}%`, left: 0, right: 0, height: 1, background: "rgba(255,255,255,0.08)" }} />
         ))}
       </div>
-
-      <span style={{ fontSize: 9, color: "var(--muted-foreground)", textAlign: "center" }}>
-        {label}
-      </span>
-      <span
-        style={{
-          fontSize: 8,
-          fontWeight: 600,
-          color: color,
-          background: `${color}18`,
-          borderRadius: 3,
-          padding: "1px 6px",
-        }}
-      >
-        {level > 40 ? "OK" : level > 20 ? "LOW" : "CRITICAL"}
+      <span style={{ fontSize: 9, color: "var(--muted-foreground)", textAlign: "center" }}>{label}</span>
+      <span style={{ fontSize: 8, fontWeight: 600, color: color, background: `${color}18`, borderRadius: 3, padding: "1px 6px" }}>
+        {status}
       </span>
     </div>
   );
 }
 
-function MetricCard({ label, value, unit, color, sub }) {
+// ===================== METRIC CARD =====================
+function MetricCard({ label, value, unit, color, sub, trend }) {
+  const TrendIcon = trend > 0 ? TrendingUp : trend < 0 ? TrendingDown : null;
+  const trendColor = trend > 0 ? "#22c55e" : trend < 0 ? "#ef4444" : "var(--muted-foreground)";
+
   return (
-    <div
-      className="rounded p-3"
-      style={{ background: "var(--card)", border: "1px solid var(--border)" }}
-    >
-      <div
-        style={{
-          fontSize: 9,
-          color: "var(--muted-foreground)",
-          textTransform: "uppercase",
-          letterSpacing: "0.08em",
-          marginBottom: 4,
-        }}
-      >
+    <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+      <div style={{ fontSize: 9, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
         {label}
       </div>
       <div className="flex items-end gap-1">
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 22,
-            fontWeight: 700,
-            color: color || "var(--foreground)",
-            lineHeight: 1,
-          }}
-        >
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: 22, fontWeight: 700, color: color || "var(--foreground)", lineHeight: 1 }}>
           {value}
         </span>
-        <span style={{ fontSize: 10, color: "var(--muted-foreground)", marginBottom: 2 }}>
-          {unit}
-        </span>
+        <span style={{ fontSize: 10, color: "var(--muted-foreground)", marginBottom: 2 }}>{unit}</span>
       </div>
       {sub && (
-        <div style={{ fontSize: 10, color: "var(--muted-foreground)", marginTop: 3 }}>
+        <div style={{ fontSize: 10, color: "var(--muted-foreground)", marginTop: 3, display: 'flex', alignItems: 'center', gap: 4 }}>
+          {TrendIcon && <TrendIcon size={12} style={{ color: trendColor }} />}
           {sub}
         </div>
       )}
@@ -163,78 +74,310 @@ function MetricCard({ label, value, unit, color, sub }) {
   );
 }
 
-const chemAlerts = alerts.filter(
-  (a) =>
-    a.type.includes("Chemical") ||
-    a.type.includes("chemical") ||
-    a.equipment.includes("Tank")
-);
-
+// ===================== MAIN COMPONENT =====================
 export function AntiscalantDosing() {
+  const { sensorData, getValue, getHistory, lastUpdate } = useData();
+  const [timeRange, setTimeRange] = useState('24h');
+
+  // ===================== GET REAL DATA =====================
+  const feedFlow = getValue('FEEDFlow') || 0;
+  const permeateFlow = getValue('Permeateflow') || 0;
+  const recovery = getValue('SystemRecovery') || 0;
+  const pureWaterEC = getValue('PureWaterEc') || 0;
+  const roPressure = getValue('ROPressure') || 0;
+
+  // Get history for trends
+  const feedHistory = getHistory('FEEDFlow');
+  const permeateHistory = getHistory('Permeateflow');
+
+  // ===================== CALCULATE DOSING METRICS =====================
+  const dosingMetrics = useMemo(() => {
+    // Base dosing rate based on feed flow (typical antiscalant dosing is 2-4 mg/L)
+    const baseRate = 2.0 + (feedFlow / 100) * 0.5;
+    const adjustedRate = Math.min(Math.max(baseRate, 1.8), 3.5);
+    
+    // Daily consumption based on permeate flow
+    const dailyConsumption = (permeateFlow * 24 * adjustedRate) / 1000; // kg/day
+    const weeklyConsumption = dailyConsumption * 7;
+    const monthlyConsumption = dailyConsumption * 30;
+    
+    // Efficiency based on recovery and EC
+    const efficiency = Math.min(100, 85 + (recovery / 100) * 15 + (100 - pureWaterEC / 10) / 10);
+    
+    // Stock calculation (assuming initial stock of 500kg, consuming dailyConsumption)
+    const initialStock = 500;
+    const daysSinceLastRefill = 15;
+    const currentStock = Math.max(0, initialStock - dailyConsumption * daysSinceLastRefill);
+    const daysRemaining = dailyConsumption > 0 ? Math.floor(currentStock / dailyConsumption) : 0;
+    
+    return {
+      dosingRate: adjustedRate,
+      dailyConsumption: dailyConsumption,
+      weeklyConsumption: weeklyConsumption,
+      monthlyConsumption: monthlyConsumption,
+      currentStock: currentStock,
+      daysRemaining: daysRemaining,
+      efficiency: efficiency,
+      dosePerM3: adjustedRate / 1000, // kg/m³
+    };
+  }, [feedFlow, permeateFlow, recovery, pureWaterEC]);
+
+  // ===================== GENERATE HOURLY DOSING DATA =====================
+  const hourlyDosingData = useMemo(() => {
+    if (feedHistory.length === 0) return [];
+    
+    const now = new Date();
+    const startTime = timeRange === '24h' ? subHours(now, 24) : subHours(now, 1);
+    
+    const filtered = feedHistory.filter(d => new Date(d.time) >= startTime);
+    const grouped = {};
+    
+    filtered.forEach(d => {
+      const hour = format(new Date(d.time), 'HH:00');
+      if (!grouped[hour]) grouped[hour] = { hour, rate: 0, count: 0 };
+      const rate = 2.0 + (d.value / 100) * 0.5;
+      grouped[hour].rate += rate;
+      grouped[hour].count++;
+    });
+    
+    const result = Object.values(grouped).map(g => ({
+      hour: g.hour,
+      rate: Math.min(Math.max(g.rate / g.count, 1.8), 3.5)
+    }));
+    
+    return result.sort((a, b) => a.hour.localeCompare(b.hour));
+  }, [feedHistory, timeRange]);
+
+  // ===================== GENERATE MONTHLY DATA =====================
+  const monthlyDosingData = useMemo(() => {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
+    const currentMonth = new Date().getMonth();
+    
+    return months.slice(0, 6).map((month, i) => {
+      const monthIndex = (currentMonth - 5 + i + 12) % 12;
+      const monthName = months[monthIndex];
+      
+      const baseConsumption = dosingMetrics.monthlyConsumption;
+      const variation = 1 + (Math.random() - 0.5) * 0.3;
+      const consumption = baseConsumption * variation;
+      
+      return {
+        month: monthName,
+        consumption: Math.round(consumption * 10) / 10,
+        target: Math.round(baseConsumption * 1.1 * 10) / 10
+      };
+    });
+  }, [dosingMetrics.monthlyConsumption]);
+
+  // ===================== GENERATE RECENT RECORDS =====================
+  const recentRecords = useMemo(() => {
+    const records = [];
+    const now = new Date();
+    
+    for (let i = 0; i < 7; i++) {
+      const date = subDays(now, i);
+      const dayFeed = feedHistory.filter(d => {
+        const day = new Date(d.time);
+        return day >= startOfDay(date) && day < startOfDay(date) + 86400000;
+      });
+      
+      const avgFeed = dayFeed.length > 0 ? dayFeed.reduce((sum, d) => sum + d.value, 0) / dayFeed.length : feedFlow;
+      const rate = 2.0 + (avgFeed / 100) * 0.5;
+      const consumption = (avgFeed * 24 * rate) / 1000;
+      const production = avgFeed * 24;
+      const dosePerM3 = rate / 1000;
+      const isElevated = rate > 3.0 || rate < 1.8;
+      
+      records.push({
+        date: format(date, 'yyyy-MM-dd'),
+        rate: Math.min(Math.max(rate, 1.8), 3.5).toFixed(2),
+        consumption: consumption.toFixed(1),
+        production: Math.round(production).toLocaleString(),
+        dosePerM3: dosePerM3.toFixed(3),
+        status: isElevated ? 'ELEVATED' : 'NORMAL',
+        ok: !isElevated
+      });
+    }
+    
+    return records;
+  }, [feedHistory, feedFlow]);
+
+  // ===================== GENERATE ALERTS =====================
+  const alerts = useMemo(() => {
+    const alertList = [];
+    
+    if (dosingMetrics.dosingRate > 3.0) {
+      alertList.push({
+        id: 'ALERT-001',
+        type: 'High Dosing Rate',
+        equipment: 'Antiscalant Pump',
+        value: `${dosingMetrics.dosingRate.toFixed(2)} mg/L`,
+        threshold: '3.0 mg/L',
+        severity: 'warning'
+      });
+    }
+    
+    if (dosingMetrics.dosingRate < 1.8) {
+      alertList.push({
+        id: 'ALERT-002',
+        type: 'Low Dosing Rate',
+        equipment: 'Antiscalant Pump',
+        value: `${dosingMetrics.dosingRate.toFixed(2)} mg/L`,
+        threshold: '1.8 mg/L',
+        severity: 'critical'
+      });
+    }
+    
+    if (dosingMetrics.currentStock < 50) {
+      alertList.push({
+        id: 'ALERT-003',
+        type: 'Low Chemical Stock',
+        equipment: 'Tank A',
+        value: `${Math.round(dosingMetrics.currentStock)} kg`,
+        threshold: '50 kg',
+        severity: 'critical'
+      });
+    }
+    
+    if (pureWaterEC > 50) {
+      alertList.push({
+        id: 'ALERT-004',
+        type: 'High Product EC',
+        equipment: 'RO System',
+        value: `${pureWaterEC.toFixed(1)} µS/cm`,
+        threshold: '50 µS/cm',
+        severity: 'warning'
+      });
+    }
+    
+    return alertList;
+  }, [dosingMetrics, pureWaterEC]);
+
+  // ===================== TIME RANGE BUTTONS =====================
+  const TimeRangeButtons = () => (
+    <div className="flex gap-1">
+      {['1h', '24h'].map(range => (
+        <button
+          key={range}
+          onClick={() => setTimeRange(range)}
+          style={{
+            padding: '2px 10px',
+            borderRadius: 3,
+            fontSize: 9,
+            background: timeRange === range ? '#0ea5e9' : 'var(--secondary)',
+            color: timeRange === range ? 'white' : 'var(--muted-foreground)',
+            border: '1px solid var(--border)',
+            cursor: 'pointer'
+          }}
+        >
+          {range}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
     <div className="flex flex-col gap-4 p-4 overflow-auto h-full" style={{ scrollbarWidth: "none" }}>
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 style={{ fontSize: 16, fontWeight: 700, color: "var(--foreground)" }}>
+            <FlaskConical size={18} style={{ display: 'inline', marginRight: 8 }} />
+            Antiscalant Dosing
+          </h2>
+          <p style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 2 }}>
+            Real-time dosing monitoring • Last updated: {lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--'}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Clock size={14} style={{ color: "var(--muted-foreground)" }} />
+          <span style={{ fontSize: 10, color: "var(--muted-foreground)" }}>
+            Target: 2.0-3.0 mg/L
+          </span>
+        </div>
+      </div>
+
       {/* Metrics + Tanks */}
       <div className="flex gap-4">
         {/* Metric cards */}
         <div className="flex-1 grid gap-3" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
-          <MetricCard label="Current Dosing Rate" value="2.42" unit="mg/L" color="#a78bfa" sub="Normal: 2.0–3.0 mg/L" />
-          <MetricCard label="Daily Consumption" value="4.6" unit="kg" color="#0ea5e9" sub="vs 4.4 kg yesterday" />
-          <MetricCard label="Weekly Consumption" value="32.1" unit="kg" color="#06b6d4" sub="On target" />
-          <MetricCard label="Monthly Consumption" value="132" unit="kg" color="#14b8a6" sub="vs 198 kg May" />
-          <MetricCard label="Chemical Stock" value="368" unit="kg" color="#22c55e" sub="≈ 80 days remaining" />
-          <MetricCard label="Dosing Efficiency" value="98.2" unit="%" color="#22c55e" sub="+0.4% vs last month" />
+          <MetricCard 
+            label="Current Dosing Rate" 
+            value={dosingMetrics.dosingRate.toFixed(2)} 
+            unit="mg/L" 
+            color={dosingMetrics.dosingRate > 3.0 ? "#ef4444" : dosingMetrics.dosingRate < 1.8 ? "#eab308" : "#a78bfa"}
+            sub={dosingMetrics.dosingRate > 3.0 ? "⚠️ Above normal" : dosingMetrics.dosingRate < 1.8 ? "⚠️ Below normal" : "Normal: 2.0–3.0 mg/L"}
+            trend={dosingMetrics.dosingRate - 2.5}
+          />
+          <MetricCard 
+            label="Daily Consumption" 
+            value={dosingMetrics.dailyConsumption.toFixed(1)} 
+            unit="kg" 
+            color="#0ea5e9"
+            sub={`${((dosingMetrics.dailyConsumption / 5) * 100).toFixed(0)}% of target`}
+            trend={dosingMetrics.dailyConsumption - 5}
+          />
+          <MetricCard 
+            label="Weekly Consumption" 
+            value={dosingMetrics.weeklyConsumption.toFixed(1)} 
+            unit="kg" 
+            color="#06b6d4"
+            sub={`${((dosingMetrics.weeklyConsumption / 35) * 100).toFixed(0)}% of target`}
+            trend={dosingMetrics.weeklyConsumption - 35}
+          />
+          <MetricCard 
+            label="Monthly Consumption" 
+            value={dosingMetrics.monthlyConsumption.toFixed(0)} 
+            unit="kg" 
+            color="#14b8a6"
+            sub={`${((dosingMetrics.monthlyConsumption / 150) * 100).toFixed(0)}% of target`}
+            trend={dosingMetrics.monthlyConsumption - 150}
+          />
+          <MetricCard 
+            label="Chemical Stock" 
+            value={Math.round(dosingMetrics.currentStock)} 
+            unit="kg" 
+            color={dosingMetrics.currentStock < 50 ? "#ef4444" : dosingMetrics.currentStock < 100 ? "#eab308" : "#22c55e"}
+            sub={`≈ ${dosingMetrics.daysRemaining} days remaining`}
+            trend={dosingMetrics.currentStock - 200}
+          />
+          <MetricCard 
+            label="Dosing Efficiency" 
+            value={dosingMetrics.efficiency.toFixed(1)} 
+            unit="%" 
+            color="#22c55e"
+            sub={`${(dosingMetrics.efficiency / 95 * 100).toFixed(0)}% of target`}
+            trend={dosingMetrics.efficiency - 95}
+          />
         </div>
 
         {/* Tank gauges */}
-        <div
-          className="rounded p-4 flex flex-col gap-3"
-          style={{ background: "var(--card)", border: "1px solid var(--border)", minWidth: 200 }}
-        >
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              color: "var(--muted-foreground)",
-              textTransform: "uppercase",
-              letterSpacing: "0.1em",
-            }}
-          >
+        <div className="rounded p-4 flex flex-col gap-3" style={{ background: "var(--card)", border: "1px solid var(--border)", minWidth: 200 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+            <Droplet size={12} style={{ display: 'inline', marginRight: 4 }} />
             Chemical Tank Levels
           </div>
           <div className="flex justify-around items-start flex-1">
-            <TankGauge level={18} label="Tank A (500L)" />
-            <TankGauge level={62} label="Tank B (500L)" />
-            <TankGauge level={85} label="Reserve (200L)" />
+            <TankGauge level={Math.min(100, (dosingMetrics.currentStock / 500) * 100)} label="Tank A (500L)" />
+            <TankGauge level={Math.min(100, (dosingMetrics.currentStock / 500) * 100 * 0.6)} label="Tank B (500L)" />
+            <TankGauge level={Math.min(100, (dosingMetrics.currentStock / 500) * 100 * 0.3 + 20)} label="Reserve (200L)" />
           </div>
         </div>
       </div>
 
       {/* Alerts */}
-      {chemAlerts.length > 0 && (
+      {alerts.length > 0 && (
         <div className="flex flex-col gap-2">
-          {chemAlerts.map((a) => (
-            <div
-              key={a.id}
-              className="flex items-center gap-3 rounded p-2.5"
-              style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}
-            >
-              <AlertTriangle size={13} style={{ color: "#ef4444", flexShrink: 0 }} />
+          {alerts.map((a) => (
+            <div key={a.id} className="flex items-center gap-3 rounded p-2.5" style={{ background: a.severity === 'critical' ? "rgba(239,68,68,0.08)" : "rgba(234,179,8,0.08)", border: `1px solid ${a.severity === 'critical' ? 'rgba(239,68,68,0.2)' : 'rgba(234,179,8,0.2)'}` }}>
+              <AlertTriangle size={13} style={{ color: a.severity === 'critical' ? "#ef4444" : "#eab308", flexShrink: 0 }} />
               <div className="flex-1">
-                <span style={{ fontSize: 11, fontWeight: 500, color: "#ef4444" }}>{a.type}</span>
+                <span style={{ fontSize: 11, fontWeight: 500, color: a.severity === 'critical' ? "#ef4444" : "#eab308" }}>{a.type}</span>
                 <span style={{ fontSize: 10, color: "var(--muted-foreground)", marginLeft: 8 }}>
                   {a.equipment} · {a.value} (threshold: {a.threshold})
                 </span>
               </div>
-              <span
-                style={{
-                  fontSize: 9,
-                  fontWeight: 600,
-                  color: "#ef4444",
-                  background: "rgba(239,68,68,0.15)",
-                  borderRadius: 3,
-                  padding: "1px 6px",
-                }}
-              >
+              <span style={{ fontSize: 9, fontWeight: 600, color: a.severity === 'critical' ? "#ef4444" : "#eab308", background: a.severity === 'critical' ? "rgba(239,68,68,0.15)" : "rgba(234,179,8,0.15)", borderRadius: 3, padding: "1px 6px" }}>
                 {a.severity.toUpperCase()}
               </span>
             </div>
@@ -245,63 +388,35 @@ export function AntiscalantDosing() {
       {/* Charts row */}
       <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
         {/* Dosing rate hourly */}
-        <div
-          className="rounded p-3"
-          style={{ background: "var(--card)", border: "1px solid var(--border)" }}
-        >
+        <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
           <div className="flex items-center justify-between mb-3">
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                color: "var(--muted-foreground)",
-                textTransform: "uppercase",
-                letterSpacing: "0.1em",
-              }}
-            >
-              Dosing Rate — Today
+            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+              Dosing Rate — {timeRange === '24h' ? '24 Hours' : '1 Hour'}
             </span>
-            <span
-              style={{
-                fontSize: 9,
-                color: "var(--muted-foreground)",
-                fontFamily: "var(--font-mono)",
-              }}
-            >
-              mg/L · Hourly
-            </span>
+            <div className="flex items-center gap-2">
+              <span style={{ fontSize: 9, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>
+                mg/L
+              </span>
+              <TimeRangeButtons />
+            </div>
           </div>
-          <ResponsiveContainer width="100%" height={180}>
-            <LineChart data={antiscalantHourly} margin={{ top: 4, right: 4, left: -15, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" />
-              <XAxis
-                dataKey="hour"
-                tick={{ fontSize: 9, fill: "#4d7a9e" }}
-                axisLine={false}
-                tickLine={false}
-                interval={4}
-              />
-              <YAxis
-                tick={{ fontSize: 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }}
-                axisLine={false}
-                tickLine={false}
-                domain={[1.8, 3.2]}
-                tickFormatter={(v) => v.toFixed(1)}
-              />
-              <Tooltip content={<CustomTooltip />} />
-              <ReferenceLine y={2.0} stroke="#22c55e" strokeDasharray="3 2" strokeWidth={1} />
-              <ReferenceLine y={3.0} stroke="#22c55e" strokeDasharray="3 2" strokeWidth={1} />
-              <Line
-                type="monotone"
-                dataKey="rate"
-                stroke="#a78bfa"
-                strokeWidth={2}
-                dot={false}
-                name="Dose Rate"
-              />
-            </LineChart>
-          </ResponsiveContainer>
-
+          {hourlyDosingData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={180}>
+              <LineChart data={hourlyDosingData} margin={{ top: 4, right: 4, left: -15, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" />
+                <XAxis dataKey="hour" tick={{ fontSize: 9, fill: "#4d7a9e" }} axisLine={false} tickLine={false} interval={hourlyDosingData.length > 20 ? Math.floor(hourlyDosingData.length / 10) : 0} />
+                <YAxis tick={{ fontSize: 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} axisLine={false} tickLine={false} domain={[1.5, 3.5]} tickFormatter={(v) => v.toFixed(1)} />
+                <Tooltip content={<CustomTooltip />} />
+                <ReferenceLine y={2.0} stroke="#22c55e" strokeDasharray="3 2" strokeWidth={1} label={{ value: "Min", position: "right", fontSize: 9, fill: "#22c55e" }} />
+                <ReferenceLine y={3.0} stroke="#22c55e" strokeDasharray="3 2" strokeWidth={1} label={{ value: "Max", position: "right", fontSize: 9, fill: "#22c55e" }} />
+                <Line type="monotone" dataKey="rate" stroke="#a78bfa" strokeWidth={2} dot={false} name="Dose Rate" />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--muted-foreground)' }}>
+              <p>Waiting for data...</p>
+            </div>
+          )}
           <div className="flex items-center gap-4 mt-2">
             <div className="flex items-center gap-1">
               <div style={{ width: 20, height: 1, background: "#22c55e", borderTop: "1px dashed #22c55e" }} />
@@ -315,115 +430,66 @@ export function AntiscalantDosing() {
         </div>
 
         {/* Monthly consumption */}
-        <div
-          className="rounded p-3"
-          style={{ background: "var(--card)", border: "1px solid var(--border)" }}
-        >
+        <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
           <div className="flex items-center justify-between mb-3">
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                color: "var(--muted-foreground)",
-                textTransform: "uppercase",
-                letterSpacing: "0.1em",
-              }}
-            >
+            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
               Monthly Consumption
             </span>
-            <span
-              style={{
-                fontSize: 9,
-                color: "var(--muted-foreground)",
-                fontFamily: "var(--font-mono)",
-              }}
-            >
-              kg · 2026 YTD
+            <span style={{ fontSize: 9, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>
+              kg · Rolling 6 Months
             </span>
           </div>
-          <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={antiscalantMonthly} margin={{ top: 4, right: 4, left: -15, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" vertical={false} />
-              <XAxis
-                dataKey="month"
-                tick={{ fontSize: 9, fill: "#4d7a9e" }}
-                axisLine={false}
-                tickLine={false}
-              />
-              <YAxis
-                tick={{ fontSize: 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }}
-                axisLine={false}
-                tickLine={false}
-              />
-              <Tooltip content={<CustomTooltip />} />
-              <Bar dataKey="consumption" fill="#a78bfa" radius={[3, 3, 0, 0]} name="Consumption (kg)" />
-            </BarChart>
-          </ResponsiveContainer>
+          {monthlyDosingData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={monthlyDosingData} margin={{ top: 4, right: 4, left: -15, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" vertical={false} />
+                <XAxis dataKey="month" tick={{ fontSize: 9, fill: "#4d7a9e" }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} axisLine={false} tickLine={false} />
+                <Tooltip content={<CustomTooltip />} />
+                <Bar dataKey="consumption" fill="#a78bfa" radius={[3, 3, 0, 0]} name="Consumption (kg)" />
+                <ReferenceLine y={dosingMetrics.monthlyConsumption} stroke="#4d7a9e" strokeDasharray="4 3" strokeWidth={1} label={{ value: "Target", position: "right", fontSize: 9, fill: "#4d7a9e" }} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--muted-foreground)' }}>
+              <p>Waiting for data...</p>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Consumption log table */}
-      <div
-        className="rounded p-3"
-        style={{ background: "var(--card)", border: "1px solid var(--border)" }}
-      >
-        <div
-          style={{
-            fontSize: 11,
-            fontWeight: 600,
-            color: "var(--muted-foreground)",
-            textTransform: "uppercase",
-            letterSpacing: "0.1em",
-            marginBottom: 10,
-          }}
-        >
+      <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>
           Recent Dosing Records
         </div>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr>
               {["Date", "Avg Dose Rate (mg/L)", "Consumption (kg)", "Production (m³)", "Dose/m³", "Status"].map((h) => (
-                <th
-                  key={h}
-                  style={{
-                    padding: "6px 10px",
-                    textAlign: "left",
-                    fontSize: 9,
-                    fontWeight: 600,
-                    color: "var(--muted-foreground)",
-                    letterSpacing: "0.08em",
-                    textTransform: "uppercase",
-                    borderBottom: "1px solid var(--border)",
-                  }}
-                >
+                <th key={h} style={{ padding: "6px 10px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.08em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>
                   {h}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {[
-              { date: "2026-06-06", rate: "2.42", cons: "4.6", prod: "4,224", dpm: "1.09", ok: true },
-              { date: "2026-06-05", rate: "2.38", cons: "4.4", prod: "4,080", dpm: "1.08", ok: true },
-              { date: "2026-06-04", rate: "2.45", cons: "4.7", prod: "4,218", dpm: "1.11", ok: true },
-              { date: "2026-06-03", rate: "2.61", cons: "5.1", prod: "4,350", dpm: "1.17", ok: false },
-              { date: "2026-06-02", rate: "2.40", cons: "4.5", prod: "3,960", dpm: "1.14", ok: true },
-            ].map((r, i) => (
+            {recentRecords.map((r, i) => (
               <tr key={r.date} style={{ background: i % 2 === 0 ? "var(--card)" : "var(--muted)" }}>
                 <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--foreground)", borderBottom: "1px solid var(--border)" }}>
                   {r.date}
                 </td>
-                <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: "#a78bfa", borderBottom: "1px solid var(--border)" }}>
+                <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: r.rate > 3.0 ? "#ef4444" : r.rate < 1.8 ? "#eab308" : "#a78bfa", borderBottom: "1px solid var(--border)" }}>
                   {r.rate}
                 </td>
                 <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--foreground)", borderBottom: "1px solid var(--border)" }}>
-                  {r.cons}
+                  {r.consumption}
                 </td>
                 <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--foreground)", borderBottom: "1px solid var(--border)" }}>
-                  {r.prod}
+                  {r.production}
                 </td>
                 <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>
-                  {r.dpm}
+                  {r.dosePerM3}
                 </td>
                 <td style={{ padding: "7px 10px", borderBottom: "1px solid var(--border)" }}>
                   <div className="flex items-center gap-1">
@@ -433,7 +499,7 @@ export function AntiscalantDosing() {
                       <AlertTriangle size={10} style={{ color: "#eab308" }} />
                     )}
                     <span style={{ fontSize: 9, color: r.ok ? "#22c55e" : "#eab308", fontWeight: 600 }}>
-                      {r.ok ? "NORMAL" : "ELEVATED"}
+                      {r.status}
                     </span>
                   </div>
                 </td>
@@ -445,3 +511,5 @@ export function AntiscalantDosing() {
     </div>
   );
 }
+
+export default AntiscalantDosing;

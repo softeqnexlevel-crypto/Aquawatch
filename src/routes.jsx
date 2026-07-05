@@ -1,7 +1,7 @@
-import { createBrowserRouter, Outlet, Navigate } from "react-router";
+// routes.jsx (or wherever your router is defined)
+import { createBrowserRouter, Outlet, Navigate, useLocation, useNavigate, RouterProvider } from "react-router";
 import { useState } from "react";
-import { useLocation, useNavigate } from "react-router";
-import { RouterProvider } from "react-router";
+import { DataProvider } from "./contexts/DataContext"; // ← ADD THIS
 
 // Components
 import { Sidebar } from "./components/Sidebar";
@@ -22,9 +22,10 @@ import TagRules from './components/TagRules';
 
 // Configuration Pages
 import Billing from "./components/Billing";
-import UserManagement from "./components/UserManagement";
+import { UserManagement } from "./components/UserManagement";
 
 import { alerts } from "./data/mockData";
+import { useAuth } from "./contexts/AuthContext";
 
 // ==================== PAGE CONFIG ====================
 const pageTitles = {
@@ -105,10 +106,10 @@ function DashboardLayout() {
 
   return (
     <div className={darkMode ? "dark" : ""} style={{ width: "100%", height: "100vh", display: "flex", overflow: "hidden", background: "var(--background)" }}>
-      <Sidebar 
-        activePage={currentPage} 
-        onNavigate={handleNavigate} 
-        alertCount={activeAlerts} 
+      <Sidebar
+        activePage={currentPage}
+        onNavigate={handleNavigate}
+        alertCount={activeAlerts}
       />
 
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
@@ -119,23 +120,28 @@ function DashboardLayout() {
           title={title}
         />
         <main style={{ flex: 1, overflow: "auto", padding: "24px" }}>
-          <Outlet />
+          {/* WRAP OUTLET WITH DATAPROVIDER */}
+          <DataProvider>
+            <Outlet />
+          </DataProvider>
         </main>
       </div>
     </div>
   );
 }
 
-// Protected Route
+// ==================== PROTECTED ROUTE ====================
 function ProtectedRoute({ children }) {
-  if (localStorage.getItem("aquaDashboardVisited") !== "true") {
+  const { user } = useAuth();
+  if (!user) {
     return <Navigate to="/" replace />;
   }
   return children;
 }
 
-// Landing Page Wrapper - FIXED
+// ==================== LANDING PAGE WRAPPER ====================
 function LandingPageWrapper() {
+  const navigate = useNavigate();
   const [darkMode, setDarkMode] = useState(() => {
     const saved = localStorage.getItem("aquaDarkMode");
     return saved !== null ? saved === "true" : true;
@@ -148,13 +154,12 @@ function LandingPageWrapper() {
   };
 
   const handleGetStarted = () => {
-    localStorage.setItem("aquaDashboardVisited", "true");
-    window.location.href = "/app";
+    navigate("/app");
   };
 
   return (
     <div className={darkMode ? "dark" : ""}>
-      <LandingPage 
+      <LandingPage
         onGetStarted={handleGetStarted}
         darkMode={darkMode}
         onToggleDark={handleToggleDark}

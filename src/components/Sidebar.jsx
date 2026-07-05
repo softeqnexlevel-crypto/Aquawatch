@@ -7,32 +7,42 @@ import {
   Receipt,
   UserPenIcon
 } from "lucide-react";
+import { useAuth } from "../contexts/AuthContext";
 
+// ── Nav items ──────────────────────────────────────────────────────────────────
+// IMPORTANT: `page` must match a key used inside ROLE_PERMISSIONS in roles.js.
+// Several items here share the same `page` on purpose — e.g. "Tank level",
+// "Production", "Filtration", and "Recovery" are all sub-views of the
+// "dashboard" permission, since roles.js doesn't define separate keys for them.
+// If you want those to be independently restrictable later, add new keys like
+// "tank-level", "production", "filtration", "recovery" to ROLE_PERMISSIONS
+// first, then update the `page` value below to match.
 const navItems = [
-  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, group: "Operations" },
-  { id: "boreholes", label: "Tank level", icon: Droplets, group: "Operations" },
-
-  { id: "production", label: "Production", icon: Activity, group: "Operations" },
-  { id: "antiscalant", label: "Antiscalant", icon: FlaskConical, group: "Operations" },
-  { id: "filtration", label: "Filtration", icon: Filter, group: "Operations" },
-  { id: "recovery", label: "Recovery", icon: RotateCcw, group: "Operations" },
-  { id: "maintenance", label: "Maintenance", icon: Wrench, group: "Management" },
-  { id: "analytics", label: "Analytics", icon: BarChart3, group: "Management" },
-  { id: "reports", label: "Reports", icon: FileText, group: "Management" },
-  { id: "alerts", label: "Alerts", icon: Bell, group: "System" },
-  { id: "settings", label: "Settings", icon: Settings, group: "System" },
-  { id: "Tagmanager", label: "Tag Manager", icon: Tags, group: "Configuration" },
-  { id: "billing", label: "Billing", icon: Receipt, group: "Configuration" },
-  { id: "user", label: "User", icon: UserPenIcon, group: "Configuration" },
-
-
-
+  { id: "dashboard",    label: "Dashboard",    icon: LayoutDashboard, group: "Operations",    page: "dashboard" },
+  { id: "boreholes",    label: "Tank level",    icon: Droplets,        group: "Operations",    page: "borehole" },
+  { id: "production",   label: "Production",    icon: Activity,        group: "Operations",    page: "dashboard" },
+  { id: "antiscalant",  label: "Antiscalant",   icon: FlaskConical,    group: "Operations",    page: "chemical" },
+  { id: "filtration",   label: "Filtration",    icon: Filter,          group: "Operations",    page: "dashboard" },
+  { id: "recovery",     label: "Recovery",      icon: RotateCcw,       group: "Operations",    page: "dashboard" },
+  { id: "maintenance",  label: "Maintenance",   icon: Wrench,          group: "Management",    page: "maintenance" },
+  { id: "analytics",    label: "Analytics",     icon: BarChart3,       group: "Management",    page: "analytics" },
+  { id: "reports",      label: "Reports",       icon: FileText,        group: "Management",    page: "reports" },
+  { id: "alerts",       label: "Alerts",        icon: Bell,            group: "System",         page: "dashboard" },
+  { id: "settings",     label: "Settings",      icon: Settings,        group: "System",         page: "settings" },
+  { id: "Tagmanager",   label: "Tag Manager",   icon: Tags,            group: "Configuration", page: "settings" },
+  { id: "billing",      label: "Billing",       icon: Receipt,         group: "Configuration", page: "settings" },
+  { id: "user",         label: "User",          icon: UserPenIcon,     group: "Configuration", page: "user-management" },
 ];
 
 export function Sidebar({ activePage, onNavigate, alertCount = 0 }) {
   const [collapsed, setCollapsed] = useState(false);
+  const { canAccess } = useAuth(); // 🔑 this was missing before
 
   const groups = ["Operations", "Management", "System", "Configuration"];
+
+  // 🔑 This is the actual fix: filter out anything the current role can't access
+  // BEFORE grouping/rendering, instead of rendering navItems unconditionally.
+  const visibleItems = navItems.filter(item => canAccess(item.page));
 
   return (
     <aside
@@ -44,12 +54,12 @@ export function Sidebar({ activePage, onNavigate, alertCount = 0 }) {
       }}
     >
       {/* Logo */}
-      <div 
-        className="flex items-center px-3 py-4 gap-2" 
+      <div
+        className="flex items-center px-3 py-4 gap-2"
         style={{ borderBottom: "1px solid rgba(14,165,233,0.08)", minHeight: 56 }}
       >
-        <div 
-          className="flex items-center justify-center rounded" 
+        <div
+          className="flex items-center justify-center rounded"
           style={{ width: 30, height: 30, background: "linear-gradient(135deg, #0ea5e9 0%, #06b6d4 100%)" }}
         >
           <Zap size={16} color="#020810" strokeWidth={2.5} />
@@ -69,23 +79,26 @@ export function Sidebar({ activePage, onNavigate, alertCount = 0 }) {
       {/* Navigation */}
       <nav className="flex-1 py-2 overflow-y-auto" style={{ scrollbarWidth: "none" }}>
         {groups.map((group) => {
-          const items = navItems.filter((i) => i.group === group);
+          // 🔑 Now filtering from visibleItems, not the raw navItems list
+          const items = visibleItems.filter((i) => i.group === group);
+          if (items.length === 0) return null; // hide empty group headers entirely
+
           return (
             <div key={group} className="mb-1">
               {!collapsed && (
-                <div style={{ 
-                  fontSize: 9, 
-                  fontWeight: 600, 
-                  color: "var(--muted-foreground)", 
-                  letterSpacing: "0.12em", 
-                  padding: "8px 12px 4px", 
-                  textTransform: "uppercase" 
+                <div style={{
+                  fontSize: 9,
+                  fontWeight: 600,
+                  color: "var(--muted-foreground)",
+                  letterSpacing: "0.12em",
+                  padding: "8px 12px 4px",
+                  textTransform: "uppercase"
                 }}>
                   {group}
                 </div>
               )}
               {collapsed && <div style={{ height: 4 }} />}
-              
+
               {items.map((item) => {
                 const active = activePage === item.id;
                 const Icon = item.icon;
