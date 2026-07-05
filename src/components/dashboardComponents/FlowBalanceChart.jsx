@@ -4,10 +4,11 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { COLORS } from '../Dashboard';
 
 export const FlowBalanceChart = ({ data }) => {
-  const feed = data?.['FEEDFlow']?.value || 0;
-  const permeate = data?.['Permeateflow']?.value || 0;
-  const concentrate = data?.['ConcentrateFlow']?.value || 0;
-  const recovery = data?.['SystemRecovery']?.value || 0;
+  // ✅ FIX: Use RO5- prefixed keys
+  const feed = data?.['RO5-FEEDFlow']?.value || 0;
+  const permeate = data?.['RO5-Permeateflow']?.value || 0;
+  const concentrate = data?.['RO5-ConcetrateFlow']?.value || 0;
+  const recovery = data?.['RO5-SystemRecovery']?.value || 0;
 
   const chartData = [
     { name: 'Feed', value: feed, color: COLORS.primary, label: 'Raw Water In' },

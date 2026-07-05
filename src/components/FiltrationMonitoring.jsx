@@ -3,9 +3,20 @@ import React, { useState, useMemo } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
 } from "recharts";
-import { AlertTriangle, CheckCircle, AlertCircle, Filter, Calendar, Clock } from "lucide-react";
+import { AlertTriangle, CheckCircle, AlertCircle, Filter, Clock } from "lucide-react";
 import { useData } from "../contexts/DataContext";
-import { format, subHours, subDays } from 'date-fns';
+import { format, subHours } from 'date-fns';
+
+// Stage 1 / Stage 2 differential pressure guideline: 1.5 bar (critical).
+// Warning is set at 80% of critical (1.2 bar) as an early-alert buffer —
+// adjust WARNING_RATIO if you want a different margin.
+const STAGE_DP_CRITICAL = 1.5;
+const STAGE_DP_WARNING = 1.2;
+
+// Media filter keeps its own, separate guideline — unrelated to the RO
+// stage membranes, so it is NOT changed here.
+const MEDIA_FILTER_DP_WARNING = 0.30;
+const MEDIA_FILTER_DP_CRITICAL = 0.50;
 
 // ===================== CUSTOM TOOLTIP =====================
 const CustomTooltip = ({ active, payload, label }) => {
@@ -126,81 +137,87 @@ export function FiltrationMonitoring() {
   const { sensorData, getValue, getHistory, lastUpdate } = useData();
   const [timeRange, setTimeRange] = useState('24h');
 
-  // Get real data from sensors
-  const stage1Delta = getValue('Stage1Delta') || 0;
-  const stage2Delta = getValue('Stage2Delta') || 0;
-  const filterDeltaP = getValue('MediaFilterDeltaP') || 0;
-  const mediaFilterIn = getValue('MediaFilterInPress') || 0;
-  const mediaFilterOut = getValue('MediaFilterOutPress') || 0;
+  // Use the correct RO5- prefixed keys
+  const stage1Delta = getValue('RO5-Stage1Delta') || 0;
+  const stage2Delta = getValue('RO5-Stage2Delta') || 0;
+  const filterDeltaP = getValue('RO5-MediaFilterDeltaP') || 0;
 
-  // Get history for trends
-  const stage1History = getHistory('Stage1Delta');
-  const stage2History = getHistory('Stage2Delta');
-  const filterHistory = getHistory('MediaFilterDeltaP');
+  // Get history with the correct RO5- prefixed keys
+  const stage1History = getHistory('RO5-Stage1Delta');
+  const stage2History = getHistory('RO5-Stage2Delta');
+  const filterHistory = getHistory('RO5-MediaFilterDeltaP');
 
   // Process data for chart
   const chartData = useMemo(() => {
     const now = new Date();
     const startTime = timeRange === '24h' ? subHours(now, 24) : subHours(now, 1);
     
-    // Get data from all three histories
     const dataMap = new Map();
     
     // Add stage1 data
-    stage1History.forEach(d => {
-      const time = new Date(d.time);
-      if (time >= startTime) {
-        const key = time.getTime();
-        if (!dataMap.has(key)) {
-          dataMap.set(key, { time: format(time, 'HH:mm') });
+    if (stage1History && stage1History.length > 0) {
+      stage1History.forEach(d => {
+        const time = new Date(d.time);
+        if (time >= startTime) {
+          const key = time.getTime();
+          if (!dataMap.has(key)) {
+            dataMap.set(key, { time: format(time, 'HH:mm') });
+          }
+          dataMap.get(key).filter1 = d.value;
         }
-        dataMap.get(key).filter1 = d.value;
-      }
-    });
+      });
+    }
     
     // Add stage2 data
-    stage2History.forEach(d => {
-      const time = new Date(d.time);
-      if (time >= startTime) {
-        const key = time.getTime();
-        if (!dataMap.has(key)) {
-          dataMap.set(key, { time: format(time, 'HH:mm') });
+    if (stage2History && stage2History.length > 0) {
+      stage2History.forEach(d => {
+        const time = new Date(d.time);
+        if (time >= startTime) {
+          const key = time.getTime();
+          if (!dataMap.has(key)) {
+            dataMap.set(key, { time: format(time, 'HH:mm') });
+          }
+          dataMap.get(key).filter2 = d.value;
         }
-        dataMap.get(key).filter2 = d.value;
-      }
-    });
+      });
+    }
     
     // Add filter data
-    filterHistory.forEach(d => {
-      const time = new Date(d.time);
-      if (time >= startTime) {
-        const key = time.getTime();
-        if (!dataMap.has(key)) {
-          dataMap.set(key, { time: format(time, 'HH:mm') });
+    if (filterHistory && filterHistory.length > 0) {
+      filterHistory.forEach(d => {
+        const time = new Date(d.time);
+        if (time >= startTime) {
+          const key = time.getTime();
+          if (!dataMap.has(key)) {
+            dataMap.set(key, { time: format(time, 'HH:mm') });
+          }
+          dataMap.get(key).filterDP = d.value;
         }
-        dataMap.get(key).filterDP = d.value;
-      }
-    });
+      });
+    }
     
     // Convert to array and sort by time
-    return Array.from(dataMap.values())
+    const result = Array.from(dataMap.values())
       .sort((a, b) => {
         const timeA = new Date(`2000-01-01 ${a.time}`).getTime();
         const timeB = new Date(`2000-01-01 ${b.time}`).getTime();
         return timeA - timeB;
       })
-      .slice(-50); // Keep last 50 points
+      .slice(-50);
+    
+    return result;
   }, [stage1History, stage2History, filterHistory, timeRange]);
 
   // Generate filter events from real data
   const filterEvents = useMemo(() => {
     const events = [];
     
-    // Add events based on pressure changes
-    if (stage1History.length > 10) {
+    // Stage 1 / Stage 2 now flag against the real 1.5 bar guideline
+    // (warning at 1.2 bar), not the old placeholder 0.50 bar.
+    if (stage1History && stage1History.length > 10) {
       const recent = stage1History.slice(-10);
       const avg = recent.reduce((sum, d) => sum + d.value, 0) / recent.length;
-      if (avg > 0.5) {
+      if (avg > STAGE_DP_WARNING) {
         events.push({
           time: format(new Date(), 'yyyy-MM-dd HH:mm'),
           filter: "Stage 1",
@@ -213,10 +230,10 @@ export function FiltrationMonitoring() {
       }
     }
     
-    if (stage2History.length > 10) {
+    if (stage2History && stage2History.length > 10) {
       const recent = stage2History.slice(-10);
       const avg = recent.reduce((sum, d) => sum + d.value, 0) / recent.length;
-      if (avg > 0.4) {
+      if (avg > STAGE_DP_WARNING) {
         events.push({
           time: format(new Date(), 'yyyy-MM-dd HH:mm'),
           filter: "Stage 2",
@@ -229,10 +246,11 @@ export function FiltrationMonitoring() {
       }
     }
     
-    if (filterHistory.length > 10) {
+    // Media filter keeps its own separate threshold
+    if (filterHistory && filterHistory.length > 10) {
       const recent = filterHistory.slice(-10);
       const avg = recent.reduce((sum, d) => sum + d.value, 0) / recent.length;
-      if (avg > 0.3) {
+      if (avg > MEDIA_FILTER_DP_WARNING) {
         events.push({
           time: format(new Date(), 'yyyy-MM-dd HH:mm'),
           filter: "Media Filter",
@@ -245,42 +263,20 @@ export function FiltrationMonitoring() {
       }
     }
     
-    // Add some historical events if we have enough data
-    if (stage1History.length > 50) {
-      const older = stage1History.slice(-50, -40);
-      const olderAvg = older.reduce((sum, d) => sum + d.value, 0) / older.length;
-      const recent = stage1History.slice(-10);
-      const recentAvg = recent.reduce((sum, d) => sum + d.value, 0) / recent.length;
-      
-      if (recentAvg < olderAvg * 0.7) {
-        events.push({
-          time: format(subHours(new Date(), 2), 'yyyy-MM-dd HH:mm'),
-          filter: "Stage 1",
-          event: "Backwash",
-          before: olderAvg.toFixed(2),
-          after: recentAvg.toFixed(2),
-          dur: "18 min",
-          op: "P. Ochieng"
-        });
-      }
-    }
-    
-    // Sort by time (most recent first) and limit to 5
     return events.slice(0, 5);
   }, [stage1History, stage2History, filterHistory]);
 
-  // Calculate if filters are healthy
-  const isHealthy = (value, warning) => value < warning;
+  // Latest values for gauges - use the current sensor values
+  const latestF1 = chartData.length > 0 ? chartData[chartData.length - 1]?.filter1 || stage1Delta : stage1Delta;
+  const latestF2 = chartData.length > 0 ? chartData[chartData.length - 1]?.filter2 || stage2Delta : stage2Delta;
+  const latestFilterDP = chartData.length > 0 ? chartData[chartData.length - 1]?.filterDP || filterDeltaP : filterDeltaP;
+
+  // Health status function
   const healthStatus = (value, warning, critical) => {
     if (value >= critical) return { status: 'Critical', color: '#ef4444', icon: AlertTriangle };
     if (value >= warning) return { status: 'Warning', color: '#eab308', icon: AlertCircle };
     return { status: 'Normal', color: '#22c55e', icon: CheckCircle };
   };
-
-  // Latest values for gauges
-  const latestF1 = chartData.length > 0 ? chartData[chartData.length - 1]?.filter1 || stage1Delta : stage1Delta;
-  const latestF2 = chartData.length > 0 ? chartData[chartData.length - 1]?.filter2 || stage2Delta : stage2Delta;
-  const latestFilterDP = chartData.length > 0 ? chartData[chartData.length - 1]?.filterDP || filterDeltaP : filterDeltaP;
 
   return (
     <div className="flex flex-col gap-4 p-4 overflow-auto h-full" style={{ scrollbarWidth: "none" }}>
@@ -331,24 +327,24 @@ export function FiltrationMonitoring() {
       <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
         <PressureGauge 
           value={latestF1} 
-          warning={0.50} 
-          critical={0.65} 
+          warning={STAGE_DP_WARNING} 
+          critical={STAGE_DP_CRITICAL} 
           label="Stage 1 Delta P" 
           filterNum={1} 
           lastUpdate={lastUpdate}
         />
         <PressureGauge 
           value={latestF2} 
-          warning={0.50} 
-          critical={0.65} 
+          warning={STAGE_DP_WARNING} 
+          critical={STAGE_DP_CRITICAL} 
           label="Stage 2 Delta P" 
           filterNum={2}
           lastUpdate={lastUpdate}
         />
         <PressureGauge 
           value={latestFilterDP} 
-          warning={0.30} 
-          critical={0.50} 
+          warning={MEDIA_FILTER_DP_WARNING} 
+          critical={MEDIA_FILTER_DP_CRITICAL} 
           label="Media Filter Delta P" 
           filterNum={3}
           lastUpdate={lastUpdate}
@@ -376,14 +372,22 @@ export function FiltrationMonitoring() {
             </div>
             <div className="flex items-center gap-1.5">
               <div style={{ width: 16, height: 1, borderTop: "1px dashed #eab308" }} />
-              <span style={{ fontSize: 9, color: "#eab308" }}>Warning</span>
+              <span style={{ fontSize: 9, color: "#eab308" }}>Stage 1/2 Warning (1.2 bar)</span>
             </div>
             <div className="flex items-center gap-1.5">
               <div style={{ width: 16, height: 1, borderTop: "1px dashed #ef4444" }} />
-              <span style={{ fontSize: 9, color: "#ef4444" }}>Critical</span>
+              <span style={{ fontSize: 9, color: "#ef4444" }}>Stage 1/2 Critical (1.5 bar)</span>
             </div>
           </div>
         </div>
+
+        {/* Note: the Media Filter's own guideline (0.30 / 0.50 bar) is much
+            lower than the Stage 1/2 guideline (1.2 / 1.5 bar) plotted below.
+            The reference lines here reflect the Stage 1/2 threshold only —
+            they will look conservative relative to the Media Filter trace.
+            If you want Media Filter's own threshold annotated too, it needs
+            a second y-axis or its own chart, since one shared linear scale
+            can't cleanly show two very different threshold pairs. */}
         
         {chartData.length > 0 ? (
           <ResponsiveContainer width="100%" height={200}>
@@ -401,11 +405,11 @@ export function FiltrationMonitoring() {
                 axisLine={false} 
                 tickLine={false} 
                 tickFormatter={v => v.toFixed(2)} 
-                domain={[0, 0.8]} 
+                domain={[0, 1.8]} 
               />
               <Tooltip content={<CustomTooltip />} />
-              <ReferenceLine y={0.50} stroke="#eab308" strokeDasharray="4 3" strokeWidth={1} />
-              <ReferenceLine y={0.65} stroke="#ef4444" strokeDasharray="4 3" strokeWidth={1} />
+              <ReferenceLine y={STAGE_DP_WARNING} stroke="#eab308" strokeDasharray="4 3" strokeWidth={1} />
+              <ReferenceLine y={STAGE_DP_CRITICAL} stroke="#ef4444" strokeDasharray="4 3" strokeWidth={1} />
               <Line 
                 type="monotone" 
                 dataKey="filter1" 
@@ -437,6 +441,7 @@ export function FiltrationMonitoring() {
           </ResponsiveContainer>
         ) : (
           <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--muted-foreground)' }}>
+            <AlertCircle size={24} style={{ margin: '0 auto 8px', opacity: 0.5 }} />
             <p>Waiting for data...</p>
             <p style={{ fontSize: 10, marginTop: 4 }}>Data will appear once available</p>
           </div>
@@ -450,25 +455,22 @@ export function FiltrationMonitoring() {
             label: "Stage 1 Delta", 
             value: latestF1.toFixed(3), 
             unit: "bar", 
-            status: healthStatus(latestF1, 0.50, 0.65),
-            icon: latestF1 >= 0.65 ? AlertTriangle : latestF1 >= 0.50 ? AlertCircle : CheckCircle
+            status: healthStatus(latestF1, STAGE_DP_WARNING, STAGE_DP_CRITICAL),
           },
           { 
             label: "Stage 2 Delta", 
             value: latestF2.toFixed(3), 
             unit: "bar", 
-            status: healthStatus(latestF2, 0.50, 0.65),
-            icon: latestF2 >= 0.65 ? AlertTriangle : latestF2 >= 0.50 ? AlertCircle : CheckCircle
+            status: healthStatus(latestF2, STAGE_DP_WARNING, STAGE_DP_CRITICAL),
           },
           { 
             label: "Media Filter Delta", 
             value: latestFilterDP.toFixed(3), 
             unit: "bar", 
-            status: healthStatus(latestFilterDP, 0.30, 0.50),
-            icon: latestFilterDP >= 0.50 ? AlertTriangle : latestFilterDP >= 0.30 ? AlertCircle : CheckCircle
+            status: healthStatus(latestFilterDP, MEDIA_FILTER_DP_WARNING, MEDIA_FILTER_DP_CRITICAL),
           },
         ].map(item => {
-          const StatusIcon = item.icon;
+          const StatusIcon = item.status.icon;
           return (
             <div key={item.label} className="rounded p-3" style={{ background: "var(--card)", border: `1px solid ${item.status.color}30` }}>
               <div style={{ fontSize: 10, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
@@ -493,7 +495,7 @@ export function FiltrationMonitoring() {
         })}
       </div>
 
-      {/* Filter events table with real data */}
+      {/* Filter events table */}
       <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
         <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>
           <Clock size={12} style={{ display: 'inline', marginRight: 4 }} />

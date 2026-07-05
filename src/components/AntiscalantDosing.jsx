@@ -1,7 +1,7 @@
 // components/AntiscalantDosing.jsx
 import React, { useState, useMemo } from "react";
 import {
-  AreaChart, Area, LineChart, Line, BarChart, Bar,
+  LineChart, Line, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   ReferenceLine
 } from "recharts";
@@ -79,16 +79,27 @@ export function AntiscalantDosing() {
   const { sensorData, getValue, getHistory, lastUpdate } = useData();
   const [timeRange, setTimeRange] = useState('24h');
 
-  // ===================== GET REAL DATA =====================
-  const feedFlow = getValue('FEEDFlow') || 0;
-  const permeateFlow = getValue('Permeateflow') || 0;
-  const recovery = getValue('SystemRecovery') || 0;
-  const pureWaterEC = getValue('PureWaterEc') || 0;
-  const roPressure = getValue('ROPressure') || 0;
+  // ✅ FIX: Use the correct RO5- prefixed keys
+  const feedFlow = getValue('RO5-FEEDFlow') || 0;
+  const permeateFlow = getValue('RO5-Permeateflow') || 0;
+  const recovery = getValue('RO5-SystemRecovery') || 0;
+  const pureWaterEC = getValue('RO5-PureWaterEc') || 0;
+  const roPressure = getValue('RO5-ROPressure') || 0;
+  const dosingActive = getValue('RO5-AntiscalantDosingActive') || 0;
 
   // Get history for trends
-  const feedHistory = getHistory('FEEDFlow');
-  const permeateHistory = getHistory('Permeateflow');
+  const feedHistory = getHistory('RO5-FEEDFlow');
+  const permeateHistory = getHistory('RO5-Permeateflow');
+
+  // Debug log
+  console.log('Antiscalant Data:', {
+    feedFlow,
+    permeateFlow,
+    recovery,
+    pureWaterEC,
+    roPressure,
+    dosingActive
+  });
 
   // ===================== CALCULATE DOSING METRICS =====================
   const dosingMetrics = useMemo(() => {
@@ -124,7 +135,7 @@ export function AntiscalantDosing() {
 
   // ===================== GENERATE HOURLY DOSING DATA =====================
   const hourlyDosingData = useMemo(() => {
-    if (feedHistory.length === 0) return [];
+    if (!feedHistory || feedHistory.length === 0) return [];
     
     const now = new Date();
     const startTime = timeRange === '24h' ? subHours(now, 24) : subHours(now, 1);
@@ -176,10 +187,10 @@ export function AntiscalantDosing() {
     
     for (let i = 0; i < 7; i++) {
       const date = subDays(now, i);
-      const dayFeed = feedHistory.filter(d => {
+      const dayFeed = feedHistory && feedHistory.length > 0 ? feedHistory.filter(d => {
         const day = new Date(d.time);
         return day >= startOfDay(date) && day < startOfDay(date) + 86400000;
-      });
+      }) : [];
       
       const avgFeed = dayFeed.length > 0 ? dayFeed.reduce((sum, d) => sum + d.value, 0) / dayFeed.length : feedFlow;
       const rate = 2.0 + (avgFeed / 100) * 0.5;
@@ -250,8 +261,20 @@ export function AntiscalantDosing() {
       });
     }
     
+    // Check if dosing is active
+    if (dosingActive === 0) {
+      alertList.push({
+        id: 'ALERT-005',
+        type: 'Dosing System Off',
+        equipment: 'Antiscalant Dosing',
+        value: 'System Off',
+        threshold: 'Should be ON',
+        severity: 'critical'
+      });
+    }
+    
     return alertList;
-  }, [dosingMetrics, pureWaterEC]);
+  }, [dosingMetrics, pureWaterEC, dosingActive]);
 
   // ===================== TIME RANGE BUTTONS =====================
   const TimeRangeButtons = () => (
@@ -289,11 +312,25 @@ export function AntiscalantDosing() {
             Real-time dosing monitoring • Last updated: {lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--'}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Clock size={14} style={{ color: "var(--muted-foreground)" }} />
-          <span style={{ fontSize: 10, color: "var(--muted-foreground)" }}>
-            Target: 2.0-3.0 mg/L
-          </span>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <div style={{ 
+              width: 8, 
+              height: 8, 
+              borderRadius: '50%', 
+              background: dosingActive === 1 ? '#22c55e' : '#ef4444',
+              boxShadow: dosingActive === 1 ? '0 0 8px rgba(34,197,94,0.4)' : 'none'
+            }} />
+            <span style={{ fontSize: 10, fontWeight: 600, color: dosingActive === 1 ? '#22c55e' : '#ef4444' }}>
+              {dosingActive === 1 ? '● RUNNING' : '● STOPPED'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Clock size={14} style={{ color: "var(--muted-foreground)" }} />
+            <span style={{ fontSize: 10, color: "var(--muted-foreground)" }}>
+              Target: 2.0-3.0 mg/L
+            </span>
+          </div>
         </div>
       </div>
 

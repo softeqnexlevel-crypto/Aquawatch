@@ -65,21 +65,28 @@ const getTagIcon = (name) => {
   return Server;
 };
 
-// ===================== ABOX SENSOR CONFIG =====================
+// ✅ FIX: keys use the short RO5- prefix only, matching what DataContext's
+// getValue()/getHistory() actually index by (the old 'siemens200smart-RO5-'
+// prefix is the RAW backend parameter name, before DataContext's aliasing
+// strips it down to 'RO5-X' — using the raw form here was why every ABOX
+// sensor row showed 0.00 despite the connection being live).
 const ABOX_SENSORS = [
-  { key: 'siemens200smart-FEEDFlow', name: 'FEED_FLOW', desc: 'Feed Flow Rate - Raw Water Inlet', address: 'VW210', unit: 'm³/h', icon: Droplet },
-  { key: 'siemens200smart-Permeateflow', name: 'PERM_FLOW', desc: 'Permeate Flow Rate - Product Water', address: 'VW211', unit: 'm³/h', icon: Droplet },
-  { key: 'siemens200smart-ConcetrateFlow', name: 'CONC_FLOW', desc: 'Concentrate Flow Rate - Reject Stream', address: 'VW212', unit: 'm³/h', icon: Droplet },
-  { key: 'siemens200smart-ROPressure', name: 'RO_PRESS', desc: 'Reverse Osmosis Operating Pressure', address: 'VW208', unit: 'bar', icon: Gauge },
-  { key: 'siemens200smart-InterstagePress', name: 'INT_PRESS', desc: 'Interstage Pressure Between Stages', address: 'VW209', unit: 'bar', icon: Gauge },
-  { key: 'siemens200smart-ConcetratePress', name: 'CONC_PRESS', desc: 'Concentrate Stream Pressure', address: 'VW213', unit: 'bar', icon: Gauge },
-  { key: 'siemens200smart-Stage1Delta', name: 'STG1_DP', desc: 'Stage 1 Differential Pressure', address: 'VW401', unit: 'bar', icon: Gauge },
-  { key: 'siemens200smart-Stage2Delta', name: 'STG2_DP', desc: 'Stage 2 Differential Pressure', address: 'VW402', unit: 'bar', icon: Gauge },
-  { key: 'siemens200smart-MediaFilterInPress', name: 'FILT_IN', desc: 'Media Filter Inlet Pressure', address: 'VW305', unit: 'bar', icon: Filter },
-  { key: 'siemens200smart-MediaFilterOutPress', name: 'FILT_OUT', desc: 'Media Filter Outlet Pressure', address: 'VW306', unit: 'bar', icon: Filter },
-  { key: 'siemens200smart-MediaFilterDeltaP', name: 'FILT_DP', desc: 'Media Filter Differential Pressure', address: 'VW307', unit: 'bar', icon: Filter },
-  { key: 'siemens200smart-SystemRecovery', name: 'RECOVERY', desc: 'System Recovery Rate', address: 'VW500', unit: '%', icon: Activity },
-  { key: 'siemens200smart-PureWaterEc', name: 'EC_PRODUCT', desc: 'Product Water Electrical Conductivity', address: 'VW601', unit: 'µS/cm', icon: Filter },
+  { key: 'RO5-FEEDFlow', name: 'FEED_FLOW', desc: 'Feed Flow Rate - Raw Water Inlet', address: 'VW210', unit: 'm³/h', icon: Droplet },
+  { key: 'RO5-Permeateflow', name: 'PERM_FLOW', desc: 'Permeate Flow Rate - Product Water', address: 'VW211', unit: 'm³/h', icon: Droplet },
+  { key: 'RO5-ConcetrateFlow', name: 'CONC_FLOW', desc: 'Concentrate Flow Rate - Reject Stream', address: 'VW212', unit: 'm³/h', icon: Droplet },
+  { key: 'RO5-ROPressure', name: 'RO_PRESS', desc: 'Reverse Osmosis Operating Pressure', address: 'VW208', unit: 'bar', icon: Gauge },
+  { key: 'RO5-InterstagePress', name: 'INT_PRESS', desc: 'Interstage Pressure Between Stages', address: 'VW209', unit: 'bar', icon: Gauge },
+  { key: 'RO5-ConcetratePress', name: 'CONC_PRESS', desc: 'Concentrate Stream Pressure', address: 'VW213', unit: 'bar', icon: Gauge },
+  { key: 'RO5-Stage1Delta', name: 'STG1_DP', desc: 'Stage 1 Differential Pressure', address: 'VW401', unit: 'bar', icon: Gauge },
+  { key: 'RO5-Stage2Delta', name: 'STG2_DP', desc: 'Stage 2 Differential Pressure', address: 'VW402', unit: 'bar', icon: Gauge },
+  { key: 'RO5-MediaFilterInPress', name: 'FILT_IN', desc: 'Media Filter Inlet Pressure', address: 'VW305', unit: 'bar', icon: Filter },
+  { key: 'RO5-MediaFilterOutPress', name: 'FILT_OUT', desc: 'Media Filter Outlet Pressure', address: 'VW306', unit: 'bar', icon: Filter },
+  { key: 'RO5-MediaFilterDeltaP', name: 'FILT_DP', desc: 'Media Filter Differential Pressure', address: 'VW307', unit: 'bar', icon: Filter },
+  { key: 'RO5-SystemRecovery', name: 'RECOVERY', desc: 'System Recovery Rate', address: 'VW500', unit: '%', icon: Activity },
+  { key: 'RO5-PureWaterEc', name: 'EC_PRODUCT', desc: 'Product Water Electrical Conductivity', address: 'VW601', unit: 'µS/cm', icon: Filter },
+  { key: 'RO5-SystemOperation', name: 'SYS_OP', desc: 'System Operation Status', address: 'VW700', unit: '', icon: Activity },
+  { key: 'RO5-SystemMode', name: 'SYS_MODE', desc: 'System Mode', address: 'VW701', unit: '', icon: Activity },
+  { key: 'RO5-AntiscalantDosingActive', name: 'DOSING_ACTIVE', desc: 'Antiscalant Dosing Active', address: 'VW702', unit: '', icon: Filter },
 ];
 
 // ===================== MAIN COMPONENT =====================
@@ -101,7 +108,7 @@ export default function TagManager() {
         data[sensor.key] = {
           value: value,
           timestamp: lastUpdate || new Date().toISOString(),
-          history: getHistory(sensor.key)
+          history: getHistory(sensor.key) || []
         };
       }
     });
@@ -124,7 +131,10 @@ export default function TagManager() {
       const data = liveData[sensor.key];
       const history = data?.history || [];
       
-      if (data && data.value !== undefined && data.value !== null) {
+      // Check if we have data for this sensor
+      const hasData = data && data.value !== undefined && data.value !== null;
+      
+      if (hasData) {
         const lastVal = history.length > 0 ? history[history.length - 1]?.value || data.value : data.value;
         const status = connected ? 'Live' : 'Offline';
         
@@ -148,14 +158,16 @@ export default function TagManager() {
     });
 
     // ----- CALCULATED TAGS FROM ABOX DATA -----
-    const feedFlow = getValue('siemens200smart-FEEDFlow') || 0;
-    const permeateFlow = getValue('siemens200smart-Permeateflow') || 0;
-    const recovery = getValue('siemens200smart-SystemRecovery') || 0;
-    const roPressure = getValue('siemens200smart-ROPressure') || 0;
-    const pureWaterEC = getValue('siemens200smart-PureWaterEc') || 0;
-    const stage1Delta = getValue('siemens200smart-Stage1Delta') || 0;
-    const filterDeltaP = getValue('siemens200smart-MediaFilterDeltaP') || 0;
-    const concentrateFlow = getValue('siemens200smart-ConcetrateFlow') || 0;
+    const feedFlow = getValue('RO5-FEEDFlow') || 0;
+    const permeateFlow = getValue('RO5-Permeateflow') || 0;
+    const recovery = getValue('RO5-SystemRecovery') || 0;
+    const roPressure = getValue('RO5-ROPressure') || 0;
+    const pureWaterEC = getValue('RO5-PureWaterEc') || 0;
+    const stage1Delta = getValue('RO5-Stage1Delta') || 0;
+    const filterDeltaP = getValue('RO5-MediaFilterDeltaP') || 0;
+    const concentrateFlow = getValue('RO5-ConcetrateFlow') || 0;
+    const dosingActive = getValue('RO5-AntiscalantDosingActive') || 0;
+    const systemOperation = getValue('RO5-SystemOperation') || 0;
 
     // 1. Antiscalant Dosing Rate
     const dosingRate = 2.0 + (feedFlow / 100) * 0.5;
@@ -166,7 +178,7 @@ export default function TagManager() {
       address: 'CALC-001',
       value: Math.min(Math.max(dosingRate, 1.8), 3.5),
       unit: 'mg/L',
-      status: 'Live',
+      status: connected ? 'Live' : 'Offline',
       source: 'ABOX-CALC',
       lastUpdate: lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--',
       key: 'DosingRate',
@@ -185,7 +197,7 @@ export default function TagManager() {
       address: 'CALC-002',
       value: saltRejection,
       unit: '%',
-      status: 'Live',
+      status: connected ? 'Live' : 'Offline',
       source: 'ABOX-CALC',
       lastUpdate: lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--',
       key: 'SaltRejection',
@@ -204,7 +216,7 @@ export default function TagManager() {
       address: 'CALC-003',
       value: energyPerM3,
       unit: 'kWh/m³',
-      status: 'Live',
+      status: connected ? 'Live' : 'Offline',
       source: 'ABOX-CALC',
       lastUpdate: lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--',
       key: 'EnergyPerM3',
@@ -223,7 +235,7 @@ export default function TagManager() {
       address: 'CALC-004',
       value: membraneHealth,
       unit: '%',
-      status: 'Live',
+      status: connected ? 'Live' : 'Offline',
       source: 'ABOX-CALC',
       lastUpdate: lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--',
       key: 'MembraneHealth',
@@ -242,7 +254,7 @@ export default function TagManager() {
       address: 'CALC-005',
       value: massBalance,
       unit: 'm³/h',
-      status: 'Live',
+      status: connected ? 'Live' : 'Offline',
       source: 'ABOX-CALC',
       lastUpdate: lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--',
       key: 'MassBalance',
@@ -261,12 +273,30 @@ export default function TagManager() {
       address: 'CALC-006',
       value: prodEfficiency,
       unit: '%',
-      status: 'Live',
+      status: connected ? 'Live' : 'Offline',
       source: 'ABOX-CALC',
       lastUpdate: lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--',
       key: 'ProdEfficiency',
       history: [],
       icon: Activity,
+      calculated: true,
+      rawKey: null
+    });
+
+    // 7. Dosing Status
+    tagList.push({
+      id: id++,
+      name: 'DOSING_STATUS',
+      desc: 'Antiscalant Dosing System Status',
+      address: 'CALC-007',
+      value: dosingActive === 1 ? 'Running' : 'Stopped',
+      unit: '',
+      status: connected ? 'Live' : 'Offline',
+      source: 'ABOX-CALC',
+      lastUpdate: lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--',
+      key: 'DosingStatus',
+      history: [],
+      icon: Filter,
       calculated: true,
       rawKey: null
     });
@@ -300,11 +330,17 @@ export default function TagManager() {
     }
     if (tag?.calculated) {
       const base = tag.value || 0;
+      if (typeof base === 'string') {
+        return Array.from({ length: 20 }, () => Math.random() * 10);
+      }
       return Array.from({ length: 20 }, (_, i) => 
         parseFloat((base + (Math.random() - 0.5) * Math.abs(base) * 0.08).toFixed(2))
       );
     }
     const base = tag?.value || 0;
+    if (typeof base === 'string') {
+      return Array.from({ length: 20 }, () => Math.random() * 10);
+    }
     return Array.from({ length: 20 }, (_, i) => 
       parseFloat((base + (Math.random() - 0.5) * Math.abs(base) * 0.05).toFixed(2))
     );

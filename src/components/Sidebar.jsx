@@ -9,21 +9,14 @@ import {
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 
-// ── Nav items ──────────────────────────────────────────────────────────────────
-// IMPORTANT: `page` must match a key used inside ROLE_PERMISSIONS in roles.js.
-// Several items here share the same `page` on purpose — e.g. "Tank level",
-// "Production", "Filtration", and "Recovery" are all sub-views of the
-// "dashboard" permission, since roles.js doesn't define separate keys for them.
-// If you want those to be independently restrictable later, add new keys like
-// "tank-level", "production", "filtration", "recovery" to ROLE_PERMISSIONS
-// first, then update the `page` value below to match.
+
 const navItems = [
   { id: "dashboard",    label: "Dashboard",    icon: LayoutDashboard, group: "Operations",    page: "dashboard" },
   { id: "boreholes",    label: "Tank level",    icon: Droplets,        group: "Operations",    page: "borehole" },
   { id: "production",   label: "Production",    icon: Activity,        group: "Operations",    page: "dashboard" },
   { id: "antiscalant",  label: "Antiscalant",   icon: FlaskConical,    group: "Operations",    page: "chemical" },
   { id: "filtration",   label: "Filtration",    icon: Filter,          group: "Operations",    page: "dashboard" },
-  { id: "recovery",     label: "Recovery",      icon: RotateCcw,       group: "Operations",    page: "dashboard" },
+  { id: "recovery",     label: "System Recovery",      icon: RotateCcw,       group: "Operations",    page: "dashboard" },
   { id: "maintenance",  label: "Maintenance",   icon: Wrench,          group: "Management",    page: "maintenance" },
   { id: "analytics",    label: "Analytics",     icon: BarChart3,       group: "Management",    page: "analytics" },
   { id: "reports",      label: "Reports",       icon: FileText,        group: "Management",    page: "reports" },

@@ -1,4 +1,4 @@
-// components/BoreholeManagement.jsx
+// components/FeedTankManagement.jsx
 import React, { useState, useMemo } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from "recharts";
 import { MapPin, ChevronRight, Activity, Clock, Wrench, Droplet, Filter, AlertCircle } from "lucide-react";
@@ -13,6 +13,8 @@ const StatusBadge = ({ status }) => {
     Standby: { bg: "rgba(14,165,233,0.1)", color: "#0ea5e9", dot: "#0ea5e9" },
     Offline: { bg: "rgba(239,68,68,0.1)", color: "#ef4444", dot: "#ef4444" },
     Warning: { bg: "rgba(245,158,11,0.1)", color: "#f59e0b", dot: "#f59e0b" },
+    Empty: { bg: "rgba(239,68,68,0.15)", color: "#ef4444", dot: "#ef4444" },
+    Refilling: { bg: "rgba(14,165,233,0.1)", color: "#0ea5e9", dot: "#0ea5e9" },
   }[status] || { bg: "rgba(77,122,158,0.1)", color: "#4d7a9e", dot: "#4d7a9e" };
 
   return (
@@ -52,40 +54,80 @@ const CustomTooltip = ({ active, payload, label }) => {
 };
 
 // ===================== MAIN COMPONENT =====================
-export function BoreholeManagement() {
+export function FeedTankManagement() {
   const { sensorData, getValue, getHistory, lastUpdate } = useData();
   const [selected, setSelected] = useState(null);
   const [filterStatus, setFilterStatus] = useState('All');
 
-  // ===================== GET REAL DATA =====================
-  const feedFlow = getValue('FEEDFlow') || 0;
-  const permeateFlow = getValue('Permeateflow') || 0;
-  const concentrateFlow = getValue('ConcetrateFlow') || 0;
-  const roPressure = getValue('ROPressure') || 0;
-  const recovery = getValue('SystemRecovery') || 0;
-  const pureWaterEC = getValue('PureWaterEc') || 0;
-  const stage1Delta = getValue('Stage1Delta') || 0;
-  const stage2Delta = getValue('Stage2Delta') || 0;
-  const filterDeltaP = getValue('MediaFilterDeltaP') || 0;
+  // Get real data from sensors
+  const feedFlow = getValue('RO5-FEEDFlow') || 0;
+  const permeateFlow = getValue('RO5-Permeateflow') || 0;
+  const concentrateFlow = getValue('RO5-ConcetrateFlow') || 0;
+  const roPressure = getValue('RO5-ROPressure') || 0;
+  const recovery = getValue('RO5-SystemRecovery') || 0;
+  const pureWaterEC = getValue('RO5-PureWaterEc') || 0;
+  const stage1Delta = getValue('RO5-Stage1Delta') || 0;
+  const stage2Delta = getValue('RO5-Stage2Delta') || 0;
+  const filterDeltaP = getValue('RO5-MediaFilterDeltaP') || 0;
+  const feedTankLevel = getValue('RO5-FeedTankLevel') || 0;
 
-  // ===================== GENERATE BOREHOLES FROM REAL DATA =====================
-  const boreholes = useMemo(() => {
+  // Get history for trends
+  const feedHistory = getHistory('RO5-FEEDFlow');
+  const tankHistory = getHistory('RO5-FeedTankLevel');
+
+  // Debug log
+  console.log('Feed Tank Data:', {
+    feedFlow,
+    permeateFlow,
+    concentrateFlow,
+    roPressure,
+    recovery,
+    feedTankLevel,
+    filterDeltaP
+  });
+
+  // ===================== GENERATE FEED TANKS FROM REAL DATA =====================
+  const feedTanks = useMemo(() => {
     const now = new Date();
-    const today = format(now, 'yyyy-MM-dd');
-    const nextMonth = format(subDays(now, -30), 'yyyy-MM-dd');
+    
+    // Calculate tank levels based on feed tank level sensor
+    // Tank A - Main tank (closest to sensor reading)
+    const tankALevel = Math.min(100, Math.max(5, feedTankLevel));
+    // Tank B - Secondary (slightly lower)
+    const tankBLevel = Math.min(100, Math.max(5, feedTankLevel * 0.75 + Math.random() * 10));
+    // Tank C - Reserve (lower)
+    const tankCLevel = Math.min(100, Math.max(5, feedTankLevel * 0.5 + Math.random() * 10));
+    // Tank D - Emergency reserve
+    const tankDLevel = Math.min(100, Math.max(5, feedTankLevel * 0.3 + Math.random() * 10));
 
-    // Generate boreholes based on real sensor data
+    // Determine status based on levels
+    const getStatus = (level) => {
+      if (level > 70) return "Active";
+      if (level > 40) return "Standby";
+      if (level > 15) return "Warning";
+      return "Empty";
+    };
+
+    // Determine health based on level and system performance
+    const getHealth = (level) => {
+      const baseHealth = (level / 100) * 70 + 30;
+      const recoveryBonus = Math.min(20, (recovery / 100) * 20);
+      return Math.min(100, baseHealth + recoveryBonus - (stage1Delta > 0.5 ? 10 : 0));
+    };
+
     return [
       {
-        id: "BH-001",
-        name: "Main Production Well",
-        location: "North Field",
-        status: feedFlow > 50 ? "Active" : feedFlow > 20 ? "Standby" : "Offline",
-        flowRate: feedFlow * 0.4,
-        dailyProd: feedFlow * 24 * 0.4,
-        monthlyProd: feedFlow * 24 * 30 * 0.4,
+        id: "FT-A",
+        name: "Main Feed Tank A",
+        location: "North Plant",
+        status: getStatus(tankALevel),
+        level: tankALevel,
+        capacity: 500,
+        volume: (tankALevel / 100) * 500,
+        dailyConsumption: feedFlow * 24 * 0.4,
+        monthlyConsumption: feedFlow * 24 * 30 * 0.4,
         runtimeHours: 22.5,
-        health: Math.min(95, 60 + (recovery / 100) * 35),
+        health: getHealth(tankALevel),
         lastMaintenance: format(subDays(now, 45), 'yyyy-MM-dd'),
         nextMaintenance: format(subDays(now, -15), 'yyyy-MM-dd'),
         waterQuality: {
@@ -96,15 +138,17 @@ export function BoreholeManagement() {
         }
       },
       {
-        id: "BH-002",
-        name: "East Field Well",
-        location: "East Field",
-        status: permeateFlow > 30 ? "Active" : permeateFlow > 15 ? "Standby" : "Maintenance",
-        flowRate: permeateFlow * 0.35,
-        dailyProd: permeateFlow * 24 * 0.35,
-        monthlyProd: permeateFlow * 24 * 30 * 0.35,
+        id: "FT-B",
+        name: "Secondary Feed Tank B",
+        location: "East Plant",
+        status: getStatus(tankBLevel),
+        level: tankBLevel,
+        capacity: 400,
+        volume: (tankBLevel / 100) * 400,
+        dailyConsumption: feedFlow * 24 * 0.35,
+        monthlyConsumption: feedFlow * 24 * 30 * 0.35,
         runtimeHours: 18.2,
-        health: Math.min(92, 55 + (recovery / 100) * 35),
+        health: getHealth(tankBLevel),
         lastMaintenance: format(subDays(now, 30), 'yyyy-MM-dd'),
         nextMaintenance: format(subDays(now, -20), 'yyyy-MM-dd'),
         waterQuality: {
@@ -115,15 +159,17 @@ export function BoreholeManagement() {
         }
       },
       {
-        id: "BH-003",
-        name: "South Field Well",
-        location: "South Field",
-        status: roPressure > 10 ? "Active" : roPressure > 5 ? "Standby" : "Maintenance",
-        flowRate: roPressure * 1.8,
-        dailyProd: roPressure * 24 * 1.8,
-        monthlyProd: roPressure * 24 * 30 * 1.8,
+        id: "FT-C",
+        name: "Reserve Feed Tank C",
+        location: "South Plant",
+        status: getStatus(tankCLevel),
+        level: tankCLevel,
+        capacity: 300,
+        volume: (tankCLevel / 100) * 300,
+        dailyConsumption: feedFlow * 24 * 0.25,
+        monthlyConsumption: feedFlow * 24 * 30 * 0.25,
         runtimeHours: 14.8,
-        health: Math.min(88, 50 + (roPressure / 20) * 35),
+        health: getHealth(tankCLevel),
         lastMaintenance: format(subDays(now, 25), 'yyyy-MM-dd'),
         nextMaintenance: format(subDays(now, -10), 'yyyy-MM-dd'),
         waterQuality: {
@@ -134,15 +180,17 @@ export function BoreholeManagement() {
         }
       },
       {
-        id: "BH-004",
-        name: "West Field Well",
-        location: "West Field",
-        status: concentrateFlow > 10 ? "Active" : concentrateFlow > 5 ? "Standby" : "Offline",
-        flowRate: concentrateFlow * 0.3,
-        dailyProd: concentrateFlow * 24 * 0.3,
-        monthlyProd: concentrateFlow * 24 * 30 * 0.3,
+        id: "FT-D",
+        name: "Emergency Feed Tank D",
+        location: "West Plant",
+        status: getStatus(tankDLevel),
+        level: tankDLevel,
+        capacity: 200,
+        volume: (tankDLevel / 100) * 200,
+        dailyConsumption: feedFlow * 24 * 0.15,
+        monthlyConsumption: feedFlow * 24 * 30 * 0.15,
         runtimeHours: 12.5,
-        health: Math.min(85, 45 + (concentrateFlow / 30) * 35),
+        health: getHealth(tankDLevel),
         lastMaintenance: format(subDays(now, 50), 'yyyy-MM-dd'),
         nextMaintenance: format(subDays(now, -5), 'yyyy-MM-dd'),
         waterQuality: {
@@ -151,64 +199,25 @@ export function BoreholeManagement() {
           turbidity: (0.5 + Math.random() * 0.5).toFixed(1),
           hardness: Math.floor(200 + Math.random() * 80)
         }
-      },
-      {
-        id: "BH-005",
-        name: "Central Booster",
-        location: "Central",
-        status: recovery > 70 ? "Active" : recovery > 50 ? "Standby" : "Warning",
-        flowRate: permeateFlow * 0.25,
-        dailyProd: permeateFlow * 24 * 0.25,
-        monthlyProd: permeateFlow * 24 * 30 * 0.25,
-        runtimeHours: 20.5,
-        health: Math.min(90, 55 + (recovery / 100) * 35),
-        lastMaintenance: format(subDays(now, 20), 'yyyy-MM-dd'),
-        nextMaintenance: format(subDays(now, -25), 'yyyy-MM-dd'),
-        waterQuality: {
-          pH: (7.3 + Math.random() * 0.3).toFixed(1),
-          TDS: Math.floor(850 + Math.random() * 70),
-          turbidity: (0.2 + Math.random() * 0.2).toFixed(1),
-          hardness: Math.floor(280 + Math.random() * 30)
-        }
-      },
-      {
-        id: "BH-006",
-        name: "Reserve Well",
-        location: "North East",
-        status: stage1Delta < 0.5 ? "Standby" : "Maintenance",
-        flowRate: feedFlow * 0.15,
-        dailyProd: feedFlow * 24 * 0.15,
-        monthlyProd: feedFlow * 24 * 30 * 0.15,
-        runtimeHours: 8.5,
-        health: Math.min(80, 40 + (1 - stage1Delta / 0.8) * 40),
-        lastMaintenance: format(subDays(now, 60), 'yyyy-MM-dd'),
-        nextMaintenance: format(subDays(now, -30), 'yyyy-MM-dd'),
-        waterQuality: {
-          pH: (6.7 + Math.random() * 0.5).toFixed(1),
-          TDS: Math.floor(680 + Math.random() * 120),
-          turbidity: (0.3 + Math.random() * 0.4).toFixed(1),
-          hardness: Math.floor(190 + Math.random() * 70)
-        }
       }
     ];
-  }, [feedFlow, permeateFlow, concentrateFlow, roPressure, recovery, stage1Delta]);
+  }, [feedTankLevel, feedFlow, permeateFlow, concentrateFlow, roPressure, recovery, stage1Delta, filterDeltaP]);
 
   // ===================== SET INITIAL SELECTION =====================
   React.useEffect(() => {
-    if (boreholes.length > 0 && !selected) {
-      setSelected(boreholes[0]);
+    if (feedTanks.length > 0 && !selected) {
+      setSelected(feedTanks[0]);
     }
-  }, [boreholes]);
+  }, [feedTanks]);
 
-  // ===================== FILTER BOREHOLES =====================
-  const filteredBoreholes = useMemo(() => {
-    if (filterStatus === 'All') return boreholes;
-    return boreholes.filter(b => b.status === filterStatus);
-  }, [boreholes, filterStatus]);
+  // ===================== FILTER TANKS =====================
+  const filteredTanks = useMemo(() => {
+    if (filterStatus === 'All') return feedTanks;
+    return feedTanks.filter(t => t.status === filterStatus);
+  }, [feedTanks, filterStatus]);
 
   // ===================== GENERATE HISTORY FROM REAL DATA =====================
-  const boreholeHistory = useMemo(() => {
-    const feedHistory = getHistory('FEEDFlow');
+  const tankHistoryData = useMemo(() => {
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const currentMonth = new Date().getMonth();
     
@@ -217,27 +226,41 @@ export function BoreholeManagement() {
       const monthName = months[monthIndex];
       
       // Use real data if available, otherwise generate from current values
-      let prod = 30000 + Math.random() * 5000;
-      if (feedHistory.length > 0) {
-        const avgFeed = feedHistory.reduce((sum, d) => sum + d.value, 0) / feedHistory.length;
-        prod = avgFeed * 24 * 30 * (0.8 + Math.random() * 0.4);
+      let consumption = 30000 + Math.random() * 5000;
+      if (tankHistory && tankHistory.length > 0) {
+        const avgLevel = tankHistory.reduce((sum, d) => sum + d.value, 0) / tankHistory.length;
+        consumption = avgLevel * 100 * (0.8 + Math.random() * 0.4);
       }
       
-      return { month: monthName, prod: Math.round(prod) };
+      return { month: monthName, consumption: Math.round(consumption) };
     });
-  }, [getHistory]);
+  }, [tankHistory]);
 
   // ===================== STATUS FILTERS =====================
-  const statusFilters = ['All', 'Active', 'Standby', 'Maintenance', 'Warning', 'Offline'];
+  const statusFilters = ['All', 'Active', 'Standby', 'Warning', 'Empty', 'Maintenance'];
+
+  // Calculate total capacity and current volume
+  const totalCapacity = feedTanks.reduce((sum, t) => sum + t.capacity, 0);
+  const totalVolume = feedTanks.reduce((sum, t) => sum + t.volume, 0);
+  const overallLevel = totalCapacity > 0 ? (totalVolume / totalCapacity) * 100 : 0;
 
   return (
     <div className="flex h-full overflow-hidden">
       {/* Table panel */}
       <div className="flex flex-col flex-1 min-w-0 overflow-auto p-4" style={{ scrollbarWidth: "none" }}>
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <h2 style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.1em", textTransform: "uppercase" }}>
-            Borehole Overview · {boreholes.length} Assets
-          </h2>
+          <div>
+            <h2 style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+              <Droplet size={14} style={{ display: 'inline', marginRight: 6 }} />
+              Feed Tank Overview · {feedTanks.length} Tanks
+            </h2>
+            <div style={{ fontSize: 10, color: "var(--muted-foreground)", marginTop: 2 }}>
+              Total Capacity: {totalCapacity.toLocaleString()} m³ · Current Volume: {totalVolume.toFixed(0)} m³ · 
+              Overall Level: <span style={{ color: overallLevel > 50 ? '#22c55e' : overallLevel > 25 ? '#eab308' : '#ef4444', fontWeight: 600 }}>
+                {overallLevel.toFixed(0)}%
+              </span>
+            </div>
+          </div>
           <div className="flex items-center gap-2">
             <Filter size={12} style={{ color: "var(--muted-foreground)" }} />
             {statusFilters.map(f => (
@@ -257,7 +280,7 @@ export function BoreholeManagement() {
               </button>
             ))}
             <span style={{ fontSize: 9, color: "var(--muted-foreground)", marginLeft: 4 }}>
-              {filteredBoreholes.length} shown
+              {filteredTanks.length} shown
             </span>
           </div>
         </div>
@@ -267,7 +290,7 @@ export function BoreholeManagement() {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ background: "var(--muted)" }}>
-                {["ID", "Name", "Location", "Status", "Flow Rate", "Daily (m³)", "Monthly (m³)", "Runtime", "Health", ""].map(h => (
+                {["ID", "Name", "Location", "Status", "Level (%)", "Volume (m³)", "Capacity (m³)", "Consumption", "Health", ""].map(h => (
                   <th 
                     key={h} 
                     style={{ 
@@ -288,54 +311,54 @@ export function BoreholeManagement() {
               </tr>
             </thead>
             <tbody>
-              {filteredBoreholes.map((b, i) => (
+              {filteredTanks.map((t, i) => (
                 <tr
-                  key={b.id}
-                  onClick={() => setSelected(b)}
+                  key={t.id}
+                  onClick={() => setSelected(t)}
                   className="cursor-pointer transition-colors"
                   style={{
-                    background: selected?.id === b.id ? "rgba(14,165,233,0.06)" : i % 2 === 0 ? "var(--card)" : "var(--muted)",
-                    borderLeft: selected?.id === b.id ? "2px solid #0ea5e9" : "2px solid transparent",
+                    background: selected?.id === t.id ? "rgba(14,165,233,0.06)" : i % 2 === 0 ? "var(--card)" : "var(--muted)",
+                    borderLeft: selected?.id === t.id ? "2px solid #0ea5e9" : "2px solid transparent",
                   }}
                 >
                   <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: "#0ea5e9", borderBottom: "1px solid var(--border)" }}>
-                    {b.id}
+                    {t.id}
                   </td>
                   <td style={{ padding: "7px 10px", fontSize: 11, color: "var(--foreground)", fontWeight: 500, borderBottom: "1px solid var(--border)" }}>
-                    {b.name}
+                    {t.name}
                   </td>
                   <td style={{ padding: "7px 10px", fontSize: 10, color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>
                     <div className="flex items-center gap-1">
-                      <MapPin size={9} />{b.location}
+                      <MapPin size={9} />{t.location}
                     </div>
                   </td>
                   <td style={{ padding: "7px 10px", borderBottom: "1px solid var(--border)" }}>
-                    <StatusBadge status={b.status} />
+                    <StatusBadge status={t.status} />
                   </td>
-                  <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: b.flowRate > 0 ? "var(--foreground)" : "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>
-                    {b.flowRate > 0 ? `${b.flowRate.toFixed(1)} m³/hr` : "—"}
-                  </td>
-                  <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--foreground)", borderBottom: "1px solid var(--border)" }}>
-                    {b.dailyProd > 0 ? Math.round(b.dailyProd).toLocaleString() : "—"}
+                  <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", fontWeight: 600, color: t.level > 50 ? "#22c55e" : t.level > 25 ? "#eab308" : "#ef4444", borderBottom: "1px solid var(--border)" }}>
+                    {t.level.toFixed(1)}%
                   </td>
                   <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--foreground)", borderBottom: "1px solid var(--border)" }}>
-                    {Math.round(b.monthlyProd).toLocaleString()}
+                    {t.volume.toFixed(0)}
                   </td>
                   <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>
-                    {b.runtimeHours > 0 ? `${b.runtimeHours}h` : "—"}
+                    {t.capacity}
+                  </td>
+                  <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--foreground)", borderBottom: "1px solid var(--border)" }}>
+                    {t.dailyConsumption.toFixed(0)} m³/day
                   </td>
                   <td style={{ padding: "7px 10px", borderBottom: "1px solid var(--border)" }}>
-                    <HealthBar value={b.health} />
+                    <HealthBar value={t.health} />
                   </td>
                   <td style={{ padding: "7px 10px", borderBottom: "1px solid var(--border)" }}>
                     <ChevronRight size={12} style={{ color: "var(--muted-foreground)" }} />
                   </td>
                 </tr>
               ))}
-              {filteredBoreholes.length === 0 && (
+              {filteredTanks.length === 0 && (
                 <tr>
                   <td colSpan={10} style={{ padding: "20px", textAlign: "center", color: "var(--muted-foreground)", fontSize: 11 }}>
-                    No boreholes found with status: {filterStatus}
+                    No tanks found with status: {filterStatus}
                   </td>
                 </tr>
               )}
@@ -343,28 +366,28 @@ export function BoreholeManagement() {
           </table>
         </div>
 
-        {/* Production comparison chart */}
+        {/* Consumption comparison chart */}
         <div className="rounded p-3 mt-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
           <div className="flex items-center justify-between mb-3">
             <h3 style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.1em", textTransform: "uppercase" }}>
-              Monthly Production Comparison
+              Daily Consumption by Tank
             </h3>
             <span style={{ fontSize: 9, color: "var(--muted-foreground)" }}>
-              Based on real-time data
+              Based on real-time feed flow data
             </span>
           </div>
           <ResponsiveContainer width="100%" height={150}>
-            <BarChart data={filteredBoreholes.filter(b => b.monthlyProd > 0)} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
+            <BarChart data={filteredTanks.filter(t => t.dailyConsumption > 0)} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" vertical={false} />
               <XAxis dataKey="id" tick={{ fontSize: 9, fill: "#4d7a9e" }} axisLine={false} tickLine={false} />
               <YAxis 
                 tick={{ fontSize: 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} 
                 axisLine={false} 
                 tickLine={false} 
-                tickFormatter={v => (v / 1000).toFixed(0) + "k"} 
+                tickFormatter={v => v + " m³"} 
               />
               <Tooltip content={<CustomTooltip />} />
-              <Bar dataKey="monthlyProd" fill="#06b6d4" radius={[3, 3, 0, 0]} name="Monthly m³" />
+              <Bar dataKey="dailyConsumption" fill="#06b6d4" radius={[3, 3, 0, 0]} name="Daily Consumption (m³)" />
             </BarChart>
           </ResponsiveContainer>
         </div>
@@ -394,12 +417,37 @@ export function BoreholeManagement() {
             </div>
           </div>
 
+          {/* Level gauge */}
+          <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+            <div style={{ fontSize: 9, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
+              Tank Level
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ flex: 1, height: 8, background: "var(--secondary)", borderRadius: 4, overflow: "hidden" }}>
+                <div style={{ 
+                  width: `${Math.min(selected.level, 100)}%`, 
+                  height: "100%", 
+                  background: selected.level > 50 ? "#22c55e" : selected.level > 25 ? "#eab308" : "#ef4444",
+                  borderRadius: 4,
+                  transition: "width 0.5s ease"
+                }} />
+              </div>
+              <span style={{ fontSize: 16, fontFamily: "var(--font-mono)", fontWeight: 700, color: selected.level > 50 ? "#22c55e" : selected.level > 25 ? "#eab308" : "#ef4444" }}>
+                {selected.level.toFixed(0)}%
+              </span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+              <span style={{ fontSize: 8, color: "var(--muted-foreground)" }}>{selected.volume.toFixed(0)} m³</span>
+              <span style={{ fontSize: 8, color: "var(--muted-foreground)" }}>Capacity: {selected.capacity} m³</span>
+            </div>
+          </div>
+
           {/* Metrics grid */}
           <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
             {[
-              { label: "Flow Rate", value: selected.flowRate > 0 ? `${selected.flowRate.toFixed(1)} m³/hr` : "—", icon: Activity },
+              { label: "Daily Consumption", value: `${selected.dailyConsumption.toFixed(0)} m³`, icon: Droplet },
               { label: "Runtime", value: `${selected.runtimeHours}h`, icon: Clock },
-              { label: "Daily Output", value: selected.dailyProd > 0 ? `${Math.round(selected.dailyProd).toLocaleString()} m³` : "—", icon: Droplet },
+              { label: "Monthly Usage", value: `${Math.round(selected.monthlyConsumption).toLocaleString()} m³`, icon: Activity },
               { label: "Health Score", value: `${Math.round(selected.health)}%`, icon: Activity },
             ].map(m => (
               <div key={m.label} className="rounded p-2" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
@@ -413,13 +461,13 @@ export function BoreholeManagement() {
             ))}
           </div>
 
-          {/* Production history mini chart */}
+          {/* Consumption history mini chart */}
           <div className="rounded p-2" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
             <div style={{ fontSize: 10, fontWeight: 600, color: "var(--muted-foreground)", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-              Production History
+              Consumption History
             </div>
             <ResponsiveContainer width="100%" height={90}>
-              <LineChart data={boreholeHistory} margin={{ top: 4, right: 4, left: -28, bottom: 0 }}>
+              <LineChart data={tankHistoryData} margin={{ top: 4, right: 4, left: -28, bottom: 0 }}>
                 <XAxis dataKey="month" tick={{ fontSize: 8, fill: "#4d7a9e" }} axisLine={false} tickLine={false} />
                 <YAxis 
                   tick={{ fontSize: 8, fill: "#4d7a9e" }} 
@@ -430,11 +478,11 @@ export function BoreholeManagement() {
                 <Tooltip content={<CustomTooltip />} />
                 <Line 
                   type="monotone" 
-                  dataKey="prod" 
+                  dataKey="consumption" 
                   stroke="#06b6d4" 
                   strokeWidth={1.5} 
                   dot={{ r: 2, fill: "#06b6d4" }} 
-                  name="Production" 
+                  name="Consumption" 
                 />
               </LineChart>
             </ResponsiveContainer>
@@ -499,4 +547,4 @@ export function BoreholeManagement() {
   );
 }
 
-export default BoreholeManagement;
+export default FeedTankManagement;

@@ -7,7 +7,7 @@ import { DataProvider } from "./contexts/DataContext"; // ← ADD THIS
 import { Sidebar } from "./components/Sidebar";
 import { TopNav } from "./components/TopNav";
 import { Dashboard } from "./components/Dashboard";
-import { BoreholeManagement } from "./components/BoreholeManagement";
+import {FeedTankManagement } from "./components/BoreholeManagement"
 import { ProductionMonitoring } from "./components/ProductionMonitoring";
 import { AntiscalantDosing } from "./components/AntiscalantDosing";
 import { FiltrationMonitoring } from "./components/FiltrationMonitoring";
@@ -183,7 +183,7 @@ const router = createBrowserRouter([
     ),
     children: [
       { index: true, Component: Dashboard },
-      { path: "tanklevel", Component: BoreholeManagement },
+      { path: "tanklevel", Component: FeedTankManagement },
       { path: "tagrules", Component: TagRules },
       { path: "production", Component: ProductionMonitoring },
       { path: "antiscalant", Component: AntiscalantDosing },

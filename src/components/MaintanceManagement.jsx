@@ -69,20 +69,29 @@ export function MaintenanceManagement() {
   const [showNewDrawer, setShowNewDrawer] = useState(false);
   const [filterStatus, setFilterStatus] = useState('All');
 
-  // Get real sensor data
-  const stage1Delta = getValue('Stage1Delta') || 0;
-  const stage2Delta = getValue('Stage2Delta') || 0;
-  const filterDeltaP = getValue('MediaFilterDeltaP') || 0;
-  const roPressure = getValue('ROPressure') || 0;
-  const recovery = getValue('SystemRecovery') || 0;
-  const feedFlow = getValue('FEEDFlow') || 0;
-  const permeateFlow = getValue('Permeateflow') || 0;
+  // ✅ FIX: Use the correct RO5- prefixed keys
+  const stage1Delta = getValue('RO5-Stage1Delta') || 0;
+  const stage2Delta = getValue('RO5-Stage2Delta') || 0;
+  const filterDeltaP = getValue('RO5-MediaFilterDeltaP') || 0;
+  const roPressure = getValue('RO5-ROPressure') || 0;
+  const recovery = getValue('RO5-SystemRecovery') || 0;
+  const feedFlow = getValue('RO5-FEEDFlow') || 0;
+  const permeateFlow = getValue('RO5-Permeateflow') || 0;
 
   // Get history for trend analysis
-  const stage1History = getHistory('Stage1Delta');
-  const stage2History = getHistory('Stage2Delta');
-  const filterHistory = getHistory('MediaFilterDeltaP');
-  const roHistory = getHistory('ROPressure');
+  const stage1History = getHistory('RO5-Stage1Delta');
+  const stage2History = getHistory('RO5-Stage2Delta');
+  const filterHistory = getHistory('RO5-MediaFilterDeltaP');
+  const roHistory = getHistory('RO5-ROPressure');
+
+  // Debug log
+  console.log('Maintenance Data:', {
+    stage1Delta,
+    stage2Delta,
+    filterDeltaP,
+    roPressure,
+    recovery
+  });
 
   // ===================== GENERATE REAL WORK ORDERS =====================
   const maintenanceWorkOrders = useMemo(() => {

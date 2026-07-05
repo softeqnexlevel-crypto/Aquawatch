@@ -16,12 +16,12 @@ export const SystemHealthRadar = ({ data }) => {
     };
 
     return [
-      { subject: 'Membranes', A: getHealth('Stage1Delta', 2.5, 3.5), fullMark: 100 },
-      { subject: 'Pressure', A: getHealth('ROPressure', 13, 16), fullMark: 100 },
-      { subject: 'Flow', A: getHealth('FEEDFlow', 60, 80), fullMark: 100 },
-      { subject: 'Quality', A: getHealth('PureWaterEC', 10, 20), fullMark: 100 },
-      { subject: 'Efficiency', A: data?.['SystemRecovery']?.value || 0, fullMark: 100 },
-      { subject: 'Filters', A: getHealth('MediaFilterDeltaP', 0.2, 0.4), fullMark: 100 },
+      { subject: 'Membranes', A: getHealth('RO5-Stage1Delta', 2.5, 3.5), fullMark: 100 },
+      { subject: 'Pressure', A: getHealth('RO5-ROPressure', 13, 16), fullMark: 100 },
+      { subject: 'Flow', A: getHealth('RO5-FEEDFlow', 60, 80), fullMark: 100 },
+      { subject: 'Quality', A: getHealth('RO5-PureWaterEc', 10, 20), fullMark: 100 },
+      { subject: 'Efficiency', A: data?.['RO5-SystemRecovery']?.value || 0, fullMark: 100 },
+      { subject: 'Filters', A: getHealth('RO5-MediaFilterDeltaP', 0.2, 0.4), fullMark: 100 },
     ];
   }, [data]);
 

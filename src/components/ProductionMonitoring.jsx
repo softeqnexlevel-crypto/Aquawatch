@@ -77,17 +77,29 @@ export function ProductionMonitoring() {
   const { sensorData, getValue, getHistory, lastUpdate } = useData();
   const [timeRange, setTimeRange] = useState('24h');
 
-  // ===================== GET REAL DATA =====================
-  const feedFlow = getValue('FEEDFlow') || 0;
-  const permeateFlow = getValue('Permeateflow') || 0;
-  const concentrateFlow = getValue('ConcetrateFlow') || 0;
-  const recovery = getValue('SystemRecovery') || 0;
-  const roPressure = getValue('ROPressure') || 0;
-  const pureWaterEC = getValue('PureWaterEc') || 0;
+  // ✅ FIX: Use the correct RO5- prefixed keys
+  const feedFlow = getValue('RO5-FEEDFlow') || 0;
+  const permeateFlow = getValue('RO5-Permeateflow') || 0;
+  const concentrateFlow = getValue('RO5-ConcetrateFlow') || 0;
+  const recovery = getValue('RO5-SystemRecovery') || 0;
+  const roPressure = getValue('RO5-ROPressure') || 0;
+  const pureWaterEC = getValue('RO5-PureWaterEc') || 0;
 
-  // ===================== GET HISTORY =====================
-  const feedHistory = getHistory('FEEDFlow');
-  const permeateHistory = getHistory('Permeateflow');
+  // ✅ FIX: Get history with RO5- prefixed keys
+  const feedHistory = getHistory('RO5-FEEDFlow') || [];
+  const permeateHistory = getHistory('RO5-Permeateflow') || [];
+
+  // Debug log
+  console.log('Production Data:', {
+    feedFlow,
+    permeateFlow,
+    concentrateFlow,
+    recovery,
+    roPressure,
+    pureWaterEC,
+    feedHistoryLength: feedHistory.length,
+    permeateHistoryLength: permeateHistory.length
+  });
 
   // ===================== CALCULATE STATS =====================
   const currentFlow = feedHistory.length > 0 ? feedHistory[feedHistory.length - 1]?.value || feedFlow : feedFlow;
@@ -135,7 +147,6 @@ export function ProductionMonitoring() {
       flow: g.flow / g.count
     }));
     
-    // Sort by time
     return result.sort((a, b) => a.hour.localeCompare(b.hour));
   }, [feedHistory, timeRange]);
 
@@ -175,9 +186,8 @@ export function ProductionMonitoring() {
       const monthIndex = (currentMonth - i + 12) % 12;
       const monthName = months[monthIndex];
       
-      // Use real data if available
       let actual = 0;
-      if (permeateHistory.length > 0) {
+      if (permeateHistory && permeateHistory.length > 0) {
         const avgPermeate = permeateHistory.reduce((sum, d) => sum + d.value, 0) / permeateHistory.length;
         actual = avgPermeate * 24 * 30 * (0.85 + Math.random() * 0.3);
       } else {

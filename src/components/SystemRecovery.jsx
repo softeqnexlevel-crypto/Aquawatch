@@ -107,18 +107,29 @@ export function SystemRecovery() {
   const { sensorData, getValue, getHistory, lastUpdate } = useData();
   const [timeRange, setTimeRange] = useState('24h');
 
-  // ===================== GET REAL DATA =====================
-  const feedFlow = getValue('FEEDFlow') || 0;
-  const permeateFlow = getValue('Permeateflow') || 0;
-  const concentrateFlow = getValue('ConcetrateFlow') || 0;
-  const recovery = getValue('SystemRecovery') || 0;
-  const pureWaterEC = getValue('PureWaterEc') || 0;
-  const roPressure = getValue('ROPressure') || 0;
+  // ✅ FIX: Use the correct RO5- prefixed keys
+  const feedFlow = getValue('RO5-FEEDFlow') || 0;
+  const permeateFlow = getValue('RO5-Permeateflow') || 0;
+  const concentrateFlow = getValue('RO5-ConcetrateFlow') || 0;
+  const recovery = getValue('RO5-SystemRecovery') || 0;
+  const pureWaterEC = getValue('RO5-PureWaterEc') || 0;
+  const roPressure = getValue('RO5-ROPressure') || 0;
 
-  // Get history
-  const feedHistory = getHistory('FEEDFlow');
-  const permeateHistory = getHistory('Permeateflow');
-  const recoveryHistory = getHistory('SystemRecovery');
+  // Get history with RO5- prefix
+  const feedHistory = getHistory('RO5-FEEDFlow') || [];
+  const permeateHistory = getHistory('RO5-Permeateflow') || [];
+  const recoveryHistory = getHistory('RO5-SystemRecovery') || [];
+
+  // Debug log
+  console.log('System Recovery Data:', {
+    feedFlow,
+    permeateFlow,
+    concentrateFlow,
+    recovery,
+    pureWaterEC,
+    roPressure,
+    recoveryHistoryLength: recoveryHistory.length
+  });
 
   // ===================== CALCULATE METRICS =====================
   const metrics = useMemo(() => {

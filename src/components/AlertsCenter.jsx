@@ -11,6 +11,104 @@ const severityColors = {
   Info: { bg: "rgba(34,197,94,0.08)", border: "rgba(34,197,94,0.3)", text: "#22c55e", dot: "#22c55e" },
 };
 
+// ==================== ROBUST TYPE NORMALIZATION ====================
+/**
+ * Normalize any value to a boolean representing "active/on" state
+ * Handles: 1, true, "1", "true", "on", "active", "yes" → true
+ * Everything else → false
+ */
+const isActive = (value) => {
+  if (value === undefined || value === null) return false;
+  
+  // Already a boolean
+  if (typeof value === 'boolean') return value;
+  
+  // Number: 1 = active, 0 = inactive
+  if (typeof value === 'number') return value === 1;
+  
+  // String: check against common active indicators
+  if (typeof value === 'string') {
+    const normalized = value.toLowerCase().trim();
+    return ['1', 'true', 'on', 'active', 'yes', 'running', 'enabled', 'online'].includes(normalized);
+  }
+  
+  // Fallback: truthy
+  return !!value;
+};
+
+/**
+ * Normalize any value to a number for threshold comparisons
+ * Handles: number, string number, boolean → number
+ */
+const toNumber = (value) => {
+  if (value === undefined || value === null) return 0;
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    const parsed = parseFloat(value);
+    return isNaN(parsed) ? 0 : parsed;
+  }
+  if (typeof value === 'boolean') return value ? 1 : 0;
+  return 0;
+};
+
+/**
+ * Get a display string for a value (for alert messages)
+ */
+const toDisplayString = (value) => {
+  if (value === undefined || value === null) return '—';
+  if (typeof value === 'boolean') return value ? 'ON' : 'OFF';
+  if (typeof value === 'number') return value.toFixed(1);
+  if (typeof value === 'string') {
+    // If it's a numeric string, format it nicely
+    const parsed = parseFloat(value);
+    if (!isNaN(parsed)) return parsed.toFixed(1);
+    return value;
+  }
+  return String(value);
+};
+
+// ==================== THRESHOLD CONFIGURATION ====================
+const ALERT_THRESHOLDS = {
+  'RO5-ROPressure': {
+    high: { value: 15, severity: 'Critical', message: 'High RO Pressure' },
+    low: { value: 10, severity: 'High', message: 'Low RO Pressure' }
+  },
+  'RO5-Stage1Delta': {
+    critical: { value: 0.60, severity: 'Critical', message: 'High Differential Pressure - Stage 1' },
+    warning: { value: 0.50, severity: 'High', message: 'High Differential Pressure - Stage 1' }
+  },
+  'RO5-Stage2Delta': {
+    high: { value: 0.55, severity: 'High', message: 'High Differential Pressure - Stage 2' }
+  },
+  'RO5-MediaFilterDeltaP': {
+    critical: { value: 0.40, severity: 'Critical', message: 'High Filter Delta P' },
+    warning: { value: 0.30, severity: 'Medium', message: 'High Filter Delta P' }
+  },
+  'RO5-SystemRecovery': {
+    critical: { value: 68, severity: 'Critical', message: 'Low System Recovery' },
+    warning: { value: 72, severity: 'Medium', message: 'Low System Recovery' }
+  },
+  'RO5-FeedTankLevel': {
+    critical: { value: 20, severity: 'Critical', message: 'Low Feed Tank Level' },
+    warning: { value: 30, severity: 'Medium', message: 'Low Feed Tank Level' }
+  },
+  'RO5-FEEDFlow': {
+    low: { value: 50, severity: 'High', message: 'Low Feed Flow' }
+  },
+  'RO5-PureWaterEc': {
+    high: { value: 50, severity: 'Medium', message: 'High Product Water EC' }
+  },
+  'RO5-ConcetrateFlow': {
+    low: { value: 10, severity: 'Medium', message: 'Low Concentrate Flow' }
+  },
+  'RO5-InterstagePress': {
+    high: { value: 10, severity: 'Medium', message: 'High Interstage Pressure' }
+  },
+  'RO5-ConcetratePress': {
+    high: { value: 8, severity: 'Low', message: 'High Concentrate Pressure' }
+  }
+};
+
 export function AlertsCenter() {
   const { sensorData, getValue, connected } = useData();
   const [severityFilter, setSeverityFilter] = useState("All");
@@ -18,269 +116,231 @@ export function AlertsCenter() {
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // ==================== HELPER FUNCTIONS ====================
+  
+  const checkThreshold = (rawValue, thresholds, type) => {
+    if (!thresholds) return null;
+    const threshold = thresholds[type];
+    if (!threshold) return null;
+    
+    const numericValue = toNumber(rawValue);
+    const thresholdValue = threshold.value;
+    
+    // Determine if threshold is exceeded (high/critical = greater than, low = less than)
+    const isExceeded = (type === 'high' || type === 'critical') 
+      ? numericValue > thresholdValue 
+      : numericValue < thresholdValue;
+      
+    if (isExceeded) {
+      return {
+        severity: threshold.severity,
+        message: threshold.message,
+        threshold: `${(type === 'high' || type === 'critical') ? '>' : '<'} ${thresholdValue}`,
+        currentValue: numericValue
+      };
+    }
+    return null;
+  };
+
   // ==================== GENERATE ALERTS FROM REAL DATA ====================
   const generateAlerts = () => {
     const newAlerts = [];
     let id = 1;
     const now = new Date();
 
-    // 1. Check RO Pressure
-    const roPressure = getValue('RO5-ROPressure');
-    if (roPressure > 15) {
+    // Helper to add alert
+    const addAlert = (key, sensorKey, rawValue, threshold, severity, message, equipment, isPowerProblem = false) => {
+      const displayValue = typeof rawValue === 'boolean' 
+        ? (rawValue ? 'ON' : 'OFF')
+        : toDisplayString(rawValue);
+      
       newAlerts.push({
         id: `ALT-${String(id++).padStart(3, '0')}`,
-        type: "High RO Pressure",
-        severity: "Critical",
+        type: message,
+        severity: severity,
         status: "Active",
-        equipment: "RO5 - ROPressure",
-        value: `${roPressure.toFixed(1)} bar`,
-        threshold: "> 15 bar",
+        equipment: equipment || sensorKey,
+        value: displayValue,
+        threshold: threshold,
         date: now.toLocaleDateString(),
         time: now.toLocaleTimeString(),
-        source: 'sensor'
+        source: key.includes('calc') ? 'calculated' : 'sensor',
+        isPowerProblem: isPowerProblem,
+        rawKey: sensorKey,
+        rawValue: rawValue
       });
-    } else if (roPressure < 10) {
-      newAlerts.push({
-        id: `ALT-${String(id++).padStart(3, '0')}`,
-        type: "Low RO Pressure",
-        severity: "High",
-        status: "Active",
-        equipment: "RO5 - ROPressure",
-        value: `${roPressure.toFixed(1)} bar`,
-        threshold: "< 10 bar",
-        date: now.toLocaleDateString(),
-        time: now.toLocaleTimeString(),
-        source: 'sensor'
-      });
-    }
+    };
 
-    // 2. Check Stage 1 Delta P
-    const stage1Delta = getValue('RO5-Stage1Delta');
-    if (stage1Delta > 0.60) {
-      newAlerts.push({
-        id: `ALT-${String(id++).padStart(3, '0')}`,
-        type: "High Differential Pressure - Stage 1",
-        severity: "Critical",
-        status: "Active",
-        equipment: "RO5 - Stage1Delta",
-        value: `${stage1Delta.toFixed(2)} bar`,
-        threshold: "> 0.60 bar",
-        date: now.toLocaleDateString(),
-        time: now.toLocaleTimeString(),
-        source: 'sensor'
-      });
-    } else if (stage1Delta > 0.50) {
-      newAlerts.push({
-        id: `ALT-${String(id++).padStart(3, '0')}`,
-        type: "High Differential Pressure - Stage 1",
-        severity: "High",
-        status: "Active",
-        equipment: "RO5 - Stage1Delta",
-        value: `${stage1Delta.toFixed(2)} bar`,
-        threshold: "> 0.50 bar",
-        date: now.toLocaleDateString(),
-        time: now.toLocaleTimeString(),
-        source: 'sensor'
-      });
-    }
-
-    // 3. Check Stage 2 Delta P
-    const stage2Delta = getValue('RO5-Stage2Delta');
-    if (stage2Delta > 0.55) {
-      newAlerts.push({
-        id: `ALT-${String(id++).padStart(3, '0')}`,
-        type: "High Differential Pressure - Stage 2",
-        severity: "High",
-        status: "Active",
-        equipment: "RO5 - Stage2Delta",
-        value: `${stage2Delta.toFixed(2)} bar`,
-        threshold: "> 0.55 bar",
-        date: now.toLocaleDateString(),
-        time: now.toLocaleTimeString(),
-        source: 'sensor'
-      });
-    }
-
-    // 4. Check Filter Delta P
-    const filterDeltaP = getValue('RO5-MediaFilterDeltaP');
-    if (filterDeltaP > 0.40) {
-      newAlerts.push({
-        id: `ALT-${String(id++).padStart(3, '0')}`,
-        type: "High Filter Delta P",
-        severity: "Critical",
-        status: "Active",
-        equipment: "RO5 - MediaFilterDeltaP",
-        value: `${filterDeltaP.toFixed(2)} bar`,
-        threshold: "> 0.40 bar",
-        date: now.toLocaleDateString(),
-        time: now.toLocaleTimeString(),
-        source: 'sensor'
-      });
-    } else if (filterDeltaP > 0.30) {
-      newAlerts.push({
-        id: `ALT-${String(id++).padStart(3, '0')}`,
-        type: "High Filter Delta P",
-        severity: "Medium",
-        status: "Active",
-        equipment: "RO5 - MediaFilterDeltaP",
-        value: `${filterDeltaP.toFixed(2)} bar`,
-        threshold: "> 0.30 bar",
-        date: now.toLocaleDateString(),
-        time: now.toLocaleTimeString(),
-        source: 'sensor'
-      });
-    }
-
-    // 5. Check System Recovery
-    const systemRecovery = getValue('RO5-SystemRecovery');
-    if (systemRecovery < 68) {
-      newAlerts.push({
-        id: `ALT-${String(id++).padStart(3, '0')}`,
-        type: "Low System Recovery",
-        severity: "Critical",
-        status: "Active",
-        equipment: "RO5 - SystemRecovery",
-        value: `${systemRecovery.toFixed(1)}%`,
-        threshold: "< 68%",
-        date: now.toLocaleDateString(),
-        time: now.toLocaleTimeString(),
-        source: 'sensor'
-      });
-    } else if (systemRecovery < 72) {
-      newAlerts.push({
-        id: `ALT-${String(id++).padStart(3, '0')}`,
-        type: "Low System Recovery",
-        severity: "Medium",
-        status: "Active",
-        equipment: "RO5 - SystemRecovery",
-        value: `${systemRecovery.toFixed(1)}%`,
-        threshold: "< 72%",
-        date: now.toLocaleDateString(),
-        time: now.toLocaleTimeString(),
-        source: 'sensor'
-      });
-    }
-
-    // 6. Check Feed Tank Level
-    const feedTankLevel = getValue('RO5-FeedTankLevel');
-    if (feedTankLevel < 20) {
-      newAlerts.push({
-        id: `ALT-${String(id++).padStart(3, '0')}`,
-        type: "Low Feed Tank Level",
-        severity: "Critical",
-        status: "Active",
-        equipment: "RO5 - FeedTankLevel",
-        value: `${feedTankLevel.toFixed(0)}%`,
-        threshold: "< 20%",
-        date: now.toLocaleDateString(),
-        time: now.toLocaleTimeString(),
-        source: 'sensor'
-      });
-    } else if (feedTankLevel < 30) {
-      newAlerts.push({
-        id: `ALT-${String(id++).padStart(3, '0')}`,
-        type: "Low Feed Tank Level",
-        severity: "Medium",
-        status: "Active",
-        equipment: "RO5 - FeedTankLevel",
-        value: `${feedTankLevel.toFixed(0)}%`,
-        threshold: "< 30%",
-        date: now.toLocaleDateString(),
-        time: now.toLocaleTimeString(),
-        source: 'sensor'
-      });
-    }
-
-    // 7. Check Feed Flow
-    const feedFlow = getValue('RO5-FEEDFlow');
-    if (feedFlow < 50) {
-      newAlerts.push({
-        id: `ALT-${String(id++).padStart(3, '0')}`,
-        type: "Low Feed Flow",
-        severity: "High",
-        status: "Active",
-        equipment: "RO5 - FEEDFlow",
-        value: `${feedFlow.toFixed(1)} m³/h`,
-        threshold: "< 50 m³/h",
-        date: now.toLocaleDateString(),
-        time: now.toLocaleTimeString(),
-        source: 'sensor'
-      });
-    }
-
-    // 8. Check Pure Water EC
-    const pureWaterEC = getValue('RO5-PureWaterEc');
-    if (pureWaterEC > 50) {
-      newAlerts.push({
-        id: `ALT-${String(id++).padStart(3, '0')}`,
-        type: "High Product Water EC",
-        severity: "Medium",
-        status: "Active",
-        equipment: "RO5 - PureWaterEc",
-        value: `${pureWaterEC.toFixed(1)} µS/cm`,
-        threshold: "> 50 µS/cm",
-        date: now.toLocaleDateString(),
-        time: now.toLocaleTimeString(),
-        source: 'sensor'
-      });
-    }
-
-    // 9. Check System Operation (Power Problem)
+    // -------------------- BINARY/STATUS SENSORS (Normalized) --------------------
+    
+    // 1. System Operation - Normalized with isActive()
     const systemOperation = getValue('RO5-SystemOperation');
-    if (systemOperation === 0) {
-      newAlerts.push({
-        id: `ALT-${String(id++).padStart(3, '0')}`,
-        type: "Power Problem - System Offline",
-        severity: "Critical",
-        status: "Active",
-        equipment: "RO5 - SystemOperation",
-        value: "OFF",
-        threshold: "ON required",
-        date: now.toLocaleDateString(),
-        time: now.toLocaleTimeString(),
-        source: 'sensor',
-        isPowerProblem: true
-      });
+    const isSystemOn = isActive(systemOperation);
+    
+    // ⚡ POWER PROBLEM: System is OFF (false/0/off)
+    if (!isSystemOn) {
+      addAlert(
+        'RO5-SystemOperation',
+        'RO5 - SystemOperation',
+        systemOperation,
+        'ON required',
+        'Critical',
+        'Power Problem - System Offline',
+        'RO5 - SystemOperation',
+        true  // isPowerProblem
+      );
     }
 
-    // 10. Check Dosing Active
+    // 2. System Mode - Normalized with isActive()
+    const systemMode = getValue('RO5-SystemMode');
+    const isAutoMode = isActive(systemMode);
+    
+    // ⚠️ SYSTEM IN MANUAL: Not in Auto mode
+    if (!isAutoMode && isSystemOn) {
+      addAlert(
+        'RO5-SystemMode',
+        'RO5 - SystemMode',
+        systemMode,
+        'Auto mode required',
+        'High',
+        'System in Manual Mode',
+        'RO5 - SystemMode'
+      );
+    }
+
+    // 3. Dosing Active - Normalized with isActive()
     const dosingActive = getValue('RO5-AntiscalantDosingActive');
-    if (dosingActive === 0 && systemOperation === 1) {
-      newAlerts.push({
-        id: `ALT-${String(id++).padStart(3, '0')}`,
-        type: "Antiscalant Dosing Stopped",
-        severity: "High",
-        status: "Active",
-        equipment: "RO5 - AntiscalantDosingActive",
-        value: "OFF",
-        threshold: "ON required",
-        date: now.toLocaleDateString(),
-        time: now.toLocaleTimeString(),
-        source: 'sensor'
-      });
+    const isDosingActive = isActive(dosingActive);
+    
+    // ⚠️ DOSING STOPPED: System is on but dosing is off
+    if (!isDosingActive && isSystemOn) {
+      addAlert(
+        'RO5-AntiscalantDosingActive',
+        'RO5 - AntiscalantDosingActive',
+        dosingActive,
+        'Running required',
+        'High',
+        'Antiscalant Dosing Stopped',
+        'RO5 - AntiscalantDosingActive'
+      );
     }
 
-    // 11. Check Mass Balance
-    const permeateFlow = getValue('RO5-Permeateflow');
-    const concentrateFlow = getValue('RO5-ConcetrateFlow');
+    // -------------------- NUMERIC SENSORS (Threshold-based) --------------------
+    
+    // Helper for numeric sensor checks
+    const checkNumericAlert = (sensorKey, displayKey, thresholds) => {
+      const rawValue = getValue(sensorKey);
+      if (rawValue === undefined || rawValue === null) return;
+      
+      const numericValue = toNumber(rawValue);
+      
+      // Check high/critical thresholds
+      ['critical', 'high'].forEach(type => {
+        const result = checkThreshold(numericValue, thresholds, type);
+        if (result) {
+          addAlert(
+            sensorKey,
+            displayKey || sensorKey,
+            numericValue,
+            result.threshold,
+            result.severity,
+            result.message,
+            displayKey || sensorKey
+          );
+        }
+      });
+      
+      // Check low thresholds
+      ['low', 'warning'].forEach(type => {
+        const result = checkThreshold(numericValue, thresholds, type);
+        if (result) {
+          // For warnings, only add if no critical alert already exists for this sensor
+          const existingCritical = newAlerts.some(a => 
+            a.rawKey === sensorKey && 
+            (a.severity === 'Critical' || a.type.includes('Critical'))
+          );
+          if (!existingCritical || type === 'low') {
+            addAlert(
+              sensorKey,
+              displayKey || sensorKey,
+              numericValue,
+              result.threshold,
+              result.severity,
+              result.message,
+              displayKey || sensorKey
+            );
+          }
+        }
+      });
+    };
+
+    // 4. RO Pressure
+    checkNumericAlert('RO5-ROPressure', 'RO5 - ROPressure', ALERT_THRESHOLDS['RO5-ROPressure']);
+
+    // 5. Stage 1 Delta P
+    checkNumericAlert('RO5-Stage1Delta', 'RO5 - Stage1Delta', ALERT_THRESHOLDS['RO5-Stage1Delta']);
+
+    // 6. Stage 2 Delta P
+    checkNumericAlert('RO5-Stage2Delta', 'RO5 - Stage2Delta', ALERT_THRESHOLDS['RO5-Stage2Delta']);
+
+    // 7. Filter Delta P
+    checkNumericAlert('RO5-MediaFilterDeltaP', 'RO5 - MediaFilterDeltaP', ALERT_THRESHOLDS['RO5-MediaFilterDeltaP']);
+
+    // 8. System Recovery
+    checkNumericAlert('RO5-SystemRecovery', 'RO5 - SystemRecovery', ALERT_THRESHOLDS['RO5-SystemRecovery']);
+
+    // 9. Feed Tank Level
+    checkNumericAlert('RO5-FeedTankLevel', 'RO5 - FeedTankLevel', ALERT_THRESHOLDS['RO5-FeedTankLevel']);
+
+    // 10. Feed Flow
+    checkNumericAlert('RO5-FEEDFlow', 'RO5 - FEEDFlow', ALERT_THRESHOLDS['RO5-FEEDFlow']);
+
+    // 11. Pure Water EC
+    checkNumericAlert('RO5-PureWaterEc', 'RO5 - PureWaterEc', ALERT_THRESHOLDS['RO5-PureWaterEc']);
+
+    // 12. Concentrate Flow
+    checkNumericAlert('RO5-ConcetrateFlow', 'RO5 - ConcetrateFlow', ALERT_THRESHOLDS['RO5-ConcetrateFlow']);
+
+    // 13. Interstage Pressure
+    checkNumericAlert('RO5-InterstagePress', 'RO5 - InterstagePress', ALERT_THRESHOLDS['RO5-InterstagePress']);
+
+    // 14. Concentrate Pressure
+    checkNumericAlert('RO5-ConcetratePress', 'RO5 - ConcetratePress', ALERT_THRESHOLDS['RO5-ConcetratePress']);
+
+    // 15. Mass Balance (calculated)
+    const feedFlow = toNumber(getValue('RO5-FEEDFlow'));
+    const permeateFlow = toNumber(getValue('RO5-Permeateflow'));
+    const concentrateFlow = toNumber(getValue('RO5-ConcetrateFlow'));
     const massBalance = Math.abs(feedFlow - (permeateFlow + concentrateFlow));
+    
     if (massBalance > 5 && feedFlow > 0) {
-      newAlerts.push({
-        id: `ALT-${String(id++).padStart(3, '0')}`,
-        type: "Mass Balance Error",
-        severity: "Medium",
-        status: "Active",
-        equipment: "RO5 - Mass Balance",
-        value: `${massBalance.toFixed(1)} m³/h`,
-        threshold: "< 5 m³/h",
-        date: now.toLocaleDateString(),
-        time: now.toLocaleTimeString(),
-        source: 'calculated'
-      });
+      addAlert(
+        'calc-mass-balance',
+        'RO5 - Mass Balance',
+        massBalance,
+        '< 5 m³/h',
+        'Medium',
+        'Mass Balance Error',
+        'RO5 - Mass Balance'
+      );
     }
 
-    // If no alerts, add a "Systems Normal" informational alert
-    if (newAlerts.length === 0) {
+    // 16. Permeate Flow - Low production
+    if (permeateFlow > 0 && permeateFlow < 20 && isSystemOn) {
+      addAlert(
+        'RO5-Permeateflow',
+        'RO5 - Permeateflow',
+        permeateFlow,
+        '> 20 m³/h',
+        'Medium',
+        'Low Permeate Production',
+        'RO5 - Permeateflow'
+      );
+    }
+
+    // If no active alerts, add a "Systems Normal" informational alert
+    const activeAlerts = newAlerts.filter(a => a.status === 'Active' && a.severity !== 'Info');
+    if (activeAlerts.length === 0) {
       newAlerts.push({
         id: `ALT-${String(id++).padStart(3, '0')}`,
         type: "All Systems Operating Normally",
@@ -291,7 +351,9 @@ export function AlertsCenter() {
         threshold: "N/A",
         date: now.toLocaleDateString(),
         time: now.toLocaleTimeString(),
-        source: 'system'
+        source: 'system',
+        isPowerProblem: false,
+        rawValue: null
       });
     }
 
@@ -401,7 +463,7 @@ export function AlertsCenter() {
         })}
       </div>
 
-      {/* Power Problem Alert Banner */}
+      {/* Power Problem Alert Banner - Shows when system is OFF */}
       {alerts.filter(a => a.isPowerProblem && a.status === 'Active').length > 0 && (
         <div className="flex items-center gap-3 rounded p-3" style={{ 
           background: 'rgba(239,68,68,0.1)', 
@@ -474,7 +536,7 @@ export function AlertsCenter() {
       <div className="flex flex-col gap-2">
         {filtered.map(alert => {
           const cfg = severityColors[alert.severity] || severityColors.Info;
-          const isActive = alert.status === "Active";
+          const isActiveStatus = alert.status === "Active";
 
           return (
             <div
@@ -483,7 +545,7 @@ export function AlertsCenter() {
               style={{ 
                 background: cfg.bg, 
                 border: `1px solid ${alert.isPowerProblem ? '#ef4444' : cfg.border}`,
-                opacity: isActive ? 1 : 0.65,
+                opacity: isActiveStatus ? 1 : 0.65,
                 borderLeft: alert.isPowerProblem ? '4px solid #ef4444' : 'none'
               }}
             >
@@ -524,8 +586,8 @@ export function AlertsCenter() {
                   <span style={{
                     fontSize: 9, 
                     fontWeight: 600,
-                    color: isActive ? "#22c55e" : "#4d7a9e",
-                    background: isActive ? "rgba(34,197,94,0.1)" : "rgba(77,122,158,0.1)",
+                    color: isActiveStatus ? "#22c55e" : "#4d7a9e",
+                    background: isActiveStatus ? "rgba(34,197,94,0.1)" : "rgba(77,122,158,0.1)",
                     borderRadius: 3, 
                     padding: "1px 6px"
                   }}>
@@ -558,7 +620,7 @@ export function AlertsCenter() {
 
               {/* Actions */}
               <div className="flex items-center gap-1 flex-shrink-0">
-                {isActive && (
+                {isActiveStatus && !alert.isPowerProblem && (
                   <button
                     onClick={() => acknowledgeAlert(alert.id)}
                     className="flex items-center gap-1 px-2 py-1 rounded transition-colors hover:bg-opacity-20"
@@ -619,6 +681,10 @@ export function AlertsCenter() {
             { type: "Low System Recovery", threshold: "< 68%", severity: "Critical" },
             { type: "Low Feed Tank Level", threshold: "< 20%", severity: "Critical" },
             { type: "Power Problem", threshold: "System Offline", severity: "Critical" },
+            { type: "System Manual Mode", threshold: "Not Auto", severity: "High" },
+            { type: "Dosing Stopped", threshold: "Dosing Off", severity: "High" },
+            { type: "Low Permeate Production", threshold: "< 20 m³/h", severity: "Medium" },
+            { type: "Mass Balance Error", threshold: "> 5 m³/h", severity: "Medium" },
           ].map(cfg => {
             const s = severityColors[cfg.severity];
             return (

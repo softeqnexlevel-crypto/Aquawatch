@@ -1,5 +1,7 @@
-import { useState, useRef } from "react";
-import { User, RefreshCw, CheckCircle } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { User, RefreshCw, CheckCircle, Download, Upload, Settings as SettingsIcon } from "lucide-react";
+import { useData } from "../contexts/DataContext";
+import { format } from 'date-fns';
 
 // ── Toast ──────────────────────────────────────────────────────────────────────
 function Toast({ toast }) {
@@ -78,39 +80,206 @@ function SettingRow({ label, desc, children }) {
   );
 }
 
+function StatusBadge({ label, value, warning, critical, unit }) {
+  const isCritical = value >= critical;
+  const isWarning = value >= warning && value < critical;
+  const color = isCritical ? '#ef4444' : isWarning ? '#eab308' : '#22c55e';
+  
+  return (
+    <div className="flex items-center gap-2">
+      <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>{label}:</span>
+      <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color }}>
+        {value.toFixed(1)} {unit}
+      </span>
+      <span style={{ 
+        fontSize: 8, 
+        color, 
+        background: `${color}15`,
+        padding: '1px 6px',
+        borderRadius: 3
+      }}>
+        {isCritical ? '⚠️ CRITICAL' : isWarning ? '⚠️ WARNING' : '✅ NORMAL'}
+      </span>
+    </div>
+  );
+}
+
 const inputStyle = { background: "var(--secondary)", border: "1px solid var(--border)", borderRadius: 4, padding: "4px 8px", fontSize: 11, color: "var(--foreground)", outline: "none" };
 const monoInput  = { ...inputStyle, fontFamily: "var(--font-mono)" };
 
 // ── Settings ───────────────────────────────────────────────────────────────────
 export function Settings() {
+  const { getValue, lastUpdate } = useData();
   const [form, setForm]   = useState({ ...DEFAULTS });
   const [users, setUsers] = useState(DEFAULT_USERS.map((u, i) => ({ ...u, id: i })));
   const { toast, show }   = useToast();
 
+  // Get real-time values
+  const currentRecovery = getValue('RO5-SystemRecovery') || 0;
+  const currentFlow = getValue('RO5-FEEDFlow') || 0;
+  const currentDosing = 2.0 + (currentFlow / 100) * 0.5;
+  const filterDelta = getValue('RO5-MediaFilterDeltaP') || 0;
+  const systemOperation = getValue('RO5-SystemOperation') || 0;
+
   const set = (key) => (e) => setForm(f => ({ ...f, [key]: e.target.value }));
 
+  function validateSettings() {
+    const errors = [];
+    
+    if (parseFloat(form.productionTarget) < 1000) {
+      errors.push('Production target should be at least 1000 m³/day');
+    }
+    
+    if (parseFloat(form.recoveryTarget) < 50 || parseFloat(form.recoveryTarget) > 95) {
+      errors.push('Recovery target should be between 50% and 95%');
+    }
+    
+    if (parseFloat(form.minDosing) >= parseFloat(form.maxDosing)) {
+      errors.push('Min dosing rate must be less than max dosing rate');
+    }
+    
+    if (parseFloat(form.filterDpWarn) >= parseFloat(form.filterDpCrit)) {
+      errors.push('Filter warning threshold must be less than critical threshold');
+    }
+    
+    return errors;
+  }
+
   function handleSave() {
+    const errors = validateSettings();
+    if (errors.length > 0) {
+      show(`❌ ${errors.join('. ')}`, true);
+      return;
+    }
+    
     show("Saving changes…");
-    setTimeout(() => show("Settings saved successfully", true), 1400);
+    setTimeout(() => show("✅ Settings saved successfully", true), 1400);
   }
 
   function handleReset() {
-    setForm({ ...DEFAULTS });
-    setUsers(DEFAULT_USERS.map((u, i) => ({ ...u, id: i })));
-    show("Settings reset to defaults", true);
+    if (window.confirm('Reset all settings to defaults?')) {
+      setForm({ ...DEFAULTS });
+      setUsers(DEFAULT_USERS.map((u, i) => ({ ...u, id: i })));
+      show("Settings reset to defaults", true);
+    }
   }
 
   function toggleUser(id) {
     setUsers(prev => prev.map(u => u.id === id ? { ...u, active: !u.active } : u));
   }
 
+  function handleExportSettings() {
+    const data = {
+      ...form,
+      users: users,
+      exportedAt: new Date().toISOString(),
+      version: '2.0'
+    };
+    
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `settings_backup_${format(new Date(), 'yyyy-MM-dd')}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    
+    show('✅ Settings exported successfully', true);
+  }
+
+  function handleImportSettings(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = JSON.parse(event.target.result);
+        setForm(data);
+        if (data.users) setUsers(data.users);
+        show('✅ Settings imported successfully', true);
+      } catch (err) {
+        show('❌ Invalid settings file', true);
+      }
+    };
+    reader.readAsText(file);
+  }
+
   return (
     <div className="flex flex-col gap-4 p-4 overflow-auto h-full" style={{ scrollbarWidth: "none" }}>
       <style>{`@keyframes spin { from { transform:rotate(0deg) } to { transform:rotate(360deg) } }`}</style>
 
-      <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
-        System Settings
+      <div className="flex items-center justify-between">
+        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+          <SettingsIcon size={14} style={{ display: 'inline', marginRight: 6 }} />
+          System Settings
+        </div>
+        <div className="flex gap-2">
+          <input
+            type="file"
+            accept=".json"
+            onChange={handleImportSettings}
+            style={{ display: 'none' }}
+            id="importSettings"
+          />
+          <label htmlFor="importSettings" style={{ cursor: 'pointer' }}>
+            <button
+              className="flex items-center gap-1 px-3 py-1.5 rounded"
+              style={{ background: "var(--secondary)", border: "1px solid var(--border)", fontSize: 10, color: "var(--muted-foreground)", cursor: "pointer" }}
+            >
+              <Upload size={12} /> Import
+            </button>
+          </label>
+          <button
+            onClick={handleExportSettings}
+            className="flex items-center gap-1 px-3 py-1.5 rounded"
+            style={{ background: "var(--secondary)", border: "1px solid var(--border)", fontSize: 10, color: "var(--muted-foreground)", cursor: "pointer" }}
+          >
+            <Download size={12} /> Export
+          </button>
+        </div>
       </div>
+
+      {/* System Status Section */}
+      <Section title="System Status (Live)">
+        <SettingRow label="System Operation">
+          <StatusBadge 
+            label="Status"
+            value={systemOperation}
+            warning={0.5}
+            critical={0.8}
+            unit=""
+          />
+        </SettingRow>
+        <SettingRow label="Current Recovery">
+          <StatusBadge 
+            label="Recovery"
+            value={currentRecovery}
+            warning={parseFloat(form.lowRecoveryWarn)}
+            critical={parseFloat(form.lowRecoveryWarn) - 5}
+            unit="%"
+          />
+        </SettingRow>
+        <SettingRow label="Current Dosing Rate">
+          <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: '#a78bfa' }}>
+            {currentDosing.toFixed(2)} mg/L
+          </span>
+        </SettingRow>
+        <SettingRow label="Filter Delta P">
+          <StatusBadge 
+            label="ΔP"
+            value={filterDelta}
+            warning={parseFloat(form.filterDpWarn)}
+            critical={parseFloat(form.filterDpCrit)}
+            unit="bar"
+          />
+        </SettingRow>
+        <SettingRow label="Last Updated">
+          <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--muted-foreground)' }}>
+            {lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--'}
+          </span>
+        </SettingRow>
+      </Section>
 
       <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
 

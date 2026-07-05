@@ -133,32 +133,46 @@ export function Analytics() {
   const [period, setPeriod] = useState("Monthly");
   const { toast, showToast } = useToast();
 
-  // ===================== GET REAL DATA =====================
-  const feedFlow = getValue('FEEDFlow') || 0;
-  const permeateFlow = getValue('Permeateflow') || 0;
-  const concentrateFlow = getValue('ConcetrateFlow') || 0;
-  const recovery = getValue('SystemRecovery') || 0;
-  const roPressure = getValue('ROPressure') || 0;
-  const pureWaterEC = getValue('PureWaterEc') || 0;
-  const stage1Delta = getValue('Stage1Delta') || 0;
-  const stage2Delta = getValue('Stage2Delta') || 0;
-  const filterDeltaP = getValue('MediaFilterDeltaP') || 0;
+  // ✅ FIX: Use the correct RO5- prefixed keys
+  const feedFlow = getValue('RO5-FEEDFlow') || 0;
+  const permeateFlow = getValue('RO5-Permeateflow') || 0;
+  const concentrateFlow = getValue('RO5-ConcetrateFlow') || 0;
+  const recovery = getValue('RO5-SystemRecovery') || 0;
+  const roPressure = getValue('RO5-ROPressure') || 0;
+  const pureWaterEC = getValue('RO5-PureWaterEc') || 0;
+  const stage1Delta = getValue('RO5-Stage1Delta') || 0;
+  const stage2Delta = getValue('RO5-Stage2Delta') || 0;
+  const filterDeltaP = getValue('RO5-MediaFilterDeltaP') || 0;
 
-  // ===================== GET HISTORY =====================
-  const feedHistory = getHistory('FEEDFlow');
-  const permeateHistory = getHistory('Permeateflow');
-  const recoveryHistory = getHistory('SystemRecovery');
-  const filterHistory = getHistory('MediaFilterDeltaP');
+  // ✅ FIX: Get history with RO5- prefix
+  const feedHistory = getHistory('RO5-FEEDFlow') || [];
+  const permeateHistory = getHistory('RO5-Permeateflow') || [];
+  const recoveryHistory = getHistory('RO5-SystemRecovery') || [];
+  const filterHistory = getHistory('RO5-MediaFilterDeltaP') || [];
+
+  // Debug log
+  console.log('Analytics Data:', {
+    feedFlow,
+    permeateFlow,
+    concentrateFlow,
+    recovery,
+    roPressure,
+    pureWaterEC,
+    stage1Delta,
+    filterDeltaP,
+    feedHistoryLength: feedHistory.length
+  });
 
   // ===================== CALCULATE METRICS =====================
   const metrics = useMemo(() => {
     const now = new Date();
-    const today = new Date();
     const weekAgo = subDays(now, 7);
     const monthAgo = subDays(now, 30);
 
     // Daily totals
-    const todayData = feedHistory.filter(d => new Date(d.time) >= new Date(now.setHours(0,0,0,0)));
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayData = feedHistory.filter(d => new Date(d.time) >= todayStart);
     const dailyTotal = todayData.reduce((sum, d) => sum + d.value, 0);
     
     // Weekly totals
@@ -170,7 +184,7 @@ export function Analytics() {
     const monthlyTotal = monthData.reduce((sum, d) => sum + d.value, 0);
 
     // Daily recovery average
-    const recoveryToday = recoveryHistory.filter(d => new Date(d.time) >= new Date(now.setHours(0,0,0,0)));
+    const recoveryToday = recoveryHistory.filter(d => new Date(d.time) >= todayStart);
     const recoveryAvg = recoveryToday.length > 0 
       ? recoveryToday.reduce((sum, d) => sum + d.value, 0) / recoveryToday.length 
       : recovery;
@@ -206,7 +220,7 @@ export function Analytics() {
       filterDeltaP: filterDeltaP,
       filterHealth: Math.min(Math.max(filterHealth, 0), 100)
     };
-  }, [feedHistory, permeateHistory, recoveryHistory, filterHistory, feedFlow, permeateFlow, concentrateFlow, recovery, roPressure, pureWaterEC, stage1Delta, filterDeltaP]);
+  }, [feedHistory, recoveryHistory, filterHistory, feedFlow, permeateFlow, concentrateFlow, recovery, roPressure, pureWaterEC, stage1Delta, filterDeltaP]);
 
   // ===================== GENERATE MONTHLY PRODUCTION =====================
   const monthlyProduction = useMemo(() => {
