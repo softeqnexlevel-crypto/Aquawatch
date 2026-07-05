@@ -11,10 +11,16 @@ export const LiveTrendChart = ({ data, sensorKey, height = 200, showControls = t
   const [showAnnotations, setShowAnnotations] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  const sensorData = data[sensorKey];
-  const history = data.history?.[sensorKey] || [];
+  // ✅ FIX: Use the correct sensor key
+  const sensorData = data?.[sensorKey];
+  const history = data?.history?.[sensorKey] || [];
 
-  const sensorInfo = SENSOR_MAP[sensorKey] || { label: sensorKey || 'Sensor', unit: '', color: COLORS.primary };
+  // Get sensor info from SENSOR_MAP using the key
+  const sensorInfo = SENSOR_MAP[sensorKey] || { 
+    label: sensorKey || 'Sensor', 
+    unit: '', 
+    color: COLORS.primary 
+  };
 
   const getTimeRange = useCallback(() => {
     const now = new Date();
