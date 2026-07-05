@@ -1,10 +1,8 @@
-// src/contexts/DataContext.jsx
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
+import { API_BASE_URL } from '../config';
 
 const DataContext = createContext();
-
-const API_BASE_URL = 'http://localhost:4000/api';
 
 // Map backend keys to frontend keys
 const KEY_MAPPING = {
@@ -27,6 +25,29 @@ const KEY_MAPPING = {
   'siemens200smart-RO5-AntiscalantDosingActive': 'RO5-AntiscalantDosingActive',
 };
 
+const getUnitForParameter = (param) => {
+  const units = {
+    'RO5-FEEDFlow': 'm³/h',
+    'RO5-Permeateflow': 'm³/h',
+    'RO5-ConcetrateFlow': 'm³/h',
+    'RO5-ROPressure': 'bar',
+    'RO5-InterstagePress': 'bar',
+    'RO5-ConcetratePress': 'bar',
+    'RO5-Stage1Delta': 'bar',
+    'RO5-Stage2Delta': 'bar',
+    'RO5-MediaFilterInPress': 'bar',
+    'RO5-MediaFilterOutPress': 'bar',
+    'RO5-MediaFilterDeltaP': 'bar',
+    'RO5-SystemRecovery': '%',
+    'RO5-PureWaterEc': 'µS/cm',
+    'RO5-FeedTankLevel': '%',
+    'RO5-SystemOperation': '',
+    'RO5-SystemMode': '',
+    'RO5-AntiscalantDosingActive': '',
+  };
+  return units[param] || '';
+};
+
 export const DataProvider = ({ children }) => {
   const [sensorData, setSensorData] = useState({});
   const [history, setHistory] = useState({});
@@ -35,13 +56,43 @@ export const DataProvider = ({ children }) => {
   const [lastUpdate, setLastUpdate] = useState(null);
   const [connected, setConnected] = useState(false);
 
+  const fetchInitialData = async () => {
+    try {
+      // ✅ FIXED: Proper API path without duplicate
+      const response = await fetch(`${API_BASE_URL}/api/current`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}: Failed to fetch data`);
+      const readings = await response.json();
+      
+      const formattedData = {};
+      Object.entries(readings).forEach(([rawKey, value]) => {
+        const key = KEY_MAPPING[rawKey] || rawKey;
+        formattedData[key] = {
+          value: value,
+          timestamp: new Date().toISOString(),
+          unit: getUnitForParameter(key)
+        };
+      });
+      setSensorData(formattedData);
+      setLoading(false);
+      setLastUpdate(new Date().toISOString());
+    } catch (err) {
+      console.error('Failed to fetch initial data:', err);
+      setError(err.message);
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const socket = io('http://localhost:4000', {
+    // ✅ FIXED: Socket connection - use API_BASE_URL directly
+    const socket = io(API_BASE_URL, {
       transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
     });
 
     socket.on('connect', () => {
-      console.log('✅ Connected to backend');
+      console.log('✅ DataContext connected to backend');
       setConnected(true);
       fetchInitialData();
     });
@@ -49,20 +100,22 @@ export const DataProvider = ({ children }) => {
     socket.on('plc-data', (newData) => {
       const rawKey = newData.parameter;
       const key = KEY_MAPPING[rawKey] || rawKey;
+      const timestamp = newData.timestamp || new Date().toISOString();
       
       setSensorData(prev => ({
         ...prev,
         [key]: {
           value: newData.value,
-          timestamp: newData.timestamp,
+          timestamp: timestamp,
           unit: newData.unit || getUnitForParameter(key),
+          simulated: newData.simulated || false
         }
       }));
 
       setHistory(prev => {
         const currentHistory = prev[key] || [];
         const newHistory = [...currentHistory, {
-          time: new Date(newData.timestamp),
+          time: new Date(timestamp),
           value: newData.value
         }];
         return {
@@ -71,69 +124,38 @@ export const DataProvider = ({ children }) => {
         };
       });
 
-      setLastUpdate(newData.timestamp);
+      setLastUpdate(timestamp);
     });
 
     socket.on('disconnect', () => {
-      console.log('❌ Disconnected from backend');
+      console.log('❌ DataContext disconnected from backend');
       setConnected(false);
     });
 
-    const fetchInitialData = async () => {
-      try {
-        const response = await fetch(`${API_BASE_URL}/current`);
-        if (!response.ok) throw new Error('Failed to fetch data');
-        const readings = await response.json();
-        
-        const formattedData = {};
-        Object.entries(readings).forEach(([rawKey, value]) => {
-          const key = KEY_MAPPING[rawKey] || rawKey;
-          formattedData[key] = {
-            value: value,
-            timestamp: new Date().toISOString(),
-            unit: getUnitForParameter(key)
-          };
-        });
-        setSensorData(formattedData);
-        setLoading(false);
-      } catch (err) {
-        setError(err.message);
-        setLoading(false);
-      }
-    };
+    socket.on('connect_error', (err) => {
+      console.error('Socket connection error:', err);
+      setError('Failed to connect to backend via WebSocket');
+      // Fallback to REST polling
+      fetchInitialData();
+    });
 
-    return () => socket.disconnect();
+    // Polling fallback if WebSocket fails
+    const interval = setInterval(() => {
+      if (!connected) {
+        fetchInitialData();
+      }
+    }, 30000);
+
+    return () => {
+      socket.disconnect();
+      clearInterval(interval);
+    };
   }, []);
 
-  const getUnitForParameter = (param) => {
-    const units = {
-      'RO5-FEEDFlow': 'm³/h',
-      'RO5-Permeateflow': 'm³/h',
-      'RO5-ConcetrateFlow': 'm³/h',
-      'RO5-ROPressure': 'bar',
-      'RO5-InterstagePress': 'bar',
-      'RO5-ConcetratePress': 'bar',
-      'RO5-Stage1Delta': 'bar',
-      'RO5-Stage2Delta': 'bar',
-      'RO5-MediaFilterInPress': 'bar',
-      'RO5-MediaFilterOutPress': 'bar',
-      'RO5-MediaFilterDeltaP': 'bar',
-      'RO5-SystemRecovery': '%',
-      'RO5-PureWaterEc': 'µS/cm',
-      'RO5-FeedTankLevel': '%',
-      'RO5-SystemOperation': '',
-      'RO5-SystemMode': '',
-      'RO5-AntiscalantDosingActive': '',
-    };
-    return units[param] || '';
-  };
-
-  // Helper to get value by key
   const getValue = (key) => {
     return sensorData[key]?.value ?? 0;
   };
 
-  // Helper to get history by key
   const getHistory = (key) => {
     return history[key] || [];
   };
@@ -147,7 +169,8 @@ export const DataProvider = ({ children }) => {
       lastUpdate,
       connected,
       getValue,
-      getHistory
+      getHistory,
+      refresh: fetchInitialData
     }}>
       {children}
     </DataContext.Provider>

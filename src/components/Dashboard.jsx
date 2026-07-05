@@ -1,4 +1,3 @@
-// components/Dashboard.jsx
 import React, { useState, useEffect } from 'react';
 import {
   Droplets, Activity, FlaskConical, AlertTriangle,
@@ -6,6 +5,7 @@ import {
   Minus, RefreshCw, Power, Clock, AlertCircle
 } from "lucide-react";
 import { io } from 'socket.io-client';
+import { API_BASE_URL } from '../config';
 
 import { AdvancedGauge } from './dashboardComponents/AdvancedGauge';
 import { LiveTrendChart } from './dashboardComponents/LiveTrendChart';
@@ -270,21 +270,19 @@ function AlarmsCard({ alarms }) {
    API service
    ============================================================ */
 
-const API_BASE_URL = 'http://localhost:4000/api';
-
 const api = {
   getCurrentReadings: async () => {
-    const response = await fetch(`${API_BASE_URL}/current`);
+    const response = await fetch(`${API_BASE_URL}/api/current`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return response.json();
   },
   getMqttStatus: async () => {
-    const response = await fetch(`${API_BASE_URL}/mqtt-status`);
+    const response = await fetch(`${API_BASE_URL}/api/mqtt-status`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return response.json();
   },
   getAlarms: async () => {
-    const response = await fetch(`${API_BASE_URL}/alarms`);
+    const response = await fetch(`${API_BASE_URL}/api/alarms`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return response.json();
   },
@@ -351,7 +349,7 @@ export function Dashboard() {
 
   useEffect(() => {
     let isMounted = true;
-    const socket = io('http://localhost:4000', {
+    const socket = io(API_BASE_URL, {
       transports: ['websocket', 'polling'],
     });
 

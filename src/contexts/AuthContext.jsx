@@ -1,5 +1,5 @@
-// frontend/src/contexts/AuthContext.jsx
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { API_BASE_URL } from '../config';
 
 // ==================== ROLE PERMISSIONS ====================
 const ROLE_PERMISSIONS = {
@@ -17,7 +17,6 @@ const ROLE_PERMISSIONS = {
 
 const AuthContext = createContext(null);
 
-// Fallback auth for when provider is not available
 const fallbackAuth = {
     user: null,
     loading: false,
@@ -35,13 +34,13 @@ export const AuthProvider = ({ children }) => {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
 
-    // Initialize auth from localStorage
     useEffect(() => {
         const initAuth = async () => {
             try {
                 const token = localStorage.getItem('accessToken');
                 if (token) {
-                    const response = await fetch('http://localhost:4000/api/auth/me', {
+                    // ✅ FIXED: Removed duplicate /api
+                    const response = await fetch(`${API_BASE_URL}/api/auth/me`, {
                         headers: {
                             'Authorization': `Bearer ${token}`
                         }
@@ -65,12 +64,12 @@ export const AuthProvider = ({ children }) => {
         initAuth();
     }, []);
 
-    // Login
     const login = async (email, password) => {
         try {
             setError(null);
             
-            const response = await fetch('http://localhost:4000/api/auth/login', {
+            // ✅ FIXED: Removed duplicate /api
+            const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email, password })
@@ -94,13 +93,13 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
-    // Logout
     const logout = async () => {
         try {
             const token = localStorage.getItem('accessToken');
             const refreshToken = localStorage.getItem('refreshToken');
             
-            await fetch('http://localhost:4000/api/auth/logout', {
+            // ✅ FIXED: Removed duplicate /api
+            await fetch(`${API_BASE_URL}/api/auth/logout`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -117,26 +116,20 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
-    // ==================== PERMISSION CHECKS ====================
-    
-    // Check if user can access a specific page
     const canAccess = (page) => {
         if (!user) return false;
         const permissions = ROLE_PERMISSIONS[user.role] || [];
         return permissions.includes(page);
     };
 
-    // Check if user has a specific role
     const hasRole = (role) => {
         return user?.role === role;
     };
 
-    // Check if user has any of the roles
     const hasAnyRole = (roles) => {
         return roles.includes(user?.role);
     };
 
-    // Check if user is authenticated
     const isAuthenticated = !!user;
 
     const value = {
