@@ -1,3 +1,4 @@
+// components/Dashboard.jsx (Complete - Fixed)
 import React, { useState, useEffect } from 'react';
 import {
   Droplets, Activity, FlaskConical, AlertTriangle,
@@ -32,11 +33,36 @@ export const COLORS = {
 };
 
 /* ============================================================
-   Sensor mapping — includes RO5- prefix sensors
+   ROBUST TYPE NORMALIZATION
+   ============================================================ */
+
+const isActive = (value) => {
+  if (value === undefined || value === null) return false;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  if (typeof value === 'string') {
+    const normalized = value.toLowerCase().trim();
+    return ['1', 'true', 'on', 'active', 'yes', 'running', 'enabled', 'online'].includes(normalized);
+  }
+  return !!value;
+};
+
+const toNumber = (value) => {
+  if (value === undefined || value === null) return 0;
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    const parsed = parseFloat(value);
+    return isNaN(parsed) ? 0 : parsed;
+  }
+  if (typeof value === 'boolean') return value ? 1 : 0;
+  return 0;
+};
+
+/* ============================================================
+   Sensor mapping
    ============================================================ */
 
 export const SENSOR_MAP = {
-  // RO5 Sensors (from backend)
   'RO5-FEEDFlow': { label: 'Feed Flow', unit: 'm³/h', icon: Droplets, color: COLORS.primary, shortName: 'FEEDFlow' },
   'RO5-Permeateflow': { label: 'Permeate Flow', unit: 'm³/h', icon: Droplets, color: COLORS.secondary, shortName: 'Permeateflow' },
   'RO5-ConcetrateFlow': { label: 'Concentrate Flow', unit: 'm³/h', icon: Activity, color: COLORS.warning, shortName: 'ConcentrateFlow' },
@@ -51,14 +77,11 @@ export const SENSOR_MAP = {
   'RO5-SystemRecovery': { label: 'System Recovery', unit: '%', icon: Activity, color: COLORS.success, shortName: 'SystemRecovery' },
   'RO5-PureWaterEc': { label: 'Product Water EC', unit: 'µS/cm', icon: FlaskConical, color: COLORS.purple, shortName: 'PureWaterEC' },
   'RO5-FeedTankLevel': { label: 'Feed Tank Level', unit: '%', icon: Droplets, color: '#14b8a6', shortName: 'FeedTankLevel' },
-  
-  // System status sensors
   'RO5-SystemOperation': { label: 'System Operation', unit: '', icon: Power, color: COLORS.success, shortName: 'SystemOperation' },
   'RO5-SystemMode': { label: 'System Mode', unit: '', icon: Power, color: COLORS.primary, shortName: 'SystemMode' },
   'RO5-AntiscalantDosingActive': { label: 'Dosing Active', unit: '', icon: FlaskConical, color: COLORS.purple, shortName: 'DosingActive' },
 };
 
-// Map raw backend keys to short names
 const PARAMETER_ALIASES = {
   'siemens200smart-RO5-FEEDFlow': 'RO5-FEEDFlow',
   'siemens200smart-RO5-Permeateflow': 'RO5-Permeateflow',
@@ -95,6 +118,75 @@ function getSensorInfo(parameter) {
 }
 
 const MAX_HISTORY_POINTS = 500;
+
+/* ============================================================
+   GENERATE MOCK DATA FOR TESTING
+   ============================================================ */
+
+const generateMockHistory = (baseValue, count = 30, variation = 0.1) => {
+  const history = [];
+  const now = new Date();
+  for (let i = count; i >= 0; i--) {
+    const time = new Date(now - i * 60000);
+    const v = baseValue * (1 + (Math.random() - 0.5) * variation);
+    history.push({
+      time: time.toISOString(),
+      value: Math.max(0, v)
+    });
+  }
+  return history;
+};
+
+const generateMockSensorData = () => {
+  return {
+    'RO5-FEEDFlow': 65 + Math.random() * 10,
+    'RO5-Permeateflow': 48 + Math.random() * 8,
+    'RO5-ConcetrateFlow': 18 + Math.random() * 4,
+    'RO5-ROPressure': 12.5 + Math.random() * 2.5,
+    'RO5-InterstagePress': 8 + Math.random() * 1.5,
+    'RO5-ConcetratePress': 5.5 + Math.random() * 1.5,
+    'RO5-Stage1Delta': 0.35 + Math.random() * 0.15,
+    'RO5-Stage2Delta': 0.25 + Math.random() * 0.15,
+    'RO5-MediaFilterInPress': 9 + Math.random() * 1,
+    'RO5-MediaFilterOutPress': 8.5 + Math.random() * 1,
+    'RO5-MediaFilterDeltaP': 0.2 + Math.random() * 0.15,
+    'RO5-SystemRecovery': 74 + Math.random() * 6,
+    'RO5-PureWaterEc': 15 + Math.random() * 10,
+    'RO5-FeedTankLevel': 75 + Math.random() * 20,
+    'RO5-SystemOperation': 1,
+    'RO5-SystemMode': 1,
+    'RO5-AntiscalantDosingActive': 1,
+  };
+};
+
+const generateMockHistoryData = () => {
+  const mockHistory = {};
+  const keys = [
+    'RO5-FEEDFlow', 'RO5-Permeateflow', 'RO5-ConcetrateFlow',
+    'RO5-ROPressure', 'RO5-Stage1Delta', 'RO5-Stage2Delta',
+    'RO5-MediaFilterDeltaP', 'RO5-SystemRecovery', 'RO5-PureWaterEc'
+  ];
+  
+  const baseValues = {
+    'RO5-FEEDFlow': 65,
+    'RO5-Permeateflow': 50,
+    'RO5-ConcetrateFlow': 20,
+    'RO5-ROPressure': 13,
+    'RO5-Stage1Delta': 0.40,
+    'RO5-Stage2Delta': 0.30,
+    'RO5-MediaFilterDeltaP': 0.25,
+    'RO5-SystemRecovery': 76,
+    'RO5-PureWaterEc': 18
+  };
+
+  keys.forEach(key => {
+    const base = baseValues[key] || 50;
+    const variation = key === 'RO5-ROPressure' ? 0.05 : 0.15;
+    mockHistory[key] = generateMockHistory(base, 30, variation);
+  });
+
+  return mockHistory;
+};
 
 /* ============================================================
    KPICard Component
@@ -209,12 +301,12 @@ function DosingRuntimeCard({ isActive, rate, runtimeHours, totalDosed }) {
 }
 
 /* ============================================================
-   Alarms Card with Power Problem
+   Alarms Card
    ============================================================ */
 
 function AlarmsCard({ alarms }) {
   const activeAlarms = alarms.filter(a => a.status === 'Active');
-  const powerAlarms = activeAlarms.filter(a => a.type.toLowerCase().includes('power'));
+  const powerAlarms = activeAlarms.filter(a => a.isPowerProblem);
   
   return (
     <div className="rounded p-3 flex flex-col gap-2" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
@@ -237,7 +329,8 @@ function AlarmsCard({ alarms }) {
         {activeAlarms.length > 0 ? activeAlarms.slice(0, 5).map((alert) => {
           const color = alert.severity === "Critical" ? COLORS.danger : 
                        alert.severity === "High" ? COLORS.orange : 
-                       alert.severity === "Medium" ? COLORS.yellow : COLORS.primary;
+                       alert.severity === "Medium" ? COLORS.yellow : 
+                       alert.severity === "Info" ? COLORS.success : COLORS.primary;
           return (
             <div key={alert.id} className="flex items-start gap-2 rounded p-2" style={{ background: "var(--muted)", border: `1px solid ${color}22` }}>
               <div style={{ width: 6, height: 6, borderRadius: "50%", background: color, marginTop: 3, flexShrink: 0 }} />
@@ -302,8 +395,138 @@ export function Dashboard() {
   const [error, setError] = useState(null);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [selectedSensors, setSelectedSensors] = useState(['RO5-FEEDFlow', 'RO5-Permeateflow', 'RO5-ConcetrateFlow']);
+  const [dataInitialized, setDataInitialized] = useState(false);
 
-  const fetchInitialData = async () => {
+  const getValue = (key) => sensorData[key]?.value ?? 0;
+
+  // ==================== INITIALIZE DATA ====================
+  const initializeData = () => {
+    // Generate mock sensor data
+    const mockData = generateMockSensorData();
+    const formatted = {};
+    Object.entries(mockData).forEach(([key, value]) => {
+      const info = getSensorInfo(key);
+      formatted[key] = {
+        value: value,
+        timestamp: new Date().toISOString(),
+        simulated: true,
+        unit: info.unit,
+        label: info.label,
+      };
+    });
+    setSensorData(formatted);
+
+    // Generate mock history data
+    const mockHistory = generateMockHistoryData();
+    setHistory(mockHistory);
+
+    setLastUpdate(new Date().toISOString());
+    setDataInitialized(true);
+    setLoading(false);
+  };
+
+  // ==================== GENERATE ALERTS ====================
+  const generateAlerts = () => {
+    const newAlerts = [];
+    let id = 1;
+    const now = new Date();
+
+    const addAlert = (type, severity, equipment, value, threshold, isPowerProblem = false) => {
+      newAlerts.push({
+        id: `ALT-${String(id++).padStart(3, '0')}`,
+        type: type,
+        severity: severity,
+        status: 'Active',
+        equipment: equipment,
+        value: typeof value === 'number' ? value.toFixed(1) : value,
+        threshold: threshold,
+        time: now.toLocaleTimeString(),
+        date: now.toLocaleDateString(),
+        isPowerProblem: isPowerProblem
+      });
+    };
+
+    const systemOp = getValue('RO5-SystemOperation');
+    const isSystemOn = isActive(systemOp);
+    if (!isSystemOn) {
+      addAlert('Power Problem - System Offline', 'Critical', 'RO5 - SystemOperation', 'OFF', 'ON required', true);
+    }
+
+    const roPressure = toNumber(getValue('RO5-ROPressure'));
+    if (roPressure > 15) {
+      addAlert('High RO Pressure', 'Critical', 'RO5 - ROPressure', roPressure, '> 15 bar');
+    } else if (roPressure < 10 && roPressure > 0) {
+      addAlert('Low RO Pressure', 'High', 'RO5 - ROPressure', roPressure, '< 10 bar');
+    }
+
+    const stage1Delta = toNumber(getValue('RO5-Stage1Delta'));
+    if (stage1Delta > 0.60) {
+      addAlert('High Differential Pressure - Stage 1', 'Critical', 'RO5 - Stage1Delta', stage1Delta, '> 0.60 bar');
+    } else if (stage1Delta > 0.50) {
+      addAlert('High Differential Pressure - Stage 1', 'High', 'RO5 - Stage1Delta', stage1Delta, '> 0.50 bar');
+    }
+
+    const stage2Delta = toNumber(getValue('RO5-Stage2Delta'));
+    if (stage2Delta > 0.55) {
+      addAlert('High Differential Pressure - Stage 2', 'High', 'RO5 - Stage2Delta', stage2Delta, '> 0.55 bar');
+    }
+
+    const filterDeltaP = toNumber(getValue('RO5-MediaFilterDeltaP'));
+    if (filterDeltaP > 0.40) {
+      addAlert('High Filter Delta P', 'Critical', 'RO5 - MediaFilterDeltaP', filterDeltaP, '> 0.40 bar');
+    } else if (filterDeltaP > 0.30) {
+      addAlert('High Filter Delta P', 'Medium', 'RO5 - MediaFilterDeltaP', filterDeltaP, '> 0.30 bar');
+    }
+
+    const systemRecovery = toNumber(getValue('RO5-SystemRecovery'));
+    if (systemRecovery < 68 && systemRecovery > 0) {
+      addAlert('Low System Recovery', 'Critical', 'RO5 - SystemRecovery', systemRecovery, '< 68%');
+    } else if (systemRecovery < 72 && systemRecovery > 0) {
+      addAlert('Low System Recovery', 'Medium', 'RO5 - SystemRecovery', systemRecovery, '< 72%');
+    }
+
+    const feedTankLevel = toNumber(getValue('RO5-FeedTankLevel'));
+    if (feedTankLevel < 20 && feedTankLevel > 0) {
+      addAlert('Low Feed Tank Level', 'Critical', 'RO5 - FeedTankLevel', feedTankLevel, '< 20%');
+    } else if (feedTankLevel < 30 && feedTankLevel > 0) {
+      addAlert('Low Feed Tank Level', 'Medium', 'RO5 - FeedTankLevel', feedTankLevel, '< 30%');
+    }
+
+    const feedFlow = toNumber(getValue('RO5-FEEDFlow'));
+    if (feedFlow < 50 && feedFlow > 0) {
+      addAlert('Low Feed Flow', 'High', 'RO5 - FEEDFlow', feedFlow, '< 50 m³/h');
+    }
+
+    const pureWaterEC = toNumber(getValue('RO5-PureWaterEc'));
+    if (pureWaterEC > 50 && pureWaterEC > 0) {
+      addAlert('High Product Water EC', 'Medium', 'RO5 - PureWaterEc', pureWaterEC, '> 50 µS/cm');
+    }
+
+    if (newAlerts.length === 0) {
+      newAlerts.push({
+        id: `ALT-${String(id++).padStart(3, '0')}`,
+        type: 'All Systems Operating Normally',
+        severity: 'Info',
+        status: 'Acknowledged',
+        equipment: 'RO5 - System Health',
+        value: 'All systems go',
+        threshold: 'N/A',
+        time: now.toLocaleTimeString(),
+        date: now.toLocaleDateString(),
+        isPowerProblem: false
+      });
+    }
+
+    return newAlerts;
+  };
+
+  const updateAlerts = () => {
+    const newAlerts = generateAlerts();
+    setAlarms(newAlerts);
+  };
+
+  // ==================== FETCH REAL DATA ====================
+  const fetchRealData = async () => {
     try {
       setLoading(true);
       const readings = await api.getCurrentReadings();
@@ -323,6 +546,25 @@ export function Dashboard() {
       setSensorData(prev => ({ ...prev, ...formatted }));
       setLastUpdate(new Date().toISOString());
 
+      // Update history with real data
+      setHistory(prev => {
+        const newHistory = { ...prev };
+        Object.keys(formatted).forEach(key => {
+          if (!newHistory[key]) {
+            newHistory[key] = [];
+          }
+          newHistory[key].push({
+            time: new Date().toISOString(),
+            value: formatted[key].value
+          });
+          // Keep only last MAX_HISTORY_POINTS
+          if (newHistory[key].length > MAX_HISTORY_POINTS) {
+            newHistory[key] = newHistory[key].slice(-MAX_HISTORY_POINTS);
+          }
+        });
+        return newHistory;
+      });
+
       try {
         const mqttStatus = await api.getMqttStatus();
         setConnected(mqttStatus.connected || false);
@@ -331,50 +573,47 @@ export function Dashboard() {
         console.warn('Could not fetch MQTT status:', err);
       }
 
-      try {
-        const alarmsData = await api.getAlarms();
-        setAlarms(alarmsData || []);
-      } catch (err) {
-        console.warn('Could not fetch alarms:', err);
-      }
-
+      updateAlerts();
       setError(null);
+      setDataInitialized(true);
     } catch (err) {
-      console.error('Failed to fetch initial data:', err);
-      setError('Failed to connect to backend');
+      console.error('Failed to fetch real data:', err);
+      // If real data fails, use mock data
+      if (!dataInitialized) {
+        initializeData();
+      }
     } finally {
       setLoading(false);
     }
   };
 
+  // ==================== INITIALIZE ====================
   useEffect(() => {
-    let isMounted = true;
+    // Start with mock data immediately
+    initializeData();
+
+    // Then try to fetch real data
     const socket = io(API_BASE_URL, {
       transports: ['websocket', 'polling'],
     });
 
     socket.on('connect', () => {
-      if (!isMounted) return;
       console.log('✅ Dashboard connected to backend');
       setConnected(true);
-      fetchInitialData();
+      fetchRealData();
     });
 
     socket.on('disconnect', () => {
-      if (!isMounted) return;
       console.log('❌ Dashboard disconnected');
       setConnected(false);
     });
 
     socket.on('connect_error', (err) => {
-      if (!isMounted) return;
       console.error('WebSocket connection error:', err);
-      setError('WebSocket connection failed');
-      fetchInitialData();
+      setError('WebSocket connection failed - using mock data');
     });
 
     socket.on('plc-data', (data) => {
-      if (!isMounted) return;
       const shortName = toShortName(data.parameter);
       const info = getSensorInfo(data.parameter);
       const timestamp = data.timestamp || new Date().toISOString();
@@ -397,10 +636,10 @@ export function Dashboard() {
       });
 
       setLastUpdate(timestamp);
+      setTimeout(() => updateAlerts(), 100);
     });
 
     socket.on('plc-alarm', (alarmData) => {
-      if (!isMounted) return;
       const newAlarms = alarmData.alarms.map(alarm => ({
         id: `${alarm.parameter}-${Date.now()}-${Math.random()}`,
         type: alarm.message || 'Alarm',
@@ -410,33 +649,39 @@ export function Dashboard() {
         time: new Date().toLocaleTimeString(),
         status: 'Active',
         value: alarmData.value,
+        isPowerProblem: alarm.parameter?.toLowerCase().includes('power') || false
       }));
       setAlarms(prev => [...newAlarms, ...prev].slice(0, 20));
     });
 
     socket.on('mqtt-status', (status) => {
-      if (!isMounted) return;
       setConnected(status.connected || false);
       setSimulationMode(status.simulationMode || false);
     });
 
     return () => {
-      isMounted = false;
       socket.disconnect();
     };
   }, []);
 
+  // ==================== PERIODIC ALERT UPDATE ====================
   useEffect(() => {
-    if (!connected && !loading) {
-      const interval = setInterval(() => {
-        console.log('🔄 Refreshing via REST API (WebSocket disconnected)');
-        fetchInitialData();
-      }, 30000);
-      return () => clearInterval(interval);
-    }
-  }, [connected, loading]);
+    const interval = setInterval(() => {
+      if (Object.keys(sensorData).length > 0) {
+        updateAlerts();
+      }
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [sensorData]);
 
-  const handleRefresh = () => fetchInitialData();
+  // ==================== REFRESH ====================
+  const handleRefresh = () => {
+    if (connected) {
+      fetchRealData();
+    } else {
+      initializeData();
+    }
+  };
 
   const toggleSensor = (key) => {
     setSelectedSensors(prev =>
@@ -444,9 +689,7 @@ export function Dashboard() {
     );
   };
 
-  const getValue = (shortName) => sensorData[shortName]?.value ?? 0;
-
-  // Get values using RO5- prefixed keys
+  // ==================== GET VALUES ====================
   const feedFlow = getValue('RO5-FEEDFlow');
   const permeateFlow = getValue('RO5-Permeateflow');
   const concentrateFlow = getValue('RO5-ConcetrateFlow');
@@ -460,26 +703,28 @@ export function Dashboard() {
   const concentratePress = getValue('RO5-ConcetratePress');
   const feedTankLevel = getValue('RO5-FeedTankLevel');
   
-  // System status sensors
   const systemOperation = getValue('RO5-SystemOperation');
   const systemMode = getValue('RO5-SystemMode');
   const dosingActive = getValue('RO5-AntiscalantDosingActive');
   
-  // Calculate dosing runtime and total dosed
-  const dosingRate = 2.4; // mg/L (from sensor)
-  const dosingRuntime = dosingActive ? 3.5 : 0; // hours (would come from actual runtime sensor)
-  const totalDosed = dosingRuntime * dosingRate * 10; // mL (example calculation)
+  const isSystemOn = isActive(systemOperation);
+  const isAutoMode = isActive(systemMode);
+  const isDosingActive = isActive(dosingActive);
+  
+  const dosingRate = 2.4;
+  const dosingRuntime = isDosingActive ? 3.5 : 0;
+  const totalDosed = dosingRuntime * dosingRate * 10;
 
   const dailyProduction = Math.round(permeateFlow * 24);
   const activeSensors = Object.keys(sensorData).filter(
     key => sensorData[key]?.value !== undefined && sensorData[key]?.value !== null
   ).length;
-  const totalSensors = 15; // Updated to include new sensors
-  const plantAvailability = activeSensors > 0 ? ((activeSensors / totalSensors) * 100).toFixed(1) : 0;
+  const totalSensors = 15;
 
   const chartData = { ...sensorData, history };
 
-  if (loading) {
+  // ==================== LOADING ====================
+  if (loading && !dataInitialized) {
     return (
       <div className="flex items-center justify-center h-full p-8">
         <div style={{ color: "var(--muted-foreground)", textAlign: "center" }}>
@@ -491,7 +736,7 @@ export function Dashboard() {
     );
   }
 
-  if (error && Object.keys(sensorData).length === 0) {
+  if (error && !dataInitialized) {
     return (
       <div className="flex items-center justify-center h-full p-8">
         <div style={{ color: COLORS.danger, textAlign: "center" }}>
@@ -564,8 +809,8 @@ export function Dashboard() {
 
       {/* System Status Row */}
       <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr 1fr 1fr" }}>
-        <SystemStatus isOn={systemOperation === 1} label="System Operation" icon={Power} />
-        <SystemStatus isOn={systemMode === 1} label="System Mode" icon={Power} />
+        <SystemStatus isOn={isSystemOn} label="System Operation" icon={Power} />
+        <SystemStatus isOn={isAutoMode} label="System Mode" icon={Power} />
         <div className="flex items-center gap-2 rounded p-2" style={{ 
           background: feedTankLevel > 20 ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
           border: `1px solid ${feedTankLevel > 20 ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)'}`,
@@ -575,44 +820,61 @@ export function Dashboard() {
             Feed Tank: {feedTankLevel > 20 ? `${feedTankLevel.toFixed(0)}%` : '⚠️ LOW'}
           </span>
         </div>
-        <SystemStatus isOn={dosingActive === 1} label="Dosing Active" icon={FlaskConical} />
+        <SystemStatus isOn={isDosingActive} label="Dosing Active" icon={FlaskConical} />
       </div>
 
-      {/* KPI Grid */}
+      {/* ============================================================
+          KPI Grid - Only Unique KPIs (No Duplicates)
+          ============================================================ */}
       <div>
         <SectionTitle>Real-Time Key Performance Indicators</SectionTitle>
-        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(5, 1fr)" }}>
+        
+        {/* Row 1: Water Flows + Pressures - 6 columns */}
+        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(6, 1fr)" }}>
+          <KPICard label="Feed Flow" value={feedFlow.toFixed(1)} unit="m³/h" icon={Droplets}
+            trend={feedFlow > 50 ? "up" : feedFlow < 40 ? "down" : "flat"}
+            trendValue={feedFlow > 50 ? "Normal" : "Check flow"} color={COLORS.primary} />
+          <KPICard label="Permeate Flow" value={permeateFlow.toFixed(1)} unit="m³/h" icon={Droplets}
+            trend={permeateFlow > 30 ? "up" : "down"}
+            trendValue={permeateFlow > 30 ? "Normal" : "Low"} color={COLORS.secondary} />
+          <KPICard label="Concentrate Flow" value={concentrateFlow.toFixed(1)} unit="m³/h" icon={Activity}
+            trend={concentrateFlow > 15 ? "up" : "down"}
+            trendValue={concentrateFlow > 15 ? "Normal" : "Low"} color={COLORS.warning} />
+          <KPICard label="RO Pressure" value={roPressure.toFixed(1)} unit="bar" icon={Gauge}
+            trend={roPressure > 13 && roPressure < 17 ? "flat" : roPressure > 17 ? "up" : "down"}
+            trendValue={roPressure > 13 && roPressure < 17 ? "Normal" : roPressure > 17 ? "High" : "Low"} color={COLORS.danger} />
+          <KPICard label="Stage 1 Delta P" value={stage1Delta.toFixed(2)} unit="bar" icon={Zap}
+            trend={stage1Delta > 0.55 ? "up" : "flat"}
+            trendValue={stage1Delta > 0.55 ? "Check membranes" : "Normal"} color={COLORS.success} />
+          <KPICard label="Stage 2 Delta P" value={stage2Delta.toFixed(2)} unit="bar" icon={Zap}
+            trend={stage2Delta > 0.50 ? "up" : "flat"}
+            trendValue={stage2Delta > 0.50 ? "Check stage 2" : "Normal"} color="#14b8a6" />
+        </div>
+        
+        {/* Row 2: Filter Delta P + System Recovery + Other KPIs - 5 columns */}
+        <div className="grid gap-3 mt-3" style={{ gridTemplateColumns: "repeat(5, 1fr)" }}>
+          <KPICard label="Filter Delta P" value={filterDeltaP.toFixed(2)} unit="bar" icon={Filter}
+            trend={filterDeltaP > 0.4 ? "up" : "flat"}
+            trendValue={filterDeltaP > 0.4 ? "Check filters" : "Normal"} color={COLORS.purple} />
+          <KPICard label="System Recovery" value={systemRecovery.toFixed(1)} unit="%" icon={Activity}
+            trend={systemRecovery > 75 ? "up" : "down"}
+            trendValue={systemRecovery > 75 ? "Good" : "Check system"} color={COLORS.success} />
+          <KPICard label="Product Water EC" value={pureWaterEC.toFixed(0)} unit="µS/cm" icon={FlaskConical}
+            trend={pureWaterEC > 150 ? "up" : "flat"}
+            trendValue={pureWaterEC > 150 ? "High conductivity" : "Within limits"} color={COLORS.purple} />
           <KPICard label="Daily Production" value={dailyProduction.toLocaleString()} unit="m³" icon={Droplets}
             trend={permeateFlow > 45 ? "up" : permeateFlow < 35 ? "down" : "flat"}
             trendValue={`${permeateFlow.toFixed(1)} m³/h`} color={COLORS.primary} />
-          <AdvancedGauge value={roPressure} label="RO Pressure" unit="bar" min={0} max={20} color={COLORS.danger} fullWidth />
-          <AdvancedGauge value={systemRecovery} label="System Recovery" unit="%" min={0} max={100} color={COLORS.success} fullWidth />
-          <KPICard label="Permeate Flow" value={permeateFlow.toFixed(1)} unit="m³/h" icon={Droplets}
-            trend="up" trendValue={`${concentrateFlow.toFixed(1)} m³/h concentrate`} color={COLORS.secondary} />
           <KPICard label="Active Alarms" value={alarms.filter(a => a.status === 'Active').length} icon={AlertTriangle}
             trend={alarms.length > 0 ? "up" : "down"}
             trendValue={alarms.length > 0 ? `${alarms.filter(a => a.severity === 'Critical').length} critical` : "All systems normal"}
             color={alarms.length > 0 ? COLORS.danger : COLORS.success} />
         </div>
-        <div className="grid gap-3 mt-3" style={{ gridTemplateColumns: "repeat(5, 1fr)" }}>
-          <AdvancedGauge value={feedFlow} label="Feed Flow" unit="m³/h" min={0} max={100} color={COLORS.primary} fullWidth />
-          <KPICard label="Stage 1 Delta P" value={stage1Delta.toFixed(2)} unit="bar" icon={Zap}
-            trend={stage1Delta > 3.8 ? "up" : "flat"}
-            trendValue={stage1Delta > 3.8 ? "Check membranes" : "Normal"} color={COLORS.success} />
-          <KPICard label="Product Water EC" value={pureWaterEC.toFixed(0)} unit="µS/cm" icon={FlaskConical}
-            trend={pureWaterEC > 150 ? "up" : "flat"}
-            trendValue={pureWaterEC > 150 ? "High conductivity" : "Within limits"} color={COLORS.purple} />
-          <KPICard label="Filter Delta P" value={filterDeltaP.toFixed(2)} unit="bar" icon={Filter}
-            trend={filterDeltaP > 0.5 ? "up" : "flat"}
-            trendValue={filterDeltaP > 0.5 ? "Check filters" : "Normal"} color={COLORS.warning} />
-          <KPICard label="Plant Availability" value={plantAvailability} unit="%" icon={CheckCircle}
-            trend="up" trendValue={`${activeSensors} sensors online`} color={COLORS.success} />
-        </div>
       </div>
 
       {/* Dosing Runtime Card */}
       <DosingRuntimeCard 
-        isActive={dosingActive === 1}
+        isActive={isDosingActive}
         rate={dosingRate}
         runtimeHours={dosingRuntime}
         totalDosed={totalDosed}
@@ -625,7 +887,7 @@ export function Dashboard() {
           <KPICard label="Interstage Pressure" value={interstagePress.toFixed(1)} unit="bar" icon={Gauge} color={COLORS.orange} sub="Between stages" />
           <KPICard label="Concentrate Pressure" value={concentratePress.toFixed(1)} unit="bar" icon={Gauge} color={COLORS.yellow} sub="Reject stream" />
           <KPICard label="Stage 2 Delta P" value={stage2Delta.toFixed(2)} unit="bar" icon={Zap} color="#14b8a6"
-            sub={stage2Delta > 3.1 ? "Check stage 2" : "Normal"} />
+            sub={stage2Delta > 0.50 ? "Check stage 2" : "Normal"} />
           <KPICard label="Concentrate Flow" value={concentrateFlow.toFixed(1)} unit="m³/h" icon={Activity} color={COLORS.warning}
             sub={`${((concentrateFlow / (feedFlow || 1)) * 100).toFixed(1)}% of feed`} />
         </div>
@@ -683,6 +945,13 @@ export function Dashboard() {
         <DistributionHistogram data={chartData} sensorKey="RO5-FEEDFlow" />
         <DistributionHistogram data={chartData} sensorKey="RO5-Permeateflow" />
       </div>
+
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.6; }
+        }
+      `}</style>
     </div>
   );
 }

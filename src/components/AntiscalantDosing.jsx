@@ -1,11 +1,11 @@
 // components/AntiscalantDosing.jsx
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
   LineChart, Line, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   ReferenceLine
 } from "recharts";
-import { AlertTriangle, CheckCircle, FlaskConical, Droplet, TrendingUp, TrendingDown, Clock } from "lucide-react";
+import { AlertTriangle, CheckCircle, FlaskConical, Droplet, TrendingUp, TrendingDown, Clock, Edit2, Save, X } from "lucide-react";
 import { useData } from "../contexts/DataContext";
 import { format, subHours, subDays, startOfDay } from 'date-fns';
 
@@ -24,8 +24,20 @@ const CustomTooltip = ({ active, payload, label }) => {
   );
 };
 
+// ===================== ROBUST TYPE NORMALIZATION =====================
+const isActive = (value) => {
+  if (value === undefined || value === null) return false;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  if (typeof value === 'string') {
+    const normalized = value.toLowerCase().trim();
+    return ['1', 'true', 'on', 'active', 'yes', 'running', 'enabled', 'online'].includes(normalized);
+  }
+  return !!value;
+};
+
 // ===================== TANK GAUGE =====================
-function TankGauge({ level, label, capacity }) {
+function TankGauge({ level, label, capacity, onEdit }) {
   const color = level > 40 ? "#22c55e" : level > 20 ? "#eab308" : "#ef4444";
   const status = level > 40 ? "OK" : level > 20 ? "LOW" : "CRITICAL";
 
@@ -44,6 +56,23 @@ function TankGauge({ level, label, capacity }) {
       <span style={{ fontSize: 8, fontWeight: 600, color: color, background: `${color}18`, borderRadius: 3, padding: "1px 6px" }}>
         {status}
       </span>
+      {onEdit && (
+        <button
+          onClick={onEdit}
+          style={{
+            fontSize: 8,
+            color: "var(--muted-foreground)",
+            background: "var(--secondary)",
+            border: "1px solid var(--border)",
+            borderRadius: 3,
+            padding: "1px 6px",
+            cursor: "pointer",
+            marginTop: 2
+          }}
+        >
+          <Edit2 size={10} /> Edit
+        </button>
+      )}
     </div>
   );
 }
@@ -78,8 +107,20 @@ function MetricCard({ label, value, unit, color, sub, trend }) {
 export function AntiscalantDosing() {
   const { sensorData, getValue, getHistory, lastUpdate } = useData();
   const [timeRange, setTimeRange] = useState('24h');
+  const [isEditingReserve, setIsEditingReserve] = useState(false);
+  const [reserveLevel, setReserveLevel] = useState(50); // Default 50%
+  const [editingReserveValue, setEditingReserveValue] = useState(50);
+  
+  // Dosing rate is fixed at 2.7 ml/hr
+  const DOSING_RATE_ML_PER_HR = 2.7;
+  
+  // Track runtime when dosing is active
+  const [runtimeSeconds, setRuntimeSeconds] = useState(0);
+  const [isDosingRunning, setIsDosingRunning] = useState(false);
+  const intervalRef = useRef(null);
+  const startTimeRef = useRef(null);
 
-  // ✅ FIX: Use the correct RO5- prefixed keys
+  // Get real data
   const feedFlow = getValue('RO5-FEEDFlow') || 0;
   const permeateFlow = getValue('RO5-Permeateflow') || 0;
   const recovery = getValue('RO5-SystemRecovery') || 0;
@@ -87,51 +128,93 @@ export function AntiscalantDosing() {
   const roPressure = getValue('RO5-ROPressure') || 0;
   const dosingActive = getValue('RO5-AntiscalantDosingActive') || 0;
 
+  // Check if dosing is active using robust type normalization
+  const isDosingActive = isActive(dosingActive);
+
   // Get history for trends
   const feedHistory = getHistory('RO5-FEEDFlow');
   const permeateHistory = getHistory('RO5-Permeateflow');
 
-  // Debug log
-  console.log('Antiscalant Data:', {
-    feedFlow,
-    permeateFlow,
-    recovery,
-    pureWaterEC,
-    roPressure,
-    dosingActive
-  });
+  // ===================== RUNTIME TRACKING =====================
+  useEffect(() => {
+    if (isDosingActive && !isDosingRunning) {
+      // Dosing started
+      setIsDosingRunning(true);
+      startTimeRef.current = Date.now();
+      
+      intervalRef.current = setInterval(() => {
+        setRuntimeSeconds(prev => prev + 1);
+      }, 1000);
+    } else if (!isDosingActive && isDosingRunning) {
+      // Dosing stopped
+      setIsDosingRunning(false);
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    }
+
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [isDosingActive]);
 
   // ===================== CALCULATE DOSING METRICS =====================
   const dosingMetrics = useMemo(() => {
-    // Base dosing rate based on feed flow (typical antiscalant dosing is 2-4 mg/L)
-    const baseRate = 2.0 + (feedFlow / 100) * 0.5;
-    const adjustedRate = Math.min(Math.max(baseRate, 1.8), 3.5);
+    // Dosing rate is fixed at 2.7 ml/hr
+    const dosingRateML = DOSING_RATE_ML_PER_HR;
+    const dosingRateMgL = dosingRateML / 1000; // Convert to mg/L (assuming density ~1)
     
-    // Daily consumption based on permeate flow
-    const dailyConsumption = (permeateFlow * 24 * adjustedRate) / 1000; // kg/day
+    // Calculate total dosed based on runtime
+    const runtimeHours = runtimeSeconds / 3600;
+    const totalDosedML = runtimeHours * DOSING_RATE_ML_PER_HR;
+    const totalDosedL = totalDosedML / 1000;
+    
+    // Daily consumption based on runtime
+    const dailyConsumption = (runtimeHours > 0) ? (totalDosedML / runtimeHours) * 24 : 0;
     const weeklyConsumption = dailyConsumption * 7;
     const monthlyConsumption = dailyConsumption * 30;
     
     // Efficiency based on recovery and EC
     const efficiency = Math.min(100, 85 + (recovery / 100) * 15 + (100 - pureWaterEC / 10) / 10);
     
-    // Stock calculation (assuming initial stock of 500kg, consuming dailyConsumption)
-    const initialStock = 500;
-    const daysSinceLastRefill = 15;
-    const currentStock = Math.max(0, initialStock - dailyConsumption * daysSinceLastRefill);
-    const daysRemaining = dailyConsumption > 0 ? Math.floor(currentStock / dailyConsumption) : 0;
+    // Stock calculation using manually set reserve level
+    const tankACapacity = 500; // Liters
+    const tankBCapacity = 500; // Liters
+    const reserveCapacity = 200; // Liters
+    
+    const tankALevel = Math.min(100, Math.max(0, 100 - (totalDosedL / tankACapacity) * 100));
+    const tankBLevel = Math.min(100, Math.max(0, 100 - (totalDosedL / tankBCapacity) * 100 * 0.6));
+    const reserveLevelPercent = Math.min(100, Math.max(0, reserveLevel));
+    
+    const currentStockL = (tankACapacity * (tankALevel / 100)) + 
+                          (tankBCapacity * (tankBLevel / 100)) + 
+                          (reserveCapacity * (reserveLevelPercent / 100));
+    
+    const dailyConsumptionL = dailyConsumption / 1000; // Convert to liters
+    const daysRemaining = dailyConsumptionL > 0 ? Math.floor(currentStockL / dailyConsumptionL) : 0;
     
     return {
-      dosingRate: adjustedRate,
+      dosingRate: dosingRateMgL,
+      dosingRateML: dosingRateML,
+      runtimeHours: runtimeHours,
+      totalDosedML: totalDosedML,
+      totalDosedL: totalDosedL,
       dailyConsumption: dailyConsumption,
       weeklyConsumption: weeklyConsumption,
       monthlyConsumption: monthlyConsumption,
-      currentStock: currentStock,
+      currentStock: currentStockL,
       daysRemaining: daysRemaining,
       efficiency: efficiency,
-      dosePerM3: adjustedRate / 1000, // kg/m³
+      dosePerM3: dosingRateMgL / 1000,
+      tankALevel: tankALevel,
+      tankBLevel: tankBLevel,
+      reserveLevel: reserveLevelPercent
     };
-  }, [feedFlow, permeateFlow, recovery, pureWaterEC]);
+  }, [runtimeSeconds, recovery, pureWaterEC, reserveLevel]);
 
   // ===================== GENERATE HOURLY DOSING DATA =====================
   const hourlyDosingData = useMemo(() => {
@@ -146,14 +229,14 @@ export function AntiscalantDosing() {
     filtered.forEach(d => {
       const hour = format(new Date(d.time), 'HH:00');
       if (!grouped[hour]) grouped[hour] = { hour, rate: 0, count: 0 };
-      const rate = 2.0 + (d.value / 100) * 0.5;
+      const rate = DOSING_RATE_ML_PER_HR / 1000; // Convert to mg/L
       grouped[hour].rate += rate;
       grouped[hour].count++;
     });
     
     const result = Object.values(grouped).map(g => ({
       hour: g.hour,
-      rate: Math.min(Math.max(g.rate / g.count, 1.8), 3.5)
+      rate: g.rate / g.count
     }));
     
     return result.sort((a, b) => a.hour.localeCompare(b.hour));
@@ -193,15 +276,15 @@ export function AntiscalantDosing() {
       }) : [];
       
       const avgFeed = dayFeed.length > 0 ? dayFeed.reduce((sum, d) => sum + d.value, 0) / dayFeed.length : feedFlow;
-      const rate = 2.0 + (avgFeed / 100) * 0.5;
+      const rate = DOSING_RATE_ML_PER_HR / 1000;
       const consumption = (avgFeed * 24 * rate) / 1000;
       const production = avgFeed * 24;
       const dosePerM3 = rate / 1000;
-      const isElevated = rate > 3.0 || rate < 1.8;
+      const isElevated = rate > 0.003 || rate < 0.0018;
       
       records.push({
         date: format(date, 'yyyy-MM-dd'),
-        rate: Math.min(Math.max(rate, 1.8), 3.5).toFixed(2),
+        rate: rate.toFixed(4),
         consumption: consumption.toFixed(1),
         production: Math.round(production).toLocaleString(),
         dosePerM3: dosePerM3.toFixed(3),
@@ -217,36 +300,36 @@ export function AntiscalantDosing() {
   const alerts = useMemo(() => {
     const alertList = [];
     
-    if (dosingMetrics.dosingRate > 3.0) {
+    // Check if dosing is active
+    if (!isDosingActive) {
       alertList.push({
         id: 'ALERT-001',
-        type: 'High Dosing Rate',
-        equipment: 'Antiscalant Pump',
-        value: `${dosingMetrics.dosingRate.toFixed(2)} mg/L`,
-        threshold: '3.0 mg/L',
-        severity: 'warning'
-      });
-    }
-    
-    if (dosingMetrics.dosingRate < 1.8) {
-      alertList.push({
-        id: 'ALERT-002',
-        type: 'Low Dosing Rate',
-        equipment: 'Antiscalant Pump',
-        value: `${dosingMetrics.dosingRate.toFixed(2)} mg/L`,
-        threshold: '1.8 mg/L',
+        type: 'Dosing System Stopped',
+        equipment: 'Antiscalant Dosing',
+        value: 'System Off',
+        threshold: 'Should be ON',
         severity: 'critical'
       });
     }
     
+    // Check stock levels
     if (dosingMetrics.currentStock < 50) {
+      alertList.push({
+        id: 'ALERT-002',
+        type: 'Low Chemical Stock',
+        equipment: 'Chemical Tanks',
+        value: `${Math.round(dosingMetrics.currentStock)} L`,
+        threshold: '50 L',
+        severity: 'critical'
+      });
+    } else if (dosingMetrics.currentStock < 100) {
       alertList.push({
         id: 'ALERT-003',
         type: 'Low Chemical Stock',
-        equipment: 'Tank A',
-        value: `${Math.round(dosingMetrics.currentStock)} kg`,
-        threshold: '50 kg',
-        severity: 'critical'
+        equipment: 'Chemical Tanks',
+        value: `${Math.round(dosingMetrics.currentStock)} L`,
+        threshold: '100 L',
+        severity: 'warning'
       });
     }
     
@@ -261,20 +344,25 @@ export function AntiscalantDosing() {
       });
     }
     
-    // Check if dosing is active
-    if (dosingActive === 0) {
-      alertList.push({
-        id: 'ALERT-005',
-        type: 'Dosing System Off',
-        equipment: 'Antiscalant Dosing',
-        value: 'System Off',
-        threshold: 'Should be ON',
-        severity: 'critical'
-      });
-    }
-    
     return alertList;
-  }, [dosingMetrics, pureWaterEC, dosingActive]);
+  }, [isDosingActive, dosingMetrics.currentStock, pureWaterEC]);
+
+  // ===================== HANDLE RESERVE EDIT =====================
+  const handleReserveEdit = () => {
+    setIsEditingReserve(true);
+    setEditingReserveValue(reserveLevel);
+  };
+
+  const handleReserveSave = () => {
+    const newLevel = Math.min(100, Math.max(0, editingReserveValue));
+    setReserveLevel(newLevel);
+    setIsEditingReserve(false);
+  };
+
+  const handleReserveCancel = () => {
+    setIsEditingReserve(false);
+    setEditingReserveValue(reserveLevel);
+  };
 
   // ===================== TIME RANGE BUTTONS =====================
   const TimeRangeButtons = () => (
@@ -318,17 +406,23 @@ export function AntiscalantDosing() {
               width: 8, 
               height: 8, 
               borderRadius: '50%', 
-              background: dosingActive === 1 ? '#22c55e' : '#ef4444',
-              boxShadow: dosingActive === 1 ? '0 0 8px rgba(34,197,94,0.4)' : 'none'
+              background: isDosingActive ? '#22c55e' : '#ef4444',
+              boxShadow: isDosingActive ? '0 0 8px rgba(34,197,94,0.4)' : 'none',
+              animation: isDosingActive ? 'pulse 1.5s infinite' : 'none'
             }} />
-            <span style={{ fontSize: 10, fontWeight: 600, color: dosingActive === 1 ? '#22c55e' : '#ef4444' }}>
-              {dosingActive === 1 ? '● RUNNING' : '● STOPPED'}
+            <span style={{ fontSize: 10, fontWeight: 600, color: isDosingActive ? '#22c55e' : '#ef4444' }}>
+              {isDosingActive ? '● RUNNING' : '● STOPPED'}
             </span>
           </div>
           <div className="flex items-center gap-2">
             <Clock size={14} style={{ color: "var(--muted-foreground)" }} />
             <span style={{ fontSize: 10, color: "var(--muted-foreground)" }}>
-              Target: 2.0-3.0 mg/L
+              Runtime: {Math.floor(dosingMetrics.runtimeHours)}h {Math.floor((dosingMetrics.runtimeHours % 1) * 60)}m
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span style={{ fontSize: 10, color: "var(--muted-foreground)" }}>
+              Rate: <span style={{ color: "#a78bfa", fontWeight: 600 }}>{DOSING_RATE_ML_PER_HR} mL/hr</span>
             </span>
           </div>
         </div>
@@ -339,41 +433,40 @@ export function AntiscalantDosing() {
         {/* Metric cards */}
         <div className="flex-1 grid gap-3" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
           <MetricCard 
-            label="Current Dosing Rate" 
-            value={dosingMetrics.dosingRate.toFixed(2)} 
-            unit="mg/L" 
-            color={dosingMetrics.dosingRate > 3.0 ? "#ef4444" : dosingMetrics.dosingRate < 1.8 ? "#eab308" : "#a78bfa"}
-            sub={dosingMetrics.dosingRate > 3.0 ? "⚠️ Above normal" : dosingMetrics.dosingRate < 1.8 ? "⚠️ Below normal" : "Normal: 2.0–3.0 mg/L"}
-            trend={dosingMetrics.dosingRate - 2.5}
+            label="Dosing Rate" 
+            value={DOSING_RATE_ML_PER_HR.toFixed(1)} 
+            unit="mL/hr" 
+            color="#a78bfa"
+            sub="Fixed rate"
           />
           <MetricCard 
-            label="Daily Consumption" 
-            value={dosingMetrics.dailyConsumption.toFixed(1)} 
-            unit="kg" 
+            label="Total Dosed" 
+            value={dosingMetrics.totalDosedML.toFixed(1)} 
+            unit="mL" 
             color="#0ea5e9"
-            sub={`${((dosingMetrics.dailyConsumption / 5) * 100).toFixed(0)}% of target`}
-            trend={dosingMetrics.dailyConsumption - 5}
+            sub={isDosingActive ? "Currently dosing..." : "Stopped"}
+            trend={isDosingActive ? 1 : 0}
           />
           <MetricCard 
-            label="Weekly Consumption" 
-            value={dosingMetrics.weeklyConsumption.toFixed(1)} 
-            unit="kg" 
+            label="Runtime" 
+            value={dosingMetrics.runtimeHours.toFixed(1)} 
+            unit="hrs" 
             color="#06b6d4"
-            sub={`${((dosingMetrics.weeklyConsumption / 35) * 100).toFixed(0)}% of target`}
-            trend={dosingMetrics.weeklyConsumption - 35}
+            sub={isDosingActive ? "● Active" : "○ Idle"}
+            trend={isDosingActive ? 1 : 0}
           />
           <MetricCard 
             label="Monthly Consumption" 
             value={dosingMetrics.monthlyConsumption.toFixed(0)} 
-            unit="kg" 
+            unit="L" 
             color="#14b8a6"
-            sub={`${((dosingMetrics.monthlyConsumption / 150) * 100).toFixed(0)}% of target`}
-            trend={dosingMetrics.monthlyConsumption - 150}
+            sub={`${((dosingMetrics.monthlyConsumption / 100) * 100).toFixed(0)}% of target`}
+            trend={dosingMetrics.monthlyConsumption - 100}
           />
           <MetricCard 
             label="Chemical Stock" 
             value={Math.round(dosingMetrics.currentStock)} 
-            unit="kg" 
+            unit="L" 
             color={dosingMetrics.currentStock < 50 ? "#ef4444" : dosingMetrics.currentStock < 100 ? "#eab308" : "#22c55e"}
             sub={`≈ ${dosingMetrics.daysRemaining} days remaining`}
             trend={dosingMetrics.currentStock - 200}
@@ -389,15 +482,101 @@ export function AntiscalantDosing() {
         </div>
 
         {/* Tank gauges */}
-        <div className="rounded p-4 flex flex-col gap-3" style={{ background: "var(--card)", border: "1px solid var(--border)", minWidth: 200 }}>
+        <div className="rounded p-4 flex flex-col gap-3" style={{ background: "var(--card)", border: "1px solid var(--border)", minWidth: 220 }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
             <Droplet size={12} style={{ display: 'inline', marginRight: 4 }} />
             Chemical Tank Levels
           </div>
           <div className="flex justify-around items-start flex-1">
-            <TankGauge level={Math.min(100, (dosingMetrics.currentStock / 500) * 100)} label="Tank A (500L)" />
-            <TankGauge level={Math.min(100, (dosingMetrics.currentStock / 500) * 100 * 0.6)} label="Tank B (500L)" />
-            <TankGauge level={Math.min(100, (dosingMetrics.currentStock / 500) * 100 * 0.3 + 20)} label="Reserve (200L)" />
+            <TankGauge 
+              level={dosingMetrics.tankALevel} 
+              label="Tank A (500L)" 
+              capacity={500}
+            />
+            <TankGauge 
+              level={dosingMetrics.tankBLevel} 
+              label="Tank B (500L)" 
+              capacity={500}
+            />
+            <div className="flex flex-col items-center">
+              <TankGauge 
+                level={dosingMetrics.reserveLevel} 
+                label="Reserve (200L)" 
+                capacity={200}
+                onEdit={handleReserveEdit}
+              />
+              {isEditingReserve && (
+                <div style={{ 
+                  position: 'absolute', 
+                  background: 'var(--card)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 4,
+                  padding: 8,
+                  marginTop: 160,
+                  zIndex: 10,
+                  minWidth: 120
+                }}>
+                  <div style={{ fontSize: 9, color: 'var(--muted-foreground)', marginBottom: 4 }}>
+                    Set Reserve Level (%)
+                  </div>
+                  <input
+                    type="number"
+                    value={editingReserveValue}
+                    onChange={(e) => setEditingReserveValue(Math.min(100, Math.max(0, Number(e.target.value))))}
+                    style={{
+                      width: '100%',
+                      padding: '4px 8px',
+                      background: 'var(--secondary)',
+                      border: '1px solid var(--border)',
+                      borderRadius: 3,
+                      color: 'var(--foreground)',
+                      fontSize: 11,
+                      outline: 'none'
+                    }}
+                  />
+                  <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+                    <button
+                      onClick={handleReserveSave}
+                      style={{
+                        flex: 1,
+                        padding: '2px 8px',
+                        background: '#22c55e',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: 3,
+                        fontSize: 9,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 2
+                      }}
+                    >
+                      <Save size={10} /> Save
+                    </button>
+                    <button
+                      onClick={handleReserveCancel}
+                      style={{
+                        flex: 1,
+                        padding: '2px 8px',
+                        background: 'var(--secondary)',
+                        color: 'var(--muted-foreground)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 3,
+                        fontSize: 9,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 2
+                      }}
+                    >
+                      <X size={10} /> Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -432,7 +611,7 @@ export function AntiscalantDosing() {
             </span>
             <div className="flex items-center gap-2">
               <span style={{ fontSize: 9, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>
-                mg/L
+                mL/hr
               </span>
               <TimeRangeButtons />
             </div>
@@ -442,11 +621,10 @@ export function AntiscalantDosing() {
               <LineChart data={hourlyDosingData} margin={{ top: 4, right: 4, left: -15, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" />
                 <XAxis dataKey="hour" tick={{ fontSize: 9, fill: "#4d7a9e" }} axisLine={false} tickLine={false} interval={hourlyDosingData.length > 20 ? Math.floor(hourlyDosingData.length / 10) : 0} />
-                <YAxis tick={{ fontSize: 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} axisLine={false} tickLine={false} domain={[1.5, 3.5]} tickFormatter={(v) => v.toFixed(1)} />
+                <YAxis tick={{ fontSize: 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} axisLine={false} tickLine={false} domain={[0, 4]} tickFormatter={(v) => v.toFixed(1)} />
                 <Tooltip content={<CustomTooltip />} />
-                <ReferenceLine y={2.0} stroke="#22c55e" strokeDasharray="3 2" strokeWidth={1} label={{ value: "Min", position: "right", fontSize: 9, fill: "#22c55e" }} />
-                <ReferenceLine y={3.0} stroke="#22c55e" strokeDasharray="3 2" strokeWidth={1} label={{ value: "Max", position: "right", fontSize: 9, fill: "#22c55e" }} />
-                <Line type="monotone" dataKey="rate" stroke="#a78bfa" strokeWidth={2} dot={false} name="Dose Rate" />
+                <ReferenceLine y={2.7} stroke="#22c55e" strokeDasharray="3 2" strokeWidth={1} label={{ value: "Rate: 2.7 mL/hr", position: "right", fontSize: 9, fill: "#22c55e" }} />
+                <Line type="monotone" dataKey="rate" stroke="#a78bfa" strokeWidth={2} dot={false} name="Dose Rate (mL/hr)" />
               </LineChart>
             </ResponsiveContainer>
           ) : (
@@ -457,7 +635,7 @@ export function AntiscalantDosing() {
           <div className="flex items-center gap-4 mt-2">
             <div className="flex items-center gap-1">
               <div style={{ width: 20, height: 1, background: "#22c55e", borderTop: "1px dashed #22c55e" }} />
-              <span style={{ fontSize: 9, color: "#22c55e" }}>Normal band (2.0–3.0)</span>
+              <span style={{ fontSize: 9, color: "#22c55e" }}>Target: 2.7 mL/hr</span>
             </div>
             <div className="flex items-center gap-1">
               <div style={{ width: 20, height: 1, background: "#a78bfa" }} />
@@ -473,7 +651,7 @@ export function AntiscalantDosing() {
               Monthly Consumption
             </span>
             <span style={{ fontSize: 9, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>
-              kg · Rolling 6 Months
+              L · Rolling 6 Months
             </span>
           </div>
           {monthlyDosingData.length > 0 ? (
@@ -483,7 +661,7 @@ export function AntiscalantDosing() {
                 <XAxis dataKey="month" tick={{ fontSize: 9, fill: "#4d7a9e" }} axisLine={false} tickLine={false} />
                 <YAxis tick={{ fontSize: 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} axisLine={false} tickLine={false} />
                 <Tooltip content={<CustomTooltip />} />
-                <Bar dataKey="consumption" fill="#a78bfa" radius={[3, 3, 0, 0]} name="Consumption (kg)" />
+                <Bar dataKey="consumption" fill="#a78bfa" radius={[3, 3, 0, 0]} name="Consumption (L)" />
                 <ReferenceLine y={dosingMetrics.monthlyConsumption} stroke="#4d7a9e" strokeDasharray="4 3" strokeWidth={1} label={{ value: "Target", position: "right", fontSize: 9, fill: "#4d7a9e" }} />
               </BarChart>
             </ResponsiveContainer>
@@ -503,7 +681,7 @@ export function AntiscalantDosing() {
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr>
-              {["Date", "Avg Dose Rate (mg/L)", "Consumption (kg)", "Production (m³)", "Dose/m³", "Status"].map((h) => (
+              {["Date", "Dose Rate (mL/hr)", "Consumption (L)", "Production (m³)", "Dose/m³", "Status"].map((h) => (
                 <th key={h} style={{ padding: "6px 10px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.08em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>
                   {h}
                 </th>
@@ -516,8 +694,8 @@ export function AntiscalantDosing() {
                 <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--foreground)", borderBottom: "1px solid var(--border)" }}>
                   {r.date}
                 </td>
-                <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: r.rate > 3.0 ? "#ef4444" : r.rate < 1.8 ? "#eab308" : "#a78bfa", borderBottom: "1px solid var(--border)" }}>
-                  {r.rate}
+                <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: "#a78bfa", borderBottom: "1px solid var(--border)" }}>
+                  {DOSING_RATE_ML_PER_HR.toFixed(1)}
                 </td>
                 <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--foreground)", borderBottom: "1px solid var(--border)" }}>
                   {r.consumption}
@@ -545,6 +723,13 @@ export function AntiscalantDosing() {
           </tbody>
         </table>
       </div>
+
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.4; }
+        }
+      `}</style>
     </div>
   );
 }
