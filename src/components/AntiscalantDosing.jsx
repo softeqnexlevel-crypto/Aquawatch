@@ -5,7 +5,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   ReferenceLine
 } from "recharts";
-import { AlertTriangle, CheckCircle, FlaskConical, Droplet, TrendingUp, TrendingDown, Clock, Edit2, Save, X } from "lucide-react";
+import { AlertTriangle, CheckCircle, FlaskConical, Droplet, TrendingUp, TrendingDown, Clock, Edit2, Save, X, Bug } from "lucide-react";
 import { useData } from "../contexts/DataContext";
 import { format, subHours, subDays, startOfDay } from 'date-fns';
 
@@ -25,6 +25,11 @@ const CustomTooltip = ({ active, payload, label }) => {
 };
 
 // ===================== ROBUST TYPE NORMALIZATION =====================
+/**
+ * Normalize any value to a boolean representing "active/on" state
+ * Handles: 1, true, "1", "true", "on", "active", "yes", "running", "enabled", "online" → true
+ * Everything else → false
+ */
 const isActive = (value) => {
   if (value === undefined || value === null) return false;
   if (typeof value === 'boolean') return value;
@@ -103,17 +108,86 @@ function MetricCard({ label, value, unit, color, sub, trend }) {
   );
 }
 
+// ===================== DEBUG PANEL =====================
+function DebugPanel({ data }) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  if (!isOpen) {
+    return (
+      <button
+        onClick={() => setIsOpen(true)}
+        style={{
+          position: 'fixed',
+          bottom: 20,
+          right: 20,
+          zIndex: 999,
+          padding: '8px 12px',
+          background: '#1e293b',
+          border: '1px solid #0ea5e9',
+          borderRadius: 4,
+          color: '#0ea5e9',
+          fontSize: 10,
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4
+        }}
+      >
+        <Bug size={14} /> Debug
+      </button>
+    );
+  }
+
+  return (
+    <div style={{
+      position: 'fixed',
+      bottom: 20,
+      right: 20,
+      zIndex: 999,
+      background: '#0a1828',
+      border: '1px solid #0ea5e9',
+      borderRadius: 8,
+      padding: 16,
+      maxWidth: 400,
+      maxHeight: 400,
+      overflow: 'auto',
+      boxShadow: '0 4px 20px rgba(0,0,0,0.8)'
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#0ea5e9' }}>🔍 Debug Info</span>
+        <button
+          onClick={() => setIsOpen(false)}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: 'var(--muted-foreground)',
+            cursor: 'pointer'
+          }}
+        >
+          <X size={14} />
+        </button>
+      </div>
+      <div style={{ fontSize: 10, fontFamily: 'var(--font-mono)', color: 'var(--foreground)' }}>
+        {Object.entries(data).map(([key, value]) => (
+          <div key={key} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+            <span style={{ color: 'var(--muted-foreground)' }}>{key}:</span>
+            <span style={{ color: '#0ea5e9' }}>{String(value)}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ===================== MAIN COMPONENT =====================
 export function AntiscalantDosing() {
   const { sensorData, getValue, getHistory, lastUpdate } = useData();
   const [timeRange, setTimeRange] = useState('24h');
   const [isEditingReserve, setIsEditingReserve] = useState(false);
+  const [showDebug, setShowDebug] = useState(false);
 
   // Chemical Reserve is a MANUALLY set stock level (in Liters).
-  // Operators update this whenever they refill / measure the tanks by hand.
-  // It automatically depletes based on the antiscalant actually dosed,
-  // which only accumulates while the dosing bit (RO5-AntiscalantDosingActive) is TRUE.
-  const [reserveCapacityL, setReserveCapacityL] = useState(1200); // Stock level when last set/refilled
+  const [reserveCapacityL, setReserveCapacityL] = useState(1200);
   const [editingReserveValue, setEditingReserveValue] = useState(1200);
 
   // Dosing rate is fixed at 2.7 ml/hr
@@ -131,23 +205,62 @@ export function AntiscalantDosing() {
   const recovery = getValue('RO5-SystemRecovery') || 0;
   const pureWaterEC = getValue('RO5-PureWaterEc') || 0;
   const roPressure = getValue('RO5-ROPressure') || 0;
-  const dosingActive = getValue('RO5-AntiscalantDosingActive') || 0;
+  const dosingActive = getValue('RO5-AntiscalantDosingActive');
+
+  // ===================== DEBUG LOGGING =====================
+  // Log all available sensor data keys
+  console.log('=== Antiscalant Dosing Debug ===');
+  console.log('Available sensorData keys:', Object.keys(sensorData || {}));
+  console.log('Raw dosingActive value:', dosingActive);
+  console.log('Type of dosingActive:', typeof dosingActive);
+
+  // Check if the sensor exists in sensorData
+  const sensorExists = sensorData && 'RO5-AntiscalantDosingActive' in sensorData;
+  console.log('Sensor "RO5-AntiscalantDosingActive" exists:', sensorExists);
+  if (sensorExists) {
+    console.log('Sensor data:', sensorData['RO5-AntiscalantDosingActive']);
+  }
 
   // Check if dosing is active using robust type normalization
   const isDosingActive = isActive(dosingActive);
+  console.log('isDosingActive result:', isDosingActive);
+  console.log('isActive() check for various values:');
+  console.log('  - dosingActive (raw):', dosingActive);
+  console.log('  - isActive(dosingActive):', isDosingActive);
+  console.log('  - isActive(1):', isActive(1));
+  console.log('  - isActive("ON"):', isActive("ON"));
+  console.log('  - isActive(true):', isActive(true));
+  console.log('  - isActive(0):', isActive(0));
+  console.log('  - isActive("OFF"):', isActive("OFF"));
+  console.log('  - isActive(false):', isActive(false));
+  console.log('=== End Debug ===');
+
+  // ===================== DEBUG DATA FOR PANEL =====================
+  const debugData = {
+    'Raw dosingActive': dosingActive !== undefined ? String(dosingActive) : 'undefined',
+    'Type of dosingActive': typeof dosingActive,
+    'Sensor exists': sensorExists ? '✅ YES' : '❌ NO',
+    'isDosingActive': isDosingActive ? '✅ TRUE (RUNNING)' : '❌ FALSE (STOPPED)',
+    'Connected': sensorData ? '✅ YES' : '❌ NO',
+    'Last Update': lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--',
+    'Feed Flow': feedFlow.toFixed(1),
+    'Permeate Flow': permeateFlow.toFixed(1),
+    'Recovery': recovery.toFixed(1),
+    'RO Pressure': roPressure.toFixed(1),
+    'Pure Water EC': pureWaterEC.toFixed(1),
+    'Reserve Level': reserveCapacityL,
+    'Runtime (hrs)': (runtimeSeconds / 3600).toFixed(2),
+    'Total Dosed (mL)': ((runtimeSeconds / 3600) * DOSING_RATE_ML_PER_HR).toFixed(1),
+  };
 
   // Get history for trends
   const feedHistory = getHistory('RO5-FEEDFlow');
   const permeateHistory = getHistory('RO5-Permeateflow');
 
   // ===================== RUNTIME TRACKING =====================
-  // Single source of truth for "counting": the runtime-seconds counter
-  // (and therefore all consumption / stock-depletion math below) only
-  // advances while isDosingActive === true (RO5-AntiscalantDosingActive bit).
-  // As soon as the bit goes false, the interval is cleared and counting stops.
   useEffect(() => {
     if (isDosingActive && !isDosingRunning) {
-      // Dosing bit turned TRUE -> start counting
+      console.log('🟢 Dosing started! (isDosingActive = true)');
       setIsDosingRunning(true);
       startTimeRef.current = Date.now();
 
@@ -155,7 +268,7 @@ export function AntiscalantDosing() {
         setRuntimeSeconds(prev => prev + 1);
       }, 1000);
     } else if (!isDosingActive && isDosingRunning) {
-      // Dosing bit turned FALSE -> stop counting
+      console.log('🔴 Dosing stopped! (isDosingActive = false)');
       setIsDosingRunning(false);
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
@@ -173,28 +286,23 @@ export function AntiscalantDosing() {
 
   // ===================== CALCULATE DOSING METRICS =====================
   const dosingMetrics = useMemo(() => {
-    // Dosing rate is fixed at 2.7 ml/hr
     const dosingRateML = DOSING_RATE_ML_PER_HR;
-    const dosingRateMgL = dosingRateML / 1000; // Convert to mg/L (assuming density ~1)
+    const dosingRateMgL = dosingRateML / 1000;
 
-    // Calculate total dosed based on runtime (only accumulates while dosing bit is TRUE)
     const runtimeHours = runtimeSeconds / 3600;
     const totalDosedML = runtimeHours * DOSING_RATE_ML_PER_HR;
     const totalDosedL = totalDosedML / 1000;
 
-    // Daily consumption based on runtime
     const dailyConsumption = (runtimeHours > 0) ? (totalDosedML / runtimeHours) * 24 : 0;
     const weeklyConsumption = dailyConsumption * 7;
     const monthlyConsumption = dailyConsumption * 30;
 
-    // Efficiency based on recovery and EC
     const efficiency = Math.min(100, 85 + (recovery / 100) * 15 + (100 - pureWaterEC / 10) / 10);
 
-    // Stock calculation: manually-set reserve, depleted by actual dosed volume
     const currentStockL = Math.min(reserveCapacityL, Math.max(0, reserveCapacityL - totalDosedL));
     const reserveLevelPercent = reserveCapacityL > 0 ? Math.min(100, Math.max(0, (currentStockL / reserveCapacityL) * 100)) : 0;
 
-    const dailyConsumptionL = dailyConsumption / 1000; // Convert to liters
+    const dailyConsumptionL = dailyConsumption / 1000;
     const daysRemaining = dailyConsumptionL > 0 ? Math.floor(currentStockL / dailyConsumptionL) : 0;
 
     return {
@@ -228,7 +336,7 @@ export function AntiscalantDosing() {
     filtered.forEach(d => {
       const hour = format(new Date(d.time), 'HH:00');
       if (!grouped[hour]) grouped[hour] = { hour, rate: 0, count: 0 };
-      const rate = DOSING_RATE_ML_PER_HR / 1000; // Convert to mg/L
+      const rate = DOSING_RATE_ML_PER_HR / 1000;
       grouped[hour].rate += rate;
       grouped[hour].count++;
     });
@@ -347,8 +455,6 @@ export function AntiscalantDosing() {
   }, [isDosingActive, dosingMetrics.currentStock, pureWaterEC]);
 
   // ===================== HANDLE RESERVE EDIT =====================
-  // Operator manually enters the current chemical reserve stock (in Liters),
-  // e.g. after refilling drums or taking a manual dip/level reading.
   const handleReserveEdit = () => {
     setIsEditingReserve(true);
     setEditingReserveValue(reserveCapacityL);
@@ -357,8 +463,6 @@ export function AntiscalantDosing() {
   const handleReserveSave = () => {
     const newLevel = Math.max(0, editingReserveValue);
     setReserveCapacityL(newLevel);
-    // Reset the depletion baseline: from this point on, consumption is
-    // tracked (only while dosing is active) against the newly-entered figure.
     setRuntimeSeconds(0);
     setIsEditingReserve(false);
   };
@@ -393,6 +497,31 @@ export function AntiscalantDosing() {
 
   return (
     <div className="flex flex-col gap-4 p-4 overflow-auto h-full" style={{ scrollbarWidth: "none" }}>
+      {/* Debug Panel */}
+      <button
+        onClick={() => setShowDebug(!showDebug)}
+        style={{
+          position: 'fixed',
+          bottom: 20,
+          right: 20,
+          zIndex: 999,
+          padding: '8px 12px',
+          background: '#1e293b',
+          border: '1px solid #0ea5e9',
+          borderRadius: 4,
+          color: '#0ea5e9',
+          fontSize: 10,
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 4
+        }}
+      >
+        <Bug size={14} /> Debug
+      </button>
+
+      {showDebug && <DebugPanel data={debugData} />}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

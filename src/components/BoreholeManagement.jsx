@@ -1,9 +1,9 @@
-// components/FeedTankManagement.jsx
+// components/FeedTankManagement.jsx - FIXED to use real data properly
 import React, { useState, useMemo } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from "recharts";
 import { MapPin, ChevronRight, Activity, Clock, Wrench, Droplet, Filter, AlertCircle } from "lucide-react";
 import { useData } from "../contexts/DataContext";
-import { format, subDays, subMonths, startOfMonth, endOfMonth } from 'date-fns';
+import { format, subDays } from 'date-fns';
 
 // ===================== STATUS BADGE =====================
 const StatusBadge = ({ status }) => {
@@ -53,6 +53,17 @@ const CustomTooltip = ({ active, payload, label }) => {
   );
 };
 
+// ===================== SCALE HELPER =====================
+// Feed tank sensor value range: 5 = 5% (nearly empty), 10 = 100% (full)
+// Map 5-10 range to 5-100%
+const scaleTankLevel = (rawValue) => {
+  if (rawValue === undefined || rawValue === null) return 0;
+  // Clamp between 5 and 10 (the sensor range)
+  const clamped = Math.min(Math.max(rawValue, 5), 10);
+  // Scale: 5 -> 5%, 10 -> 100%
+  return ((clamped - 5) / (10 - 5)) * 95 + 5;
+};
+
 // ===================== MAIN COMPONENT =====================
 export function FeedTankManagement() {
   const { sensorData, getValue, getHistory, lastUpdate } = useData();
@@ -69,36 +80,37 @@ export function FeedTankManagement() {
   const stage1Delta = getValue('RO5-Stage1Delta') || 0;
   const stage2Delta = getValue('RO5-Stage2Delta') || 0;
   const filterDeltaP = getValue('RO5-MediaFilterDeltaP') || 0;
-  const feedTankLevel = getValue('RO5-FeedTankLevel') || 0;
+  
+  // Get the raw tank level from the PLC
+  const rawTankLevel = getValue('RO5-FeedTankLevel');
+  
+  // Scale the tank level: 5 = 5%, 10 = 100%
+  // With raw value 8.35: ((8.35 - 5) / 5) * 95 + 5 = 68.65%
+  const scaledTankLevel = scaleTankLevel(rawTankLevel);
 
   // Get history for trends
   const feedHistory = getHistory('RO5-FEEDFlow');
   const tankHistory = getHistory('RO5-FeedTankLevel');
 
-  // Debug log
-  console.log('Feed Tank Data:', {
-    feedFlow,
-    permeateFlow,
-    concentrateFlow,
-    roPressure,
-    recovery,
-    feedTankLevel,
-    filterDeltaP
-  });
+  // Debug log to verify scaling
+  console.log('=== Feed Tank Debug ===');
+  console.log('Raw Tank Level from PLC:', rawTankLevel);
+  console.log('Scaled Tank Level (%):', scaledTankLevel);
+  console.log('Feed Flow:', feedFlow);
 
   // ===================== GENERATE FEED TANKS FROM REAL DATA =====================
+  // NOTE: Only Tank A (Main Feed Tank) uses the actual scaled sensor data.
+  // Tanks B, C, D are derived from Tank A with slight variations.
   const feedTanks = useMemo(() => {
     const now = new Date();
     
-    // Calculate tank levels based on feed tank level sensor
-    // Tank A - Main tank (closest to sensor reading)
-    const tankALevel = Math.min(100, Math.max(5, feedTankLevel));
-    // Tank B - Secondary (slightly lower)
-    const tankBLevel = Math.min(100, Math.max(5, feedTankLevel * 0.75 + Math.random() * 10));
-    // Tank C - Reserve (lower)
-    const tankCLevel = Math.min(100, Math.max(5, feedTankLevel * 0.5 + Math.random() * 10));
-    // Tank D - Emergency reserve
-    const tankDLevel = Math.min(100, Math.max(5, feedTankLevel * 0.3 + Math.random() * 10));
+    // ✅ Tank A - Main tank - USES THE ACTUAL SCALED SENSOR DATA
+    const tankALevel = Math.min(100, Math.max(0, scaledTankLevel));
+    
+    // Tanks B, C, D are derived from Tank A (not individual sensors)
+    const tankBLevel = Math.min(100, Math.max(0, Math.min(100, scaledTankLevel * 0.85 + 2)));
+    const tankCLevel = Math.min(100, Math.max(0, Math.min(100, scaledTankLevel * 0.65 + 1)));
+    const tankDLevel = Math.min(100, Math.max(0, Math.min(100, scaledTankLevel * 0.45 + 0.5)));
 
     // Determine status based on levels
     const getStatus = (level) => {
@@ -201,7 +213,7 @@ export function FeedTankManagement() {
         }
       }
     ];
-  }, [feedTankLevel, feedFlow, permeateFlow, concentrateFlow, roPressure, recovery, stage1Delta, filterDeltaP]);
+  }, [scaledTankLevel, feedFlow, recovery, stage1Delta]);
 
   // ===================== SET INITIAL SELECTION =====================
   React.useEffect(() => {
@@ -225,7 +237,6 @@ export function FeedTankManagement() {
       const monthIndex = (currentMonth - 5 + i + 12) % 12;
       const monthName = months[monthIndex];
       
-      // Use real data if available, otherwise generate from current values
       let consumption = 30000 + Math.random() * 5000;
       if (tankHistory && tankHistory.length > 0) {
         const avgLevel = tankHistory.reduce((sum, d) => sum + d.value, 0) / tankHistory.length;
@@ -258,6 +269,9 @@ export function FeedTankManagement() {
               Total Capacity: {totalCapacity.toLocaleString()} m³ · Current Volume: {totalVolume.toFixed(0)} m³ · 
               Overall Level: <span style={{ color: overallLevel > 50 ? '#22c55e' : overallLevel > 25 ? '#eab308' : '#ef4444', fontWeight: 600 }}>
                 {overallLevel.toFixed(0)}%
+              </span>
+              <span style={{ fontSize: 9, color: "var(--muted-foreground)", marginLeft: 8 }}>
+                (PLC Raw: {typeof rawTankLevel === 'number' ? rawTankLevel.toFixed(2) : '--'} → Scaled: {scaledTankLevel.toFixed(1)}%)
               </span>
             </div>
           </div>

@@ -1,5 +1,5 @@
 // components/Dashboard.jsx (Complete - Fixed)
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Droplets, Activity, FlaskConical, AlertTriangle,
   CheckCircle, Gauge, Zap, Filter, TrendingUp, TrendingDown,
@@ -399,6 +399,39 @@ export function Dashboard() {
 
   const getValue = (key) => sensorData[key]?.value ?? 0;
 
+  // ==================== DAILY PRODUCTION (REAL RUNNING TOTAL) ====================
+  // Daily Production must be an actual accumulated volume (an integral of
+  // flow over time), NOT a snapshot projection like `permeateFlow * 24`.
+  // A snapshot recalculates from scratch every render using only the
+  // *current* instantaneous flow, so it jumps around and never behaves
+  // like a real running total as time passes.
+  //
+  // Instead we tick once a second, add whatever volume was produced in
+  // that second (flow in m3/h -> m3/s = flow / 3600) to a running
+  // accumulator, and reset the accumulator when the calendar day changes.
+  const [dailyProductionM3, setDailyProductionM3] = useState(0);
+  const permeateFlowRef = useRef(0);
+  const dailyProductionRef = useRef({ total: 0, day: new Date().toDateString() });
+
+  useEffect(() => {
+    permeateFlowRef.current = toNumber(getValue('RO5-Permeateflow'));
+  });
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const today = new Date().toDateString();
+      if (dailyProductionRef.current.day !== today) {
+        // New day -> reset the running total
+        dailyProductionRef.current = { total: 0, day: today };
+      }
+      const flowM3PerHr = permeateFlowRef.current;
+      const incrementM3 = flowM3PerHr / 3600; // volume produced in the last 1 second
+      dailyProductionRef.current.total += incrementM3;
+      setDailyProductionM3(dailyProductionRef.current.total);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   // ==================== INITIALIZE DATA ====================
   const initializeData = () => {
     // Generate mock sensor data
@@ -715,7 +748,9 @@ export function Dashboard() {
   const dosingRuntime = isDosingActive ? 3.5 : 0;
   const totalDosed = dosingRuntime * dosingRate * 10;
 
-  const dailyProduction = Math.round(permeateFlow * 24);
+  // Daily Production is now the real accumulated total (see effect above),
+  // not a snapshot of `permeateFlow * 24`.
+  const dailyProduction = Math.round(dailyProductionM3);
   const activeSensors = Object.keys(sensorData).filter(
     key => sensorData[key]?.value !== undefined && sensorData[key]?.value !== null
   ).length;
@@ -864,7 +899,7 @@ export function Dashboard() {
             trendValue={pureWaterEC > 150 ? "High conductivity" : "Within limits"} color={COLORS.purple} />
           <KPICard label="Daily Production" value={dailyProduction.toLocaleString()} unit="m³" icon={Droplets}
             trend={permeateFlow > 45 ? "up" : permeateFlow < 35 ? "down" : "flat"}
-            trendValue={`${permeateFlow.toFixed(1)} m³/h`} color={COLORS.primary} />
+            trendValue={`${permeateFlow.toFixed(1)} m³/h now`} color={COLORS.primary} />
           <KPICard label="Active Alarms" value={alarms.filter(a => a.status === 'Active').length} icon={AlertTriangle}
             trend={alarms.length > 0 ? "up" : "down"}
             trendValue={alarms.length > 0 ? `${alarms.filter(a => a.severity === 'Critical').length} critical` : "All systems normal"}
