@@ -197,30 +197,27 @@ export function AntiscalantDosing() {
   const recovery = getValue('RO5-SystemRecovery') || 0;
   const pureWaterEC = getValue('RO5-PureWaterEc') || 0;
   const roPressure = getValue('RO5-ROPressure') || 0;
-  
-  // ✅ FIX: Try ALL possible keys for Antiscalant Doser
-  const dosingActive = getValue('RO5-AntiscalantDoser') ?? 
-                       getValue('RO5-AntiscalantDosingActive') ?? 
-                       getValue('AntiscalantDoser') ?? 
-                       getValue('AntiscalantDosingActive') ?? 0;
 
-  // Log what we got
-  console.log('🔍 ANTISCALANT DEBUG:');
-  console.log('  RO5-AntiscalantDoser:', getValue('RO5-AntiscalantDoser'));
-  console.log('  RO5-AntiscalantDosingActive:', getValue('RO5-AntiscalantDosingActive'));
-  console.log('  AntiscalantDoser:', getValue('AntiscalantDoser'));
-  console.log('  Final dosingActive:', dosingActive);
+  // ✅ FIX: DataContext already normalizes every possible backend key
+  // (RO5-AntiscalantDoser, siemens200smart-RO5-AntiscalantDoser, etc.)
+  // into this single canonical key, as an already-normalized 'ON'/'OFF'
+  // string. Read that one key directly — do NOT chain it with `??`
+  // fallbacks to other key names. Those other keys don't exist in
+  // sensorData, so getValue() for them falls through to its numeric
+  // default of 0 (not undefined/null), which `??` treats as a valid
+  // value and stops right there — permanently locking dosingActive to 0
+  // regardless of the real, correctly-normalized value sitting under
+  // 'RO5-AntiscalantDosingActive'.
+  const dosingActive = getValue('RO5-AntiscalantDosingActive');
 
   const isDosingActive = isActive(dosingActive);
-  console.log('  isDosingActive:', isDosingActive);
 
   // ===================== DEBUG DATA FOR PANEL =====================
   const debugData = {
     'Raw dosingActive': dosingActive !== undefined ? String(dosingActive) : 'undefined',
     'Type of dosingActive': typeof dosingActive,
     'isDosingActive': isDosingActive ? '✅ TRUE (RUNNING)' : '❌ FALSE (STOPPED)',
-    'RO5-AntiscalantDoser': getValue('RO5-AntiscalantDoser'),
-    'RO5-AntiscalantDosingActive': getValue('RO5-AntiscalantDosingActive'),
+    'RO5-AntiscalantDosingActive (raw)': sensorData?.['RO5-AntiscalantDosingActive']?.value,
     'Connected': sensorData ? '✅ YES' : '❌ NO',
     'Last Update': lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--',
     'Feed Flow': feedFlow.toFixed(1),
@@ -232,9 +229,12 @@ export function AntiscalantDosing() {
   const permeateHistory = getHistory('RO5-Permeateflow');
 
   // ===================== RUNTIME TRACKING =====================
+  // Single source of truth for "counting": the runtime-seconds counter
+  // (and therefore all consumption / stock-depletion math below) only
+  // advances while isDosingActive === true. As soon as the bit goes
+  // false, the interval is cleared and counting stops.
   useEffect(() => {
     if (isDosingActive && !isDosingRunning) {
-      console.log('🟢 Dosing started! (isDosingActive = true)');
       setIsDosingRunning(true);
       startTimeRef.current = Date.now();
 
@@ -242,7 +242,6 @@ export function AntiscalantDosing() {
         setRuntimeSeconds(prev => prev + 1);
       }, 1000);
     } else if (!isDosingActive && isDosingRunning) {
-      console.log('🔴 Dosing stopped! (isDosingActive = false)');
       setIsDosingRunning(false);
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
@@ -657,7 +656,6 @@ export function AntiscalantDosing() {
                       background: 'var(--secondary)',
                       color: 'var(--muted-foreground)',
                       border: '1px solid var(--border)',
-                      borderRadius: 3,
                       fontSize: 9,
                       cursor: 'pointer',
                       display: 'flex',
