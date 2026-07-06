@@ -1,4 +1,4 @@
-// components/Dashboard.jsx (Complete - Fixed)
+// components/Dashboard.jsx (Updated - Removed MultiSensorChart)
 import React, { useState, useEffect, useRef } from 'react';
 import {
   Droplets, Activity, FlaskConical, AlertTriangle,
@@ -10,7 +10,7 @@ import { API_BASE_URL } from '../config';
 
 import { AdvancedGauge } from './dashboardComponents/AdvancedGauge';
 import { LiveTrendChart } from './dashboardComponents/LiveTrendChart';
-import { MultiSensorChart } from './dashboardComponents/MultiSensorChart';
+// REMOVED: import { MultiSensorChart } from './dashboardComponents/MultiSensorChart';
 import { SystemHealthRadar } from './dashboardComponents/SystemHealthRadar';
 import { FlowBalanceChart } from './dashboardComponents/FlowBalanceChart';
 import { DistributionHistogram } from './dashboardComponents/DistributionHistogram';
@@ -394,21 +394,13 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [lastUpdate, setLastUpdate] = useState(null);
-  const [selectedSensors, setSelectedSensors] = useState(['RO5-FEEDFlow', 'RO5-Permeateflow', 'RO5-ConcetrateFlow']);
+  // RADIO BUTTON BEHAVIOR: Only one sensor selected at a time
+  const [selectedSensors, setSelectedSensors] = useState(['RO5-Permeateflow']);
   const [dataInitialized, setDataInitialized] = useState(false);
 
   const getValue = (key) => sensorData[key]?.value ?? 0;
 
   // ==================== DAILY PRODUCTION (REAL RUNNING TOTAL) ====================
-  // Daily Production must be an actual accumulated volume (an integral of
-  // flow over time), NOT a snapshot projection like `permeateFlow * 24`.
-  // A snapshot recalculates from scratch every render using only the
-  // *current* instantaneous flow, so it jumps around and never behaves
-  // like a real running total as time passes.
-  //
-  // Instead we tick once a second, add whatever volume was produced in
-  // that second (flow in m3/h -> m3/s = flow / 3600) to a running
-  // accumulator, and reset the accumulator when the calendar day changes.
   const [dailyProductionM3, setDailyProductionM3] = useState(0);
   const permeateFlowRef = useRef(0);
   const dailyProductionRef = useRef({ total: 0, day: new Date().toDateString() });
@@ -421,11 +413,10 @@ export function Dashboard() {
     const interval = setInterval(() => {
       const today = new Date().toDateString();
       if (dailyProductionRef.current.day !== today) {
-        // New day -> reset the running total
         dailyProductionRef.current = { total: 0, day: today };
       }
       const flowM3PerHr = permeateFlowRef.current;
-      const incrementM3 = flowM3PerHr / 3600; // volume produced in the last 1 second
+      const incrementM3 = flowM3PerHr / 3600;
       dailyProductionRef.current.total += incrementM3;
       setDailyProductionM3(dailyProductionRef.current.total);
     }, 1000);
@@ -434,7 +425,6 @@ export function Dashboard() {
 
   // ==================== INITIALIZE DATA ====================
   const initializeData = () => {
-    // Generate mock sensor data
     const mockData = generateMockSensorData();
     const formatted = {};
     Object.entries(mockData).forEach(([key, value]) => {
@@ -449,7 +439,6 @@ export function Dashboard() {
     });
     setSensorData(formatted);
 
-    // Generate mock history data
     const mockHistory = generateMockHistoryData();
     setHistory(mockHistory);
 
@@ -579,7 +568,6 @@ export function Dashboard() {
       setSensorData(prev => ({ ...prev, ...formatted }));
       setLastUpdate(new Date().toISOString());
 
-      // Update history with real data
       setHistory(prev => {
         const newHistory = { ...prev };
         Object.keys(formatted).forEach(key => {
@@ -590,7 +578,6 @@ export function Dashboard() {
             time: new Date().toISOString(),
             value: formatted[key].value
           });
-          // Keep only last MAX_HISTORY_POINTS
           if (newHistory[key].length > MAX_HISTORY_POINTS) {
             newHistory[key] = newHistory[key].slice(-MAX_HISTORY_POINTS);
           }
@@ -611,7 +598,6 @@ export function Dashboard() {
       setDataInitialized(true);
     } catch (err) {
       console.error('Failed to fetch real data:', err);
-      // If real data fails, use mock data
       if (!dataInitialized) {
         initializeData();
       }
@@ -622,10 +608,8 @@ export function Dashboard() {
 
   // ==================== INITIALIZE ====================
   useEffect(() => {
-    // Start with mock data immediately
     initializeData();
 
-    // Then try to fetch real data
     const socket = io(API_BASE_URL, {
       transports: ['websocket', 'polling'],
     });
@@ -716,10 +700,10 @@ export function Dashboard() {
     }
   };
 
+  // ==================== TOGGLE SENSOR - RADIO BUTTON BEHAVIOR ====================
   const toggleSensor = (key) => {
-    setSelectedSensors(prev =>
-      prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
-    );
+    // Radio button behavior: clicking a sensor selects it and deselects all others
+    setSelectedSensors([key]);
   };
 
   // ==================== GET VALUES ====================
@@ -748,8 +732,6 @@ export function Dashboard() {
   const dosingRuntime = isDosingActive ? 3.5 : 0;
   const totalDosed = dosingRuntime * dosingRate * 10;
 
-  // Daily Production is now the real accumulated total (see effect above),
-  // not a snapshot of `permeateFlow * 24`.
   const dailyProduction = Math.round(dailyProductionM3);
   const activeSensors = Object.keys(sensorData).filter(
     key => sensorData[key]?.value !== undefined && sensorData[key]?.value !== null
@@ -934,12 +916,11 @@ export function Dashboard() {
         <SystemHealthRadar data={sensorData} />
       </div>
 
-      {/* Multi-sensor comparison + selector */}
+      {/* REMOVED: MultiSensorChart - Only the sensor selector remains */}
       <div>
-        <MultiSensorChart data={chartData} sensors={selectedSensors} height={220} />
-        <div className="rounded p-3 mt-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+        <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
           <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 8, display: "block" }}>
-            Select Sensors for Comparison
+            Select Sensor for Comparison
           </span>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
             {Object.keys(SENSOR_MAP).map(key => {
@@ -954,10 +935,13 @@ export function Dashboard() {
                     borderRadius: 12,
                     background: isSelected ? sensor.color : 'var(--secondary)',
                     color: isSelected ? 'white' : 'var(--muted-foreground)',
-                    border: '1px solid var(--border)',
+                    border: isSelected ? `2px solid ${sensor.color}` : '1px solid var(--border)',
                     fontSize: 10,
                     cursor: 'pointer',
-                    transition: 'all 0.2s'
+                    transition: 'all 0.2s',
+                    fontWeight: isSelected ? 600 : 400,
+                    opacity: isSelected ? 1 : 0.7,
+                    transform: isSelected ? 'scale(1.02)' : 'scale(1)',
                   }}
                 >
                   {sensor.label}
