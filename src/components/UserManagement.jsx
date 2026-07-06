@@ -414,7 +414,7 @@ export function UserManagement() {
 
   // ==================== RENDER ====================
   return (
-    <div className="flex flex-col gap-4 p-4 overflow-auto h-full" style={{ scrollbarWidth: "none" }}>
+    <div className="flex flex-col gap-4 p-4 overflow-auto h-full" >
       {/* Read-only banner */}
       {!isAdmin && (
         <div className="flex items-center gap-2 rounded p-2.5" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}>

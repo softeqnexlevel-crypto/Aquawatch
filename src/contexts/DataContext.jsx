@@ -1,3 +1,4 @@
+// frontend/src/contexts/DataContext.jsx
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
 import { API_BASE_URL } from '../config';
@@ -22,7 +23,15 @@ const KEY_MAPPING = {
   'siemens200smart-RO5-FeedTankLevel': 'RO5-FeedTankLevel',
   'siemens200smart-RO5-SystemOperation': 'RO5-SystemOperation',
   'siemens200smart-RO5-SystemMode': 'RO5-SystemMode',
+  
+  // ✅ ANTISCALANT DOSER MAPPINGS
   'siemens200smart-RO5-AntiscalantDosingActive': 'RO5-AntiscalantDosingActive',
+  'RO5-AntiscalantDoser': 'RO5-AntiscalantDosingActive',
+  'siemens200smart-RO5-AntiscalantDoser': 'RO5-AntiscalantDosingActive',
+  'RO5-AntiscalantDosingActive': 'RO5-AntiscalantDosingActive',
+  'AntiscalantDoser': 'RO5-AntiscalantDosingActive',
+  'AntiscalantDosingActive': 'RO5-AntiscalantDosingActive',
+  'RO5/AntiscalantDoser': 'RO5-AntiscalantDosingActive',
 };
 
 const getUnitForParameter = (param) => {
@@ -48,6 +57,36 @@ const getUnitForParameter = (param) => {
   return units[param] || '';
 };
 
+/**
+ * Normalize Antiscalant Doser value to ON/OFF
+ * Handles: 1, true, "1", "true", "ON", "on" → "ON"
+ *          0, false, "0", "false", "OFF", "off" → "OFF"
+ */
+const normalizeAntiscalantValue = (value) => {
+  if (value === undefined || value === null) return 'OFF';
+  
+  // If it's already a string "ON" or "OFF"
+  if (typeof value === 'string') {
+    const normalized = value.toUpperCase().trim();
+    if (normalized === 'ON' || normalized === 'TRUE' || normalized === '1') return 'ON';
+    if (normalized === 'OFF' || normalized === 'FALSE' || normalized === '0') return 'OFF';
+    // If it's any other string, treat as OFF
+    return 'OFF';
+  }
+  
+  // If it's a boolean
+  if (typeof value === 'boolean') {
+    return value ? 'ON' : 'OFF';
+  }
+  
+  // If it's a number
+  if (typeof value === 'number') {
+    return value === 1 ? 'ON' : 'OFF';
+  }
+  
+  return 'OFF';
+};
+
 export const DataProvider = ({ children }) => {
   const [sensorData, setSensorData] = useState({});
   const [history, setHistory] = useState({});
@@ -58,20 +97,34 @@ export const DataProvider = ({ children }) => {
 
   const fetchInitialData = async () => {
     try {
-      // ✅ FIXED: Proper API path without duplicate
       const response = await fetch(`${API_BASE_URL}/api/current`);
       if (!response.ok) throw new Error(`HTTP ${response.status}: Failed to fetch data`);
       const readings = await response.json();
       
+      console.log('📊 Fetched readings:', readings);
+      
       const formattedData = {};
       Object.entries(readings).forEach(([rawKey, value]) => {
-        const key = KEY_MAPPING[rawKey] || rawKey;
+        // Try to find the key in KEY_MAPPING
+        let key = KEY_MAPPING[rawKey] || rawKey;
+        
+        // ✅ Special handling for Antiscalant - normalize the value
+        let finalValue = value;
+        if (key === 'RO5-AntiscalantDosingActive' || rawKey.includes('Antiscalant')) {
+          finalValue = normalizeAntiscalantValue(value);
+          console.log(`🔍 Antiscalant normalized: ${rawKey} → ${key} = ${value} → ${finalValue}`);
+        }
+        
         formattedData[key] = {
-          value: value,
+          value: finalValue,
           timestamp: new Date().toISOString(),
           unit: getUnitForParameter(key)
         };
       });
+      
+      console.log('📊 Formatted sensor data keys:', Object.keys(formattedData));
+      console.log('🔍 Antiscalant value:', formattedData['RO5-AntiscalantDosingActive']?.value);
+      
       setSensorData(formattedData);
       setLoading(false);
       setLastUpdate(new Date().toISOString());
@@ -83,7 +136,6 @@ export const DataProvider = ({ children }) => {
   };
 
   useEffect(() => {
-    // ✅ FIXED: Socket connection - use API_BASE_URL directly
     const socket = io(API_BASE_URL, {
       transports: ['websocket', 'polling'],
       reconnection: true,
@@ -99,13 +151,20 @@ export const DataProvider = ({ children }) => {
 
     socket.on('plc-data', (newData) => {
       const rawKey = newData.parameter;
-      const key = KEY_MAPPING[rawKey] || rawKey;
+      let key = KEY_MAPPING[rawKey] || rawKey;
       const timestamp = newData.timestamp || new Date().toISOString();
+      
+      // ✅ Special handling for Antiscalant - normalize the value
+      let value = newData.value;
+      if (key === 'RO5-AntiscalantDosingActive' || rawKey.includes('Antiscalant')) {
+        value = normalizeAntiscalantValue(newData.value);
+        console.log(`🔴 Antiscalant received: ${rawKey} → ${key} = ${newData.value} → ${value}`);
+      }
       
       setSensorData(prev => ({
         ...prev,
         [key]: {
-          value: newData.value,
+          value: value,
           timestamp: timestamp,
           unit: newData.unit || getUnitForParameter(key),
           simulated: newData.simulated || false
@@ -116,7 +175,7 @@ export const DataProvider = ({ children }) => {
         const currentHistory = prev[key] || [];
         const newHistory = [...currentHistory, {
           time: new Date(timestamp),
-          value: newData.value
+          value: value
         }];
         return {
           ...prev,
@@ -135,11 +194,9 @@ export const DataProvider = ({ children }) => {
     socket.on('connect_error', (err) => {
       console.error('Socket connection error:', err);
       setError('Failed to connect to backend via WebSocket');
-      // Fallback to REST polling
       fetchInitialData();
     });
 
-    // Polling fallback if WebSocket fails
     const interval = setInterval(() => {
       if (!connected) {
         fetchInitialData();
@@ -153,7 +210,12 @@ export const DataProvider = ({ children }) => {
   }, []);
 
   const getValue = (key) => {
-    return sensorData[key]?.value ?? 0;
+    const value = sensorData[key]?.value;
+    // If value is undefined or null, return 0 for numeric or 'OFF' for Antiscalant
+    if (key === 'RO5-AntiscalantDosingActive') {
+      return value !== undefined && value !== null ? value : 'OFF';
+    }
+    return value !== undefined && value !== null ? value : 0;
   };
 
   const getHistory = (key) => {

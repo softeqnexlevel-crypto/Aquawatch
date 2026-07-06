@@ -1,13 +1,14 @@
-// routes.jsx (or wherever your router is defined)
+// routes.jsx
 import { createBrowserRouter, Outlet, Navigate, useLocation, useNavigate, RouterProvider } from "react-router";
 import { useState } from "react";
-import { DataProvider } from "./contexts/DataContext"; // ← ADD THIS
+import { DataProvider } from "./contexts/DataContext";
+import { ScrollContainer } from "./components/ScrollContainer"; // ← ADD THIS IMPORT
 
 // Components
 import { Sidebar } from "./components/Sidebar";
 import { TopNav } from "./components/TopNav";
 import { Dashboard } from "./components/Dashboard";
-import {FeedTankManagement } from "./components/BoreholeManagement"
+import { FeedTankManagement } from "./components/BoreholeManagement";
 import { ProductionMonitoring } from "./components/ProductionMonitoring";
 import { AntiscalantDosing } from "./components/AntiscalantDosing";
 import { FiltrationMonitoring } from "./components/FiltrationMonitoring";
@@ -119,12 +120,13 @@ function DashboardLayout() {
           alertCount={activeAlerts}
           title={title}
         />
-        <main style={{ flex: 1, overflow: "auto", padding: "24px" }}>
-          {/* WRAP OUTLET WITH DATAPROVIDER */}
+        
+        {/* ✅ REPLACE main with ScrollContainer */}
+        <ScrollContainer>
           <DataProvider>
             <Outlet />
           </DataProvider>
-        </main>
+        </ScrollContainer>
       </div>
     </div>
   );

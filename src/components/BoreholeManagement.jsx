@@ -258,7 +258,7 @@ export function FeedTankManagement() {
   return (
     <div className="flex h-full overflow-hidden">
       {/* Table panel */}
-      <div className="flex flex-col flex-1 min-w-0 overflow-auto p-4" style={{ scrollbarWidth: "none" }}>
+      <div className="flex flex-col flex-1 min-w-0 overflow-auto p-4" >
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div>
             <h2 style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.1em", textTransform: "uppercase" }}>
@@ -411,7 +411,7 @@ export function FeedTankManagement() {
       {selected && (
         <div 
           className="flex flex-col overflow-auto p-4 gap-4" 
-          style={{ width: 280, background: "var(--muted)", borderLeft: "1px solid var(--border)", scrollbarWidth: "none", flexShrink: 0 }}
+          style={{ width: 280, background: "var(--muted)", borderLeft: "1px solid var(--border)", flexShrink: 0 }}
         >
           <div>
             <div className="flex items-center justify-between mb-1">

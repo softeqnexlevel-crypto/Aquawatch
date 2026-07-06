@@ -25,11 +25,6 @@ const CustomTooltip = ({ active, payload, label }) => {
 };
 
 // ===================== ROBUST TYPE NORMALIZATION =====================
-/**
- * Normalize any value to a boolean representing "active/on" state
- * Handles: 1, true, "1", "true", "on", "active", "yes", "running", "enabled", "online" → true
- * Everything else → false
- */
 const isActive = (value) => {
   if (value === undefined || value === null) return false;
   if (typeof value === 'boolean') return value;
@@ -186,14 +181,11 @@ export function AntiscalantDosing() {
   const [isEditingReserve, setIsEditingReserve] = useState(false);
   const [showDebug, setShowDebug] = useState(false);
 
-  // Chemical Reserve is a MANUALLY set stock level (in Liters).
   const [reserveCapacityL, setReserveCapacityL] = useState(1200);
   const [editingReserveValue, setEditingReserveValue] = useState(1200);
 
-  // Dosing rate is fixed at 2.7 ml/hr
   const DOSING_RATE_ML_PER_HR = 2.7;
 
-  // Track runtime when dosing is active
   const [runtimeSeconds, setRuntimeSeconds] = useState(0);
   const [isDosingRunning, setIsDosingRunning] = useState(false);
   const intervalRef = useRef(null);
@@ -205,52 +197,34 @@ export function AntiscalantDosing() {
   const recovery = getValue('RO5-SystemRecovery') || 0;
   const pureWaterEC = getValue('RO5-PureWaterEc') || 0;
   const roPressure = getValue('RO5-ROPressure') || 0;
-  const dosingActive = getValue('RO5-AntiscalantDosingActive');
+  
+  // ✅ FIX: Try ALL possible keys for Antiscalant Doser
+  const dosingActive = getValue('RO5-AntiscalantDoser') ?? 
+                       getValue('RO5-AntiscalantDosingActive') ?? 
+                       getValue('AntiscalantDoser') ?? 
+                       getValue('AntiscalantDosingActive') ?? 0;
 
-  // ===================== DEBUG LOGGING =====================
-  // Log all available sensor data keys
-  console.log('=== Antiscalant Dosing Debug ===');
-  console.log('Available sensorData keys:', Object.keys(sensorData || {}));
-  console.log('Raw dosingActive value:', dosingActive);
-  console.log('Type of dosingActive:', typeof dosingActive);
+  // Log what we got
+  console.log('🔍 ANTISCALANT DEBUG:');
+  console.log('  RO5-AntiscalantDoser:', getValue('RO5-AntiscalantDoser'));
+  console.log('  RO5-AntiscalantDosingActive:', getValue('RO5-AntiscalantDosingActive'));
+  console.log('  AntiscalantDoser:', getValue('AntiscalantDoser'));
+  console.log('  Final dosingActive:', dosingActive);
 
-  // Check if the sensor exists in sensorData
-  const sensorExists = sensorData && 'RO5-AntiscalantDosingActive' in sensorData;
-  console.log('Sensor "RO5-AntiscalantDosingActive" exists:', sensorExists);
-  if (sensorExists) {
-    console.log('Sensor data:', sensorData['RO5-AntiscalantDosingActive']);
-  }
-
-  // Check if dosing is active using robust type normalization
   const isDosingActive = isActive(dosingActive);
-  console.log('isDosingActive result:', isDosingActive);
-  console.log('isActive() check for various values:');
-  console.log('  - dosingActive (raw):', dosingActive);
-  console.log('  - isActive(dosingActive):', isDosingActive);
-  console.log('  - isActive(1):', isActive(1));
-  console.log('  - isActive("ON"):', isActive("ON"));
-  console.log('  - isActive(true):', isActive(true));
-  console.log('  - isActive(0):', isActive(0));
-  console.log('  - isActive("OFF"):', isActive("OFF"));
-  console.log('  - isActive(false):', isActive(false));
-  console.log('=== End Debug ===');
+  console.log('  isDosingActive:', isDosingActive);
 
   // ===================== DEBUG DATA FOR PANEL =====================
   const debugData = {
     'Raw dosingActive': dosingActive !== undefined ? String(dosingActive) : 'undefined',
     'Type of dosingActive': typeof dosingActive,
-    'Sensor exists': sensorExists ? '✅ YES' : '❌ NO',
     'isDosingActive': isDosingActive ? '✅ TRUE (RUNNING)' : '❌ FALSE (STOPPED)',
+    'RO5-AntiscalantDoser': getValue('RO5-AntiscalantDoser'),
+    'RO5-AntiscalantDosingActive': getValue('RO5-AntiscalantDosingActive'),
     'Connected': sensorData ? '✅ YES' : '❌ NO',
     'Last Update': lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--',
     'Feed Flow': feedFlow.toFixed(1),
     'Permeate Flow': permeateFlow.toFixed(1),
-    'Recovery': recovery.toFixed(1),
-    'RO Pressure': roPressure.toFixed(1),
-    'Pure Water EC': pureWaterEC.toFixed(1),
-    'Reserve Level': reserveCapacityL,
-    'Runtime (hrs)': (runtimeSeconds / 3600).toFixed(2),
-    'Total Dosed (mL)': ((runtimeSeconds / 3600) * DOSING_RATE_ML_PER_HR).toFixed(1),
   };
 
   // Get history for trends
@@ -407,7 +381,6 @@ export function AntiscalantDosing() {
   const alerts = useMemo(() => {
     const alertList = [];
 
-    // Check if dosing is active
     if (!isDosingActive) {
       alertList.push({
         id: 'ALERT-001',
@@ -419,7 +392,6 @@ export function AntiscalantDosing() {
       });
     }
 
-    // Check stock levels
     if (dosingMetrics.currentStock < 50) {
       alertList.push({
         id: 'ALERT-002',
@@ -496,8 +468,7 @@ export function AntiscalantDosing() {
   );
 
   return (
-    <div className="flex flex-col gap-4 p-4 overflow-auto h-full" style={{ scrollbarWidth: "none" }}>
-      {/* Debug Panel */}
+    <div className="flex flex-col gap-4 p-4 overflow-auto h-full">
       <button
         onClick={() => setShowDebug(!showDebug)}
         style={{
@@ -563,7 +534,6 @@ export function AntiscalantDosing() {
 
       {/* Metrics + Reserve */}
       <div className="flex gap-4">
-        {/* Metric cards */}
         <div className="flex-1 grid gap-3" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
           <MetricCard 
             label="Dosing Rate" 
@@ -614,7 +584,6 @@ export function AntiscalantDosing() {
           />
         </div>
 
-        {/* Chemical Reserve gauge (manual) */}
         <div className="rounded p-4 flex flex-col gap-3" style={{ background: "var(--card)", border: "1px solid var(--border)", minWidth: 220, position: "relative" }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
             <Droplet size={12} style={{ display: 'inline', marginRight: 4 }} />
@@ -728,7 +697,6 @@ export function AntiscalantDosing() {
 
       {/* Charts row */}
       <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
-        {/* Dosing rate hourly */}
         <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
           <div className="flex items-center justify-between mb-3">
             <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
@@ -769,7 +737,6 @@ export function AntiscalantDosing() {
           </div>
         </div>
 
-        {/* Monthly consumption */}
         <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
           <div className="flex items-center justify-between mb-3">
             <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>

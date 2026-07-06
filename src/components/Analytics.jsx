@@ -362,7 +362,7 @@ export function Analytics() {
   }
 
   return (
-    <div className="flex flex-col gap-4 p-4 overflow-auto h-full" style={{ scrollbarWidth: "none" }}>
+    <div className="flex flex-col gap-4 p-4 overflow-auto h-full" >
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
 
       {/* Header */}

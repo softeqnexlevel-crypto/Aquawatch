@@ -325,7 +325,7 @@ function AlarmsCard({ alarms }) {
         </div>
       )}
       
-      <div className="flex flex-col gap-1.5 flex-1 overflow-auto" style={{ scrollbarWidth: "none" }}>
+      <div className="flex flex-col gap-1.5 flex-1 overflow-auto" >
         {activeAlarms.length > 0 ? activeAlarms.slice(0, 5).map((alert) => {
           const color = alert.severity === "Critical" ? COLORS.danger : 
                        alert.severity === "High" ? COLORS.orange : 
@@ -797,7 +797,7 @@ export function Dashboard() {
   const isDataStale = lastUpdate && (Date.now() - new Date(lastUpdate).getTime() > 60000);
 
   return (
-    <div className="flex flex-col gap-4 p-4 overflow-auto h-full" style={{ scrollbarWidth: "none" }}>
+    <div className="flex flex-col gap-4 p-4 overflow-auto h-full" >
 
       {/* Status Bar */}
       <div className="flex items-center justify-between px-3 py-2 rounded" style={{

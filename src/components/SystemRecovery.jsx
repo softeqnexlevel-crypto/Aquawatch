@@ -275,7 +275,7 @@ export function SystemRecovery() {
   );
 
   return (
-    <div className="flex flex-col gap-4 p-4 overflow-auto h-full" style={{ scrollbarWidth: "none" }}>
+    <div className="flex flex-col gap-4 p-4 overflow-auto h-full" >
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
