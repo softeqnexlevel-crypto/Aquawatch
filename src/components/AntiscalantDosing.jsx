@@ -108,12 +108,17 @@ export function AntiscalantDosing() {
   const { sensorData, getValue, getHistory, lastUpdate } = useData();
   const [timeRange, setTimeRange] = useState('24h');
   const [isEditingReserve, setIsEditingReserve] = useState(false);
-  const [reserveLevel, setReserveLevel] = useState(50); // Default 50%
-  const [editingReserveValue, setEditingReserveValue] = useState(50);
-  
+
+  // Chemical Reserve is a MANUALLY set stock level (in Liters).
+  // Operators update this whenever they refill / measure the tanks by hand.
+  // It automatically depletes based on the antiscalant actually dosed,
+  // which only accumulates while the dosing bit (RO5-AntiscalantDosingActive) is TRUE.
+  const [reserveCapacityL, setReserveCapacityL] = useState(1200); // Stock level when last set/refilled
+  const [editingReserveValue, setEditingReserveValue] = useState(1200);
+
   // Dosing rate is fixed at 2.7 ml/hr
   const DOSING_RATE_ML_PER_HR = 2.7;
-  
+
   // Track runtime when dosing is active
   const [runtimeSeconds, setRuntimeSeconds] = useState(0);
   const [isDosingRunning, setIsDosingRunning] = useState(false);
@@ -136,17 +141,21 @@ export function AntiscalantDosing() {
   const permeateHistory = getHistory('RO5-Permeateflow');
 
   // ===================== RUNTIME TRACKING =====================
+  // Single source of truth for "counting": the runtime-seconds counter
+  // (and therefore all consumption / stock-depletion math below) only
+  // advances while isDosingActive === true (RO5-AntiscalantDosingActive bit).
+  // As soon as the bit goes false, the interval is cleared and counting stops.
   useEffect(() => {
     if (isDosingActive && !isDosingRunning) {
-      // Dosing started
+      // Dosing bit turned TRUE -> start counting
       setIsDosingRunning(true);
       startTimeRef.current = Date.now();
-      
+
       intervalRef.current = setInterval(() => {
         setRuntimeSeconds(prev => prev + 1);
       }, 1000);
     } else if (!isDosingActive && isDosingRunning) {
-      // Dosing stopped
+      // Dosing bit turned FALSE -> stop counting
       setIsDosingRunning(false);
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
@@ -167,36 +176,27 @@ export function AntiscalantDosing() {
     // Dosing rate is fixed at 2.7 ml/hr
     const dosingRateML = DOSING_RATE_ML_PER_HR;
     const dosingRateMgL = dosingRateML / 1000; // Convert to mg/L (assuming density ~1)
-    
-    // Calculate total dosed based on runtime
+
+    // Calculate total dosed based on runtime (only accumulates while dosing bit is TRUE)
     const runtimeHours = runtimeSeconds / 3600;
     const totalDosedML = runtimeHours * DOSING_RATE_ML_PER_HR;
     const totalDosedL = totalDosedML / 1000;
-    
+
     // Daily consumption based on runtime
     const dailyConsumption = (runtimeHours > 0) ? (totalDosedML / runtimeHours) * 24 : 0;
     const weeklyConsumption = dailyConsumption * 7;
     const monthlyConsumption = dailyConsumption * 30;
-    
+
     // Efficiency based on recovery and EC
     const efficiency = Math.min(100, 85 + (recovery / 100) * 15 + (100 - pureWaterEC / 10) / 10);
-    
-    // Stock calculation using manually set reserve level
-    const tankACapacity = 500; // Liters
-    const tankBCapacity = 500; // Liters
-    const reserveCapacity = 200; // Liters
-    
-    const tankALevel = Math.min(100, Math.max(0, 100 - (totalDosedL / tankACapacity) * 100));
-    const tankBLevel = Math.min(100, Math.max(0, 100 - (totalDosedL / tankBCapacity) * 100 * 0.6));
-    const reserveLevelPercent = Math.min(100, Math.max(0, reserveLevel));
-    
-    const currentStockL = (tankACapacity * (tankALevel / 100)) + 
-                          (tankBCapacity * (tankBLevel / 100)) + 
-                          (reserveCapacity * (reserveLevelPercent / 100));
-    
+
+    // Stock calculation: manually-set reserve, depleted by actual dosed volume
+    const currentStockL = Math.min(reserveCapacityL, Math.max(0, reserveCapacityL - totalDosedL));
+    const reserveLevelPercent = reserveCapacityL > 0 ? Math.min(100, Math.max(0, (currentStockL / reserveCapacityL) * 100)) : 0;
+
     const dailyConsumptionL = dailyConsumption / 1000; // Convert to liters
     const daysRemaining = dailyConsumptionL > 0 ? Math.floor(currentStockL / dailyConsumptionL) : 0;
-    
+
     return {
       dosingRate: dosingRateMgL,
       dosingRateML: dosingRateML,
@@ -210,22 +210,21 @@ export function AntiscalantDosing() {
       daysRemaining: daysRemaining,
       efficiency: efficiency,
       dosePerM3: dosingRateMgL / 1000,
-      tankALevel: tankALevel,
-      tankBLevel: tankBLevel,
-      reserveLevel: reserveLevelPercent
+      reserveLevel: reserveLevelPercent,
+      reserveCapacity: reserveCapacityL
     };
-  }, [runtimeSeconds, recovery, pureWaterEC, reserveLevel]);
+  }, [runtimeSeconds, recovery, pureWaterEC, reserveCapacityL]);
 
   // ===================== GENERATE HOURLY DOSING DATA =====================
   const hourlyDosingData = useMemo(() => {
     if (!feedHistory || feedHistory.length === 0) return [];
-    
+
     const now = new Date();
     const startTime = timeRange === '24h' ? subHours(now, 24) : subHours(now, 1);
-    
+
     const filtered = feedHistory.filter(d => new Date(d.time) >= startTime);
     const grouped = {};
-    
+
     filtered.forEach(d => {
       const hour = format(new Date(d.time), 'HH:00');
       if (!grouped[hour]) grouped[hour] = { hour, rate: 0, count: 0 };
@@ -233,12 +232,12 @@ export function AntiscalantDosing() {
       grouped[hour].rate += rate;
       grouped[hour].count++;
     });
-    
+
     const result = Object.values(grouped).map(g => ({
       hour: g.hour,
       rate: g.rate / g.count
     }));
-    
+
     return result.sort((a, b) => a.hour.localeCompare(b.hour));
   }, [feedHistory, timeRange]);
 
@@ -246,15 +245,15 @@ export function AntiscalantDosing() {
   const monthlyDosingData = useMemo(() => {
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
     const currentMonth = new Date().getMonth();
-    
+
     return months.slice(0, 6).map((month, i) => {
       const monthIndex = (currentMonth - 5 + i + 12) % 12;
       const monthName = months[monthIndex];
-      
+
       const baseConsumption = dosingMetrics.monthlyConsumption;
       const variation = 1 + (Math.random() - 0.5) * 0.3;
       const consumption = baseConsumption * variation;
-      
+
       return {
         month: monthName,
         consumption: Math.round(consumption * 10) / 10,
@@ -267,21 +266,21 @@ export function AntiscalantDosing() {
   const recentRecords = useMemo(() => {
     const records = [];
     const now = new Date();
-    
+
     for (let i = 0; i < 7; i++) {
       const date = subDays(now, i);
       const dayFeed = feedHistory && feedHistory.length > 0 ? feedHistory.filter(d => {
         const day = new Date(d.time);
         return day >= startOfDay(date) && day < startOfDay(date) + 86400000;
       }) : [];
-      
+
       const avgFeed = dayFeed.length > 0 ? dayFeed.reduce((sum, d) => sum + d.value, 0) / dayFeed.length : feedFlow;
       const rate = DOSING_RATE_ML_PER_HR / 1000;
       const consumption = (avgFeed * 24 * rate) / 1000;
       const production = avgFeed * 24;
       const dosePerM3 = rate / 1000;
       const isElevated = rate > 0.003 || rate < 0.0018;
-      
+
       records.push({
         date: format(date, 'yyyy-MM-dd'),
         rate: rate.toFixed(4),
@@ -292,14 +291,14 @@ export function AntiscalantDosing() {
         ok: !isElevated
       });
     }
-    
+
     return records;
   }, [feedHistory, feedFlow]);
 
   // ===================== GENERATE ALERTS =====================
   const alerts = useMemo(() => {
     const alertList = [];
-    
+
     // Check if dosing is active
     if (!isDosingActive) {
       alertList.push({
@@ -311,13 +310,13 @@ export function AntiscalantDosing() {
         severity: 'critical'
       });
     }
-    
+
     // Check stock levels
     if (dosingMetrics.currentStock < 50) {
       alertList.push({
         id: 'ALERT-002',
         type: 'Low Chemical Stock',
-        equipment: 'Chemical Tanks',
+        equipment: 'Chemical Reserve',
         value: `${Math.round(dosingMetrics.currentStock)} L`,
         threshold: '50 L',
         severity: 'critical'
@@ -326,13 +325,13 @@ export function AntiscalantDosing() {
       alertList.push({
         id: 'ALERT-003',
         type: 'Low Chemical Stock',
-        equipment: 'Chemical Tanks',
+        equipment: 'Chemical Reserve',
         value: `${Math.round(dosingMetrics.currentStock)} L`,
         threshold: '100 L',
         severity: 'warning'
       });
     }
-    
+
     if (pureWaterEC > 50) {
       alertList.push({
         id: 'ALERT-004',
@@ -343,25 +342,30 @@ export function AntiscalantDosing() {
         severity: 'warning'
       });
     }
-    
+
     return alertList;
   }, [isDosingActive, dosingMetrics.currentStock, pureWaterEC]);
 
   // ===================== HANDLE RESERVE EDIT =====================
+  // Operator manually enters the current chemical reserve stock (in Liters),
+  // e.g. after refilling drums or taking a manual dip/level reading.
   const handleReserveEdit = () => {
     setIsEditingReserve(true);
-    setEditingReserveValue(reserveLevel);
+    setEditingReserveValue(reserveCapacityL);
   };
 
   const handleReserveSave = () => {
-    const newLevel = Math.min(100, Math.max(0, editingReserveValue));
-    setReserveLevel(newLevel);
+    const newLevel = Math.max(0, editingReserveValue);
+    setReserveCapacityL(newLevel);
+    // Reset the depletion baseline: from this point on, consumption is
+    // tracked (only while dosing is active) against the newly-entered figure.
+    setRuntimeSeconds(0);
     setIsEditingReserve(false);
   };
 
   const handleReserveCancel = () => {
     setIsEditingReserve(false);
-    setEditingReserveValue(reserveLevel);
+    setEditingReserveValue(reserveCapacityL);
   };
 
   // ===================== TIME RANGE BUTTONS =====================
@@ -428,7 +432,7 @@ export function AntiscalantDosing() {
         </div>
       </div>
 
-      {/* Metrics + Tanks */}
+      {/* Metrics + Reserve */}
       <div className="flex gap-4">
         {/* Metric cards */}
         <div className="flex-1 grid gap-3" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
@@ -481,102 +485,94 @@ export function AntiscalantDosing() {
           />
         </div>
 
-        {/* Tank gauges */}
-        <div className="rounded p-4 flex flex-col gap-3" style={{ background: "var(--card)", border: "1px solid var(--border)", minWidth: 220 }}>
+        {/* Chemical Reserve gauge (manual) */}
+        <div className="rounded p-4 flex flex-col gap-3" style={{ background: "var(--card)", border: "1px solid var(--border)", minWidth: 220, position: "relative" }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
             <Droplet size={12} style={{ display: 'inline', marginRight: 4 }} />
-            Chemical Tank Levels
+            Chemical Reserve
           </div>
-          <div className="flex justify-around items-start flex-1">
-            <TankGauge 
-              level={dosingMetrics.tankALevel} 
-              label="Tank A (500L)" 
-              capacity={500}
+          <div className="flex flex-col items-center justify-center flex-1 gap-2">
+            <TankGauge
+              level={dosingMetrics.reserveLevel}
+              label={`Reserve (${Math.round(dosingMetrics.currentStock)} / ${dosingMetrics.reserveCapacity} L)`}
+              capacity={dosingMetrics.reserveCapacity}
+              onEdit={handleReserveEdit}
             />
-            <TankGauge 
-              level={dosingMetrics.tankBLevel} 
-              label="Tank B (500L)" 
-              capacity={500}
-            />
-            <div className="flex flex-col items-center">
-              <TankGauge 
-                level={dosingMetrics.reserveLevel} 
-                label="Reserve (200L)" 
-                capacity={200}
-                onEdit={handleReserveEdit}
-              />
-              {isEditingReserve && (
-                <div style={{ 
-                  position: 'absolute', 
-                  background: 'var(--card)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 4,
-                  padding: 8,
-                  marginTop: 160,
-                  zIndex: 10,
-                  minWidth: 120
-                }}>
-                  <div style={{ fontSize: 9, color: 'var(--muted-foreground)', marginBottom: 4 }}>
-                    Set Reserve Level (%)
-                  </div>
-                  <input
-                    type="number"
-                    value={editingReserveValue}
-                    onChange={(e) => setEditingReserveValue(Math.min(100, Math.max(0, Number(e.target.value))))}
+            <span style={{ fontSize: 8, color: "var(--muted-foreground)", textAlign: "center" }}>
+              Updated manually · depletes only while dosing is active
+            </span>
+            {isEditingReserve && (
+              <div style={{ 
+                position: 'absolute', 
+                background: 'var(--card)',
+                border: '1px solid var(--border)',
+                borderRadius: 4,
+                padding: 8,
+                top: '100%',
+                marginTop: 4,
+                zIndex: 10,
+                minWidth: 160
+              }}>
+                <div style={{ fontSize: 9, color: 'var(--muted-foreground)', marginBottom: 4 }}>
+                  Set Chemical Reserve (L)
+                </div>
+                <input
+                  type="number"
+                  value={editingReserveValue}
+                  onChange={(e) => setEditingReserveValue(Math.max(0, Number(e.target.value)))}
+                  style={{
+                    width: '100%',
+                    padding: '4px 8px',
+                    background: 'var(--secondary)',
+                    border: '1px solid var(--border)',
+                    borderRadius: 3,
+                    color: 'var(--foreground)',
+                    fontSize: 11,
+                    outline: 'none'
+                  }}
+                />
+                <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+                  <button
+                    onClick={handleReserveSave}
                     style={{
-                      width: '100%',
-                      padding: '4px 8px',
+                      flex: 1,
+                      padding: '2px 8px',
+                      background: '#22c55e',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: 3,
+                      fontSize: 9,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 2
+                    }}
+                  >
+                    <Save size={10} /> Save
+                  </button>
+                  <button
+                    onClick={handleReserveCancel}
+                    style={{
+                      flex: 1,
+                      padding: '2px 8px',
                       background: 'var(--secondary)',
+                      color: 'var(--muted-foreground)',
                       border: '1px solid var(--border)',
                       borderRadius: 3,
-                      color: 'var(--foreground)',
-                      fontSize: 11,
-                      outline: 'none'
+                      fontSize: 9,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 2
                     }}
-                  />
-                  <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
-                    <button
-                      onClick={handleReserveSave}
-                      style={{
-                        flex: 1,
-                        padding: '2px 8px',
-                        background: '#22c55e',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: 3,
-                        fontSize: 9,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: 2
-                      }}
-                    >
-                      <Save size={10} /> Save
-                    </button>
-                    <button
-                      onClick={handleReserveCancel}
-                      style={{
-                        flex: 1,
-                        padding: '2px 8px',
-                        background: 'var(--secondary)',
-                        color: 'var(--muted-foreground)',
-                        border: '1px solid var(--border)',
-                        borderRadius: 3,
-                        fontSize: 9,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: 2
-                      }}
-                    >
-                      <X size={10} /> Cancel
-                    </button>
-                  </div>
+                  >
+                    <X size={10} /> Cancel
+                  </button>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
