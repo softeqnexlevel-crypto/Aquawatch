@@ -1,4 +1,4 @@
-// components/FeedTankManagement.jsx - FIXED to use real data properly
+// components/FeedTankManagement.jsx - CLEAN WATER VERSION
 import React, { useState, useMemo } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from "recharts";
 import { MapPin, ChevronRight, Activity, Clock, Wrench, Droplet, Filter, AlertCircle } from "lucide-react";
@@ -58,9 +58,7 @@ const CustomTooltip = ({ active, payload, label }) => {
 // Map 5-10 range to 5-100%
 const scaleTankLevel = (rawValue) => {
   if (rawValue === undefined || rawValue === null) return 0;
-  // Clamp between 5 and 10 (the sensor range)
   const clamped = Math.min(Math.max(rawValue, 5), 10);
-  // Scale: 5 -> 5%, 10 -> 100%
   return ((clamped - 5) / (10 - 5)) * 95 + 5;
 };
 
@@ -72,39 +70,23 @@ export function FeedTankManagement() {
 
   // Get real data from sensors
   const feedFlow = getValue('RO5-FEEDFlow') || 0;
-  const permeateFlow = getValue('RO5-Permeateflow') || 0;
-  const concentrateFlow = getValue('RO5-ConcetrateFlow') || 0;
-  const roPressure = getValue('RO5-ROPressure') || 0;
   const recovery = getValue('RO5-SystemRecovery') || 0;
-  const pureWaterEC = getValue('RO5-PureWaterEc') || 0;
   const stage1Delta = getValue('RO5-Stage1Delta') || 0;
-  const stage2Delta = getValue('RO5-Stage2Delta') || 0;
-  const filterDeltaP = getValue('RO5-MediaFilterDeltaP') || 0;
   
   // Get the raw tank level from the PLC
   const rawTankLevel = getValue('RO5-FeedTankLevel');
   
   // Scale the tank level: 5 = 5%, 10 = 100%
-  // With raw value 8.35: ((8.35 - 5) / 5) * 95 + 5 = 68.65%
   const scaledTankLevel = scaleTankLevel(rawTankLevel);
 
   // Get history for trends
-  const feedHistory = getHistory('RO5-FEEDFlow');
   const tankHistory = getHistory('RO5-FeedTankLevel');
 
-  // Debug log to verify scaling
-  console.log('=== Feed Tank Debug ===');
-  console.log('Raw Tank Level from PLC:', rawTankLevel);
-  console.log('Scaled Tank Level (%):', scaledTankLevel);
-  console.log('Feed Flow:', feedFlow);
-
   // ===================== GENERATE FEED TANKS FROM REAL DATA =====================
-  // NOTE: Only Tank A (Main Feed Tank) uses the actual scaled sensor data.
-  // Tanks B, C, D are derived from Tank A with slight variations.
   const feedTanks = useMemo(() => {
     const now = new Date();
     
-    // ✅ Tank A - Main tank - USES THE ACTUAL SCALED SENSOR DATA
+    // Tank A - Main tank - USES THE ACTUAL SCALED SENSOR DATA
     const tankALevel = Math.min(100, Math.max(0, scaledTankLevel));
     
     // Tanks B, C, D are derived from Tank A (not individual sensors)
@@ -142,12 +124,7 @@ export function FeedTankManagement() {
         health: getHealth(tankALevel),
         lastMaintenance: format(subDays(now, 45), 'yyyy-MM-dd'),
         nextMaintenance: format(subDays(now, -15), 'yyyy-MM-dd'),
-        waterQuality: {
-          pH: (7 + Math.random() * 0.4).toFixed(1),
-          TDS: Math.floor(800 + Math.random() * 100),
-          turbidity: (0.3 + Math.random() * 0.3).toFixed(1),
-          hardness: Math.floor(250 + Math.random() * 50)
-        }
+        // REMOVED: waterQuality (clean water - no quality parameters needed)
       },
       {
         id: "FT-B",
@@ -163,12 +140,6 @@ export function FeedTankManagement() {
         health: getHealth(tankBLevel),
         lastMaintenance: format(subDays(now, 30), 'yyyy-MM-dd'),
         nextMaintenance: format(subDays(now, -20), 'yyyy-MM-dd'),
-        waterQuality: {
-          pH: (6.8 + Math.random() * 0.5).toFixed(1),
-          TDS: Math.floor(750 + Math.random() * 120),
-          turbidity: (0.2 + Math.random() * 0.4).toFixed(1),
-          hardness: Math.floor(220 + Math.random() * 60)
-        }
       },
       {
         id: "FT-C",
@@ -184,12 +155,6 @@ export function FeedTankManagement() {
         health: getHealth(tankCLevel),
         lastMaintenance: format(subDays(now, 25), 'yyyy-MM-dd'),
         nextMaintenance: format(subDays(now, -10), 'yyyy-MM-dd'),
-        waterQuality: {
-          pH: (7.1 + Math.random() * 0.3).toFixed(1),
-          TDS: Math.floor(820 + Math.random() * 80),
-          turbidity: (0.4 + Math.random() * 0.2).toFixed(1),
-          hardness: Math.floor(260 + Math.random() * 40)
-        }
       },
       {
         id: "FT-D",
@@ -205,12 +170,6 @@ export function FeedTankManagement() {
         health: getHealth(tankDLevel),
         lastMaintenance: format(subDays(now, 50), 'yyyy-MM-dd'),
         nextMaintenance: format(subDays(now, -5), 'yyyy-MM-dd'),
-        waterQuality: {
-          pH: (6.9 + Math.random() * 0.6).toFixed(1),
-          TDS: Math.floor(700 + Math.random() * 150),
-          turbidity: (0.5 + Math.random() * 0.5).toFixed(1),
-          hardness: Math.floor(200 + Math.random() * 80)
-        }
       }
     ];
   }, [scaledTankLevel, feedFlow, recovery, stage1Delta]);
@@ -258,7 +217,7 @@ export function FeedTankManagement() {
   return (
     <div className="flex h-full overflow-hidden">
       {/* Table panel */}
-      <div className="flex flex-col flex-1 min-w-0 overflow-auto p-4" >
+      <div className="flex flex-col flex-1 min-w-0 overflow-auto p-4" style={{ scrollbarWidth: "none" }}>
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <div>
             <h2 style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.1em", textTransform: "uppercase" }}>
@@ -456,7 +415,7 @@ export function FeedTankManagement() {
             </div>
           </div>
 
-          {/* Metrics grid */}
+          {/* Metrics grid - REMOVED Water Quality */}
           <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
             {[
               { label: "Daily Consumption", value: `${selected.dailyConsumption.toFixed(0)} m³`, icon: Droplet },
@@ -524,37 +483,7 @@ export function FeedTankManagement() {
             </div>
           </div>
 
-          {/* Water quality summary */}
-          <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-            <div style={{ fontSize: 10, fontWeight: 600, color: "var(--muted-foreground)", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-              <Droplet size={12} style={{ display: 'inline', marginRight: 4 }} />
-              Water Quality
-            </div>
-            {selected.waterQuality && [
-              { param: "pH", value: selected.waterQuality.pH, unit: "", status: "Normal" },
-              { param: "TDS", value: selected.waterQuality.TDS, unit: "mg/L", status: selected.waterQuality.TDS < 900 ? "Normal" : "High" },
-              { param: "Turbidity", value: selected.waterQuality.turbidity, unit: "NTU", status: selected.waterQuality.turbidity < 0.5 ? "Normal" : "High" },
-              { param: "Hardness", value: selected.waterQuality.hardness, unit: "mg/L", status: selected.waterQuality.hardness < 300 ? "Normal" : "High" },
-            ].map(q => (
-              <div key={q.param} className="flex items-center justify-between py-1" style={{ borderBottom: "1px solid var(--border)" }}>
-                <span style={{ fontSize: 10, color: "var(--muted-foreground)" }}>{q.param}</span>
-                <div className="flex items-center gap-2">
-                  <span style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--foreground)" }}>
-                    {q.value} {q.unit}
-                  </span>
-                  <span style={{ 
-                    fontSize: 8, 
-                    color: q.status === "Normal" ? "#22c55e" : "#ef4444", 
-                    background: q.status === "Normal" ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)", 
-                    borderRadius: 2, 
-                    padding: "0 4px" 
-                  }}>
-                    {q.status}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
+          {/* REMOVED: Water Quality Section - Clean water doesn't need these parameters */}
         </div>
       )}
     </div>
