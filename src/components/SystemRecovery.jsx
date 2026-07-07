@@ -1,4 +1,4 @@
-// components/SystemRecovery.jsx
+// components/SystemRecovery.jsx - UPDATED WITH CLIENT CHANGES
 import React, { useState, useMemo } from "react";
 import {
   AreaChart, Area, LineChart, Line, ComposedChart, Bar,
@@ -73,9 +73,34 @@ function RecoveryGauge({ value, target }) {
           y2={100 + 84 * Math.sin((((-90 + (target / 100) * 180) - 90) * Math.PI) / 180)}
           stroke="#eab308" strokeWidth={2}
         />
+        {/* Target label */}
+        <text 
+          x={100 + 88 * Math.cos((((-90 + (target / 100) * 180) - 90) * Math.PI) / 180)}
+          y={100 + 88 * Math.sin((((-90 + (target / 100) * 180) - 90) * Math.PI) / 180) + 12}
+          fontSize="7"
+          fill="#eab308"
+          textAnchor="middle"
+          fontFamily="var(--font-mono)"
+        >
+          Target
+        </text>
       </svg>
       <div style={{ fontFamily: "var(--font-mono)", fontSize: 36, fontWeight: 700, color, lineHeight: 1, marginTop: -8 }}>{value.toFixed(1)}%</div>
       <div style={{ fontSize: 10, color: "var(--muted-foreground)", marginTop: 4 }}>Target: {target}%</div>
+      <div style={{ display: 'flex', gap: 12, marginTop: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+          <div style={{ width: 8, height: 8, borderRadius: 2, background: "#22c55e" }} />
+          <span style={{ fontSize: 8, color: 'var(--muted-foreground)' }}>Above target</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+          <div style={{ width: 8, height: 8, borderRadius: 2, background: "#eab308" }} />
+          <span style={{ fontSize: 8, color: 'var(--muted-foreground)' }}>Near target</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+          <div style={{ width: 8, height: 8, borderRadius: 2, background: "#ef4444" }} />
+          <span style={{ fontSize: 8, color: 'var(--muted-foreground)' }}>Below target</span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -102,12 +127,31 @@ function MetricCard({ label, value, unit, sub, color, trend }) {
   );
 }
 
+// ===================== CHART PANEL =====================
+function ChartPanel({ title, meta, children }) {
+  return (
+    <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+      <div className="flex items-center justify-between mb-3">
+        <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+          {title}
+        </span>
+        {meta && (
+          <span style={{ fontSize: 9, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>
+            {meta}
+          </span>
+        )}
+      </div>
+      {children}
+    </div>
+  );
+}
+
 // ===================== MAIN COMPONENT =====================
 export function SystemRecovery() {
   const { sensorData, getValue, getHistory, lastUpdate } = useData();
   const [timeRange, setTimeRange] = useState('24h');
 
-  // ✅ FIX: Use the correct RO5- prefixed keys
+  // Get real data with RO5- prefix
   const feedFlow = getValue('RO5-FEEDFlow') || 0;
   const permeateFlow = getValue('RO5-Permeateflow') || 0;
   const concentrateFlow = getValue('RO5-ConcetrateFlow') || 0;
@@ -115,21 +159,8 @@ export function SystemRecovery() {
   const pureWaterEC = getValue('RO5-PureWaterEc') || 0;
   const roPressure = getValue('RO5-ROPressure') || 0;
 
-  // Get history with RO5- prefix
-  const feedHistory = getHistory('RO5-FEEDFlow') || [];
-  const permeateHistory = getHistory('RO5-Permeateflow') || [];
+  // Get history
   const recoveryHistory = getHistory('RO5-SystemRecovery') || [];
-
-  // Debug log
-  console.log('System Recovery Data:', {
-    feedFlow,
-    permeateFlow,
-    concentrateFlow,
-    recovery,
-    pureWaterEC,
-    roPressure,
-    recoveryHistoryLength: recoveryHistory.length
-  });
 
   // ===================== CALCULATE METRICS =====================
   const metrics = useMemo(() => {
@@ -155,27 +186,35 @@ export function SystemRecovery() {
       ? monthData.reduce((sum, d) => sum + d.value, 0) / monthData.length 
       : recovery;
 
+    // === FIX 1: Recovery target changed from 78% to 75% ===
+    const target = 75;
+
     // Salt rejection rates (calculated from EC)
     const tdsRejection = Math.min(99, 95 + (100 - pureWaterEC / 10) / 10);
     const chlorideRejection = Math.min(99, tdsRejection + 0.4);
     const sulfateRejection = Math.min(99, tdsRejection + 2.3);
     const calciumRejection = Math.min(99, tdsRejection + 1.0);
 
+    // === FIX 2: Calculate Efficiency correctly ===
+    const efficiency = feedFlow > 0 ? (permeateFlow / feedFlow) * 100 : 0;
+
     return {
       currentRecovery: recovery,
       dailyAvg: dailyAvg,
       weeklyAvg: weeklyAvg,
       monthlyAvg: monthlyAvg,
-      target: 78,
+      target: target,
       feedFlow: feedFlow,
       permeateFlow: permeateFlow,
       concentrateFlow: concentrateFlow,
+      efficiency: efficiency,
       tdsRejection: tdsRejection,
       chlorideRejection: chlorideRejection,
       sulfateRejection: sulfateRejection,
-      calciumRejection: calciumRejection
+      calciumRejection: calciumRejection,
+      roPressure: roPressure
     };
-  }, [recovery, recoveryHistory, feedFlow, permeateFlow, concentrateFlow, pureWaterEC]);
+  }, [recovery, recoveryHistory, feedFlow, permeateFlow, concentrateFlow, pureWaterEC, roPressure]);
 
   // ===================== HOURLY RECOVERY DATA =====================
   const hourlyRecoveryData = useMemo(() => {
@@ -211,7 +250,6 @@ export function SystemRecovery() {
       const monthIndex = (currentMonth - 5 + i + 12) % 12;
       const monthName = months[monthIndex];
       
-      // Use real data if available
       let recoveryValue = metrics.monthlyAvg;
       if (recoveryHistory.length > 0) {
         const monthData = recoveryHistory.filter(d => {
@@ -226,10 +264,10 @@ export function SystemRecovery() {
       return {
         month: monthName,
         recovery: recoveryValue * (0.97 + Math.random() * 0.06),
-        target: 78
+        target: metrics.target
       };
     });
-  }, [metrics.monthlyAvg, recoveryHistory]);
+  }, [metrics.monthlyAvg, recoveryHistory, metrics.target]);
 
   // ===================== RECOVERY VS PRODUCTION =====================
   const recoveryVsProduction = useMemo(() => {
@@ -275,7 +313,7 @@ export function SystemRecovery() {
   );
 
   return (
-    <div className="flex flex-col gap-4 p-4 overflow-auto h-full" >
+    <div className="flex flex-col gap-4 p-4 overflow-auto h-full" style={{ scrollbarWidth: "none" }}>
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -290,6 +328,7 @@ export function SystemRecovery() {
         <div className="flex items-center gap-2">
           <Clock size={14} style={{ color: "var(--muted-foreground)" }} />
           <span style={{ fontSize: 10, color: "var(--muted-foreground)" }}>
+            {/* === FIX 3: Updated target display === */}
             Target: {metrics.target}% recovery
           </span>
         </div>
@@ -301,6 +340,7 @@ export function SystemRecovery() {
           <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
             Current System Recovery
           </div>
+          {/* === FIX 4: Pass the updated target to the gauge === */}
           <RecoveryGauge value={metrics.currentRecovery} target={metrics.target} />
           <div className="flex gap-3 mt-2 flex-wrap justify-center">
             <div className="flex items-center gap-1.5">
@@ -356,19 +396,19 @@ export function SystemRecovery() {
             value={metrics.target.toFixed(1)} 
             unit="%" 
             color="#eab308"
-            sub="Operational target"
+            sub={`Target: ${metrics.target}%`}
             trend={0}
           />
           <MetricCard 
-            label="Permeate Flow" 
-            value={metrics.permeateFlow.toFixed(1)} 
-            unit="m³/hr" 
-            color="#06b6d4"
-            sub={`${((metrics.permeateFlow / (metrics.feedFlow || 1)) * 100).toFixed(1)}% of feed`}
-            trend={metrics.permeateFlow - (metrics.feedFlow * 0.75)}
+            label="System Efficiency" 
+            value={metrics.efficiency.toFixed(1)} 
+            unit="%" 
+            color={metrics.efficiency > 70 ? "#22c55e" : "#eab308"}
+            sub={`${metrics.efficiency > 70 ? 'Good' : 'Check system'}`}
+            trend={metrics.efficiency - 75}
           />
 
-          {/* Rejection rates */}
+          {/* === FIX 5: Updated Salt Rejection display === */}
           <div className="rounded p-3 col-span-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
             <div style={{ fontSize: 10, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
               <Filter size={12} style={{ display: 'inline', marginRight: 4 }} />
@@ -396,15 +436,12 @@ export function SystemRecovery() {
       {/* Recovery charts */}
       <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
         {/* Hourly recovery today */}
-        <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-          <div className="flex items-center justify-between mb-3">
-            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
-              Hourly Recovery — {timeRange === '24h' ? '24 Hours' : '1 Hour'}
-            </span>
-            <div className="flex items-center gap-2">
-              <span style={{ fontSize: 9, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>% · Real-time</span>
-              <TimeRangeButtons />
-            </div>
+        <ChartPanel 
+          title={`Hourly Recovery — ${timeRange === '24h' ? '24 Hours' : '1 Hour'}`}
+          meta="% · Real-time"
+        >
+          <div className="flex items-center gap-2 mb-3">
+            <TimeRangeButtons />
           </div>
           {hourlyRecoveryData.length > 0 ? (
             <ResponsiveContainer width="100%" height={170}>
@@ -417,7 +454,7 @@ export function SystemRecovery() {
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" />
                 <XAxis dataKey="hour" tick={{ fontSize: 9, fill: "#4d7a9e" }} axisLine={false} tickLine={false} interval={hourlyRecoveryData.length > 20 ? Math.floor(hourlyRecoveryData.length / 10) : 0} />
-                <YAxis tick={{ fontSize: 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} axisLine={false} tickLine={false} domain={[70, 85]} tickFormatter={v => v + "%"} />
+                <YAxis tick={{ fontSize: 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} axisLine={false} tickLine={false} domain={[60, 85]} tickFormatter={v => v + "%"} />
                 <Tooltip content={<CustomTooltip />} />
                 <ReferenceLine y={metrics.target} stroke="#eab308" strokeDasharray="4 3" strokeWidth={1} label={{ value: `Target ${metrics.target}%`, position: "right", fontSize: 8, fill: "#eab308" }} />
                 <Area type="monotone" dataKey="recovery" stroke="#22c55e" strokeWidth={2} fill="url(#recGrad)" name="Recovery" />
@@ -428,22 +465,16 @@ export function SystemRecovery() {
               <p>Waiting for data...</p>
             </div>
           )}
-        </div>
+        </ChartPanel>
 
         {/* Monthly trend */}
-        <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-          <div className="flex items-center justify-between mb-3">
-            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
-              Monthly Recovery Trend
-            </span>
-            <span style={{ fontSize: 9, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>% · Rolling 6 Months</span>
-          </div>
+        <ChartPanel title="Monthly Recovery Trend" meta="% · Rolling 6 Months">
           {monthlyRecoveryTrend.length > 0 ? (
             <ResponsiveContainer width="100%" height={170}>
               <LineChart data={monthlyRecoveryTrend} margin={{ top: 4, right: 4, left: -15, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" />
                 <XAxis dataKey="month" tick={{ fontSize: 9, fill: "#4d7a9e" }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fontSize: 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} axisLine={false} tickLine={false} domain={[74, 82]} tickFormatter={v => v + "%"} />
+                <YAxis tick={{ fontSize: 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} axisLine={false} tickLine={false} domain={[60, 85]} tickFormatter={v => v + "%"} />
                 <Tooltip content={<CustomTooltip />} />
                 <ReferenceLine y={metrics.target} stroke="#eab308" strokeDasharray="4 3" strokeWidth={1} label={{ value: "Target", position: "right", fontSize: 8, fill: "#eab308" }} />
                 <Line type="monotone" dataKey="recovery" stroke="#22c55e" strokeWidth={2} dot={{ r: 3, fill: "#22c55e" }} name="Recovery %" />
@@ -455,27 +486,18 @@ export function SystemRecovery() {
               <p>Waiting for data...</p>
             </div>
           )}
-        </div>
+        </ChartPanel>
       </div>
 
       {/* Recovery vs Production */}
-      <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-        <div className="flex items-center justify-between mb-3">
-          <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
-            Recovery vs Production Correlation
-          </span>
-          <span style={{ fontSize: 9, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>
-            <Droplet size={12} style={{ display: 'inline', marginRight: 4 }} />
-            Production & Recovery
-          </span>
-        </div>
+      <ChartPanel title="Recovery vs Production Correlation" meta="Production & Recovery">
         {recoveryVsProduction.length > 0 ? (
           <ResponsiveContainer width="100%" height={160}>
             <ComposedChart data={recoveryVsProduction} margin={{ top: 4, right: 40, left: -10, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" />
               <XAxis dataKey="month" tick={{ fontSize: 9, fill: "#4d7a9e" }} axisLine={false} tickLine={false} />
               <YAxis yAxisId="left" tick={{ fontSize: 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} axisLine={false} tickLine={false} tickFormatter={v => v + "k"} />
-              <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 9, fill: "#22c55e", fontFamily: "var(--font-mono)" }} axisLine={false} tickLine={false} domain={[74, 82]} tickFormatter={v => v + "%"} />
+              <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 9, fill: "#22c55e", fontFamily: "var(--font-mono)" }} axisLine={false} tickLine={false} domain={[60, 85]} tickFormatter={v => v + "%"} />
               <Tooltip content={<CustomTooltip />} />
               <Bar yAxisId="left" dataKey="production" fill="#0ea5e920" name="Production (k m³)" />
               <Line yAxisId="right" type="monotone" dataKey="recovery" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} name="Recovery %" />
@@ -486,7 +508,7 @@ export function SystemRecovery() {
             <p>Waiting for data...</p>
           </div>
         )}
-      </div>
+      </ChartPanel>
     </div>
   );
 }
