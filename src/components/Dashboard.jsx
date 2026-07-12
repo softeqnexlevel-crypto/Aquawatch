@@ -320,23 +320,23 @@ function AlarmsCard({ alarms }) {
   API service
   ============================================================ */
 
-const api = {
-  getCurrentReadings: async () => {
-    const response = await fetch(`${API_BASE_URL}/api/current`);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return response.json();
-  },
-  getMqttStatus: async () => {
-    const response = await fetch(`${API_BASE_URL}/api/mqtt-status`);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return response.json();
-  },
-  getAlarms: async () => {
-    const response = await fetch(`${API_BASE_URL}/api/alarms`);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return response.json();
-  },
-};
+  const api = {
+    getCurrentReadings: async () => {
+      const response = await fetch(`${API_BASE_URL}/api/current`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.json();
+    },
+    getMqttStatus: async () => {
+      const response = await fetch(`${API_BASE_URL}/api/mqtt-status`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.json();
+    },
+    getAlarms: async () => {
+      const response = await fetch(`${API_BASE_URL}/api/alarms`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.json();
+    },
+  };
 
 /* ============================================================
   Dashboard - COMPLETE FIXED VERSION - REAL DATA ONLY
@@ -689,17 +689,19 @@ export function Dashboard() {
   
   const systemOperation = getValue('RO5-SystemOperation');
   const systemMode = getValue('RO5-SystemMode');
-  const dosingActive = getValue('RO5-AntiscalantDosingActive');
+  // const dosingActive = getValue('RO5-AntiscalantDosingActive');
   
   // ✅ Better system detection - if data is flowing, system is ON
   const isSystemOn = isActive(systemOperation) || feedFlow > 5 || permeateFlow > 5;
   const isAutoMode = isActive(systemMode);
   // isActive() already covers 1 / 'ON' / true / etc. — no need to OR them in again.
-  const isDosingActive = isActive(dosingActive);
-  
-  const dosingRate = isDosingActive ? 2.4 : 0;
-  const dosingRuntime = isDosingActive ? 3.5 : 0;
-  const totalDosed = dosingRuntime * dosingRate * 10;
+//   const dosingActive = getValue('RO5-AntiscalantDosingActive');
+// const isDosingActive = isActive(dosingActive);
+
+// // ✅ Get REAL values from sensorData
+// const dosingRate = isDosingActive ? (sensorData['AntiscalantDosingRate']?.value || 0) : 0;
+// const dosingRuntime = isDosingActive ? (sensorData['AntiscalantRuntime']?.value || 0) : 0;
+// const totalDosed = isDosingActive ? (sensorData['AntiscalantTotalDosed']?.value || 0) : 0;
 
   const dailyProduction = Math.round(dailyProductionM3);
   const activeSensors = Object.keys(sensorData).filter(
@@ -839,7 +841,7 @@ export function Dashboard() {
           </span>
         </div>
         
-        <SystemStatus isOn={isDosingActive} label="Dosing Active" icon={FlaskConical} />
+        {/* <SystemStatus isOn={isDosingActive} label="Dosing Active" icon={FlaskConical} /> */}
       </div>
 
       {/* ============================================================
@@ -922,12 +924,12 @@ export function Dashboard() {
       </div>
 
       {/* Dosing Runtime Card */}
-      <DosingRuntimeCard 
+      {/* <DosingRuntimeCard 
         isActive={isDosingActive}
         rate={dosingRate}
         runtimeHours={dosingRuntime}
         totalDosed={totalDosed}
-      />
+      /> */}
 
       {/* Pressure Monitoring Row */}
       <div>
