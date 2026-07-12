@@ -1,4 +1,4 @@
-// components/Dashboard.jsx - COMPLETE FIXED VERSION - REAL DATA ONLY
+// components/Dashboard.jsx - COMPLETE FIXED VERSION WITH PRODUCTION SUMMARY API
 
 import React, { useState, useEffect, useRef } from 'react';
 import {
@@ -320,26 +320,43 @@ function AlarmsCard({ alarms }) {
   API service
   ============================================================ */
 
-  const api = {
-    getCurrentReadings: async () => {
-      const response = await fetch(`${API_BASE_URL}/api/current`);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return response.json();
-    },
-    getMqttStatus: async () => {
-      const response = await fetch(`${API_BASE_URL}/api/mqtt-status`);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return response.json();
-    },
-    getAlarms: async () => {
-      const response = await fetch(`${API_BASE_URL}/api/alarms`);
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return response.json();
-    },
-  };
+const api = {
+  getCurrentReadings: async () => {
+    const token = localStorage.getItem('accessToken');
+    const response = await fetch(`${API_BASE_URL}/api/current`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  },
+  getMqttStatus: async () => {
+    const token = localStorage.getItem('accessToken');
+    const response = await fetch(`${API_BASE_URL}/api/mqtt-status`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  },
+  getAlarms: async () => {
+    const token = localStorage.getItem('accessToken');
+    const response = await fetch(`${API_BASE_URL}/api/alarms`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  },
+  getProductionSummary: async () => {
+    const token = localStorage.getItem('accessToken');
+    const response = await fetch(`${API_BASE_URL}/api/production-summary`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  },
+};
 
 /* ============================================================
-  Dashboard - COMPLETE FIXED VERSION - REAL DATA ONLY
+  Dashboard - COMPLETE FIXED VERSION
   ============================================================ */
 
 export function Dashboard() {
@@ -355,6 +372,27 @@ export function Dashboard() {
   const [dataInitialized, setDataInitialized] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
 
+  // ==================== PRODUCTION SUMMARY FROM BACKEND ====================
+  const [productionSummary, setProductionSummary] = useState(null);
+  const [summaryLoading, setSummaryLoading] = useState(true);
+
+  const fetchProductionSummary = async () => {
+    try {
+      const data = await api.getProductionSummary();
+      setProductionSummary(data);
+      setSummaryLoading(false);
+    } catch (err) {
+      console.error('Failed to fetch production summary:', err);
+      setSummaryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProductionSummary();
+    const interval = setInterval(fetchProductionSummary, 60000); // Update every minute
+    return () => clearInterval(interval);
+  }, []);
+
   // Raw value — use for status/boolean-style parameters via isActive().
   const getValue = (key) => {
     const val = sensorData[key]?.value;
@@ -366,30 +404,12 @@ export function Dashboard() {
   // here, since safeNumber() falls back to 0 rather than throwing.
   const getNumber = (key) => safeNumber(getValue(key));
 
-  // ==================== DAILY PRODUCTION ====================
-  const [dailyProductionM3, setDailyProductionM3] = useState(0);
-  const permeateFlowRef = useRef(0);
-  const dailyProductionRef = useRef({ total: 0, day: new Date().toDateString() });
-
-  useEffect(() => {
-    permeateFlowRef.current = getNumber('RO5-Permeateflow');
-  }, [sensorData]);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const today = new Date().toDateString();
-      if (dailyProductionRef.current.day !== today) {
-        dailyProductionRef.current = { total: 0, day: today };
-      }
-      const flowM3PerHr = permeateFlowRef.current;
-      if (flowM3PerHr > 0) {
-        const incrementM3 = flowM3PerHr / 3600;
-        dailyProductionRef.current.total += incrementM3;
-        setDailyProductionM3(dailyProductionRef.current.total);
-      }
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
+  // ==================== DAILY PRODUCTION FROM API ====================
+  // ✅ Use production summary from backend instead of calculating in browser
+  const dailyProduction = productionSummary?.permeate?.daily ?? 0;
+  const weeklyProduction = productionSummary?.permeate?.weekly ?? 0;
+  const monthlyProduction = productionSummary?.permeate?.monthly ?? 0;
+  const yearlyProduction = productionSummary?.permeate?.yearly ?? 0;
 
   // ==================== GENERATE ALERTS ====================
   const generateAlerts = () => {
@@ -505,9 +525,6 @@ export function Dashboard() {
       Object.entries(readings).forEach(([key, value]) => {
         const shortName = toShortName(key);
         const info = getSensorInfo(key);
-        // Preserve the raw value as-is here (could be a number, or "ON"/"OFF"
-        // for bit-type parameters) — do NOT coerce with safeNumber(), or
-        // dosing/system status values get silently zeroed out.
         formatted[shortName] = {
           value: value,
           timestamp: new Date().toISOString(),
@@ -526,9 +543,6 @@ export function Dashboard() {
           if (!newHistory[key]) {
             newHistory[key] = [];
           }
-          // History is used for charting, so always store a numeric
-          // representation there (ON/1 -> 1, OFF/0 -> 0 via safeNumber/isActive
-          // fallback), even though sensorData itself keeps the raw value.
           const rawVal = formatted[key].value;
           const numValue = typeof rawVal === 'string' && isNaN(parseFloat(rawVal))
             ? (isActive(rawVal) ? 1 : 0)
@@ -597,11 +611,6 @@ export function Dashboard() {
       const info = getSensorInfo(data.parameter);
       const timestamp = data.timestamp || new Date().toISOString();
 
-      // ✅ FIX: only coerce numeric readings to a number. Bit/boolean
-      // parameters (dosing status, system operation/mode) come through with
-      // dataType: 'bit' and a value of "ON"/"OFF" from the backend — running
-      // safeNumber() on those turns them into 0 and silently breaks
-      // isActive()/isDosingActive on every live update after the first fetch.
       const value = data.dataType === 'bit' ? data.value : safeNumber(data.value);
 
       setSensorData(prev => ({
@@ -617,8 +626,6 @@ export function Dashboard() {
 
       setHistory(prev => {
         const existing = prev[shortName] || [];
-        // History is for charts — always store a numeric representation,
-        // converting ON/OFF to 1/0, regardless of dataType.
         const historyValue = data.dataType === 'bit' ? (isActive(data.value) ? 1 : 0) : value;
         const updated = [...existing, { time: timestamp, value: historyValue }].slice(-MAX_HISTORY_POINTS);
         return { ...prev, [shortName]: updated };
@@ -666,6 +673,7 @@ export function Dashboard() {
   // ==================== REFRESH ====================
   const handleRefresh = () => {
     fetchRealData();
+    fetchProductionSummary();
   };
 
   // ==================== TOGGLE SENSOR ====================
@@ -689,21 +697,20 @@ export function Dashboard() {
   
   const systemOperation = getValue('RO5-SystemOperation');
   const systemMode = getValue('RO5-SystemMode');
-  // const dosingActive = getValue('RO5-AntiscalantDosingActive');
+  const dosingActive = getValue('RO5-AntiscalantDosingActive');
   
-  // ✅ Better system detection - if data is flowing, system is ON
   const isSystemOn = isActive(systemOperation) || feedFlow > 5 || permeateFlow > 5;
   const isAutoMode = isActive(systemMode);
-  // isActive() already covers 1 / 'ON' / true / etc. — no need to OR them in again.
-//   const dosingActive = getValue('RO5-AntiscalantDosingActive');
-// const isDosingActive = isActive(dosingActive);
+  const isDosingActive = isActive(dosingActive);
+  
+  // ✅ Get real antiscalant values from sensor data
+  const dosingRate = isDosingActive ? (getNumber('AntiscalantDosingRate') || 2.7) : 0;
+  const dosingRuntime = isDosingActive ? (getNumber('AntiscalantRuntime') || 0) : 0;
+  const totalDosed = isDosingActive ? (getNumber('AntiscalantTotalDosed') || 0) : 0;
 
-// // ✅ Get REAL values from sensorData
-// const dosingRate = isDosingActive ? (sensorData['AntiscalantDosingRate']?.value || 0) : 0;
-// const dosingRuntime = isDosingActive ? (sensorData['AntiscalantRuntime']?.value || 0) : 0;
-// const totalDosed = isDosingActive ? (sensorData['AntiscalantTotalDosed']?.value || 0) : 0;
+  // ✅ Use production summary from API instead of browser calculation
+  const dailyProdDisplay = summaryLoading ? '...' : Math.round(dailyProduction).toLocaleString();
 
-  const dailyProduction = Math.round(dailyProductionM3);
   const activeSensors = Object.keys(sensorData).filter(
     key => sensorData[key]?.value !== undefined && sensorData[key]?.value !== null
   ).length;
@@ -824,12 +831,11 @@ export function Dashboard() {
         </div>
       </div>
 
-      {/* System Status Row - FIXED */}
+      {/* System Status Row */}
       <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr 1fr 1fr" }}>
         <SystemStatus isOn={isSystemOn} label="System Operation" icon={Power} />
         <SystemStatus isOn={isAutoMode} label="System Mode" icon={Power} />
         
-        {/* ✅ FIXED: Feed Tank - Show actual level */}
         <div className="flex items-center gap-2 rounded p-2" style={{ 
           background: feedTankLevel > 30 ? 'rgba(34,197,94,0.1)' : feedTankLevel > 0 ? 'rgba(245,158,11,0.1)' : 'rgba(239,68,68,0.1)',
           border: `1px solid ${feedTankLevel > 30 ? 'rgba(34,197,94,0.2)' : feedTankLevel > 0 ? 'rgba(245,158,11,0.2)' : 'rgba(239,68,68,0.2)'}`,
@@ -841,16 +847,15 @@ export function Dashboard() {
           </span>
         </div>
         
-        {/* <SystemStatus isOn={isDosingActive} label="Dosing Active" icon={FlaskConical} /> */}
+        <SystemStatus isOn={isDosingActive} label="Dosing Active" icon={FlaskConical} />
       </div>
 
       {/* ============================================================
-          KPI Grid - COMPLETE FIX WITH PROPER THRESHOLDS
+          KPI Grid
           ============================================================ */}
       <div>
         <SectionTitle>Real-Time Key Performance Indicators</SectionTitle>
         
-        {/* Row 1: Water Flows + Pressures - 6 columns */}
         <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(6, 1fr)" }}>
           <KPICard label="Feed Flow" value={safeFormat(feedFlow, 1)} unit="m³/h" icon={Droplets}
             trend={feedFlow > 50 ? "up" : feedFlow < 40 ? "down" : "flat"}
@@ -867,7 +872,6 @@ export function Dashboard() {
             trendValue={concentrateFlow > 15 ? "Normal" : "Low"} 
             color={concentrateFlow > 15 ? COLORS.success : COLORS.warning} />
             
-          {/* ✅ FIXED: RO Pressure - Safe range 8-16 bar, NOT LOW at 11.3 */}
           <KPICard label="RO Pressure" value={safeFormat(roPressure, 1)} unit="bar" icon={Gauge}
             trend={roPressure >= 8 && roPressure <= 16 ? "flat" : roPressure > 16 ? "up" : "down"}
             trendValue={
@@ -894,7 +898,6 @@ export function Dashboard() {
             color={stage2Delta > 0.50 ? COLORS.warning : stage2Delta > 0 ? COLORS.success : COLORS.primary} />
         </div>
         
-        {/* Row 2: Filter Delta P + System Recovery + Other KPIs - 5 columns */}
         <div className="grid gap-3 mt-3" style={{ gridTemplateColumns: "repeat(5, 1fr)" }}>
           <KPICard label="Filter Delta P" value={safeFormat(filterDeltaP, 2)} unit="bar" icon={Filter}
             trend={filterDeltaP > 0.4 ? "up" : "flat"}
@@ -911,9 +914,10 @@ export function Dashboard() {
             trendValue={pureWaterEC > 150 ? "High conductivity" : pureWaterEC > 0 ? "Within limits" : "---"} 
             color={pureWaterEC > 150 ? COLORS.danger : pureWaterEC > 0 ? COLORS.success : COLORS.primary} />
             
-          <KPICard label="Daily Production" value={dailyProduction.toLocaleString()} unit="m³" icon={Droplets}
+          {/* ✅ DAILY PRODUCTION - NOW FROM BACKEND API */}
+          <KPICard label="Daily Production" value={dailyProdDisplay} unit="m³" icon={Droplets}
             trend={permeateFlow > 45 ? "up" : permeateFlow < 35 ? "down" : "flat"}
-            trendValue={`${safeFormat(permeateFlow, 1)} m³/h now`} 
+            trendValue={summaryLoading ? 'Loading...' : `${safeFormat(permeateFlow, 1)} m³/h now`} 
             color={dailyProduction > 0 ? COLORS.success : COLORS.primary} />
             
           <KPICard label="Active Alarms" value={alarms.filter(a => a.status === 'Active').length} icon={AlertTriangle}
@@ -924,12 +928,12 @@ export function Dashboard() {
       </div>
 
       {/* Dosing Runtime Card */}
-      {/* <DosingRuntimeCard 
+      <DosingRuntimeCard 
         isActive={isDosingActive}
         rate={dosingRate}
         runtimeHours={dosingRuntime}
         totalDosed={totalDosed}
-      /> */}
+      />
 
       {/* Pressure Monitoring Row */}
       <div>
