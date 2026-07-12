@@ -122,18 +122,23 @@ export function Reports() {
 
   // ===================== GENERATE REAL REPORTS FROM DATA =====================
   const generateReportsFromData = useMemo(() => {
-    const feedFlow = getValue('FEEDFlow') || 0;
-    const permeateFlow = getValue('Permeateflow') || 0;
-    const concentrateFlow = getValue('ConcetrateFlow') || 0;
-    const roPressure = getValue('ROPressure') || 0;
-    const recovery = getValue('SystemRecovery') || 0;
-    const pureWaterEC = getValue('PureWaterEc') || 0;
-    const stage1Delta = getValue('Stage1Delta') || 0;
-    const stage2Delta = getValue('Stage2Delta') || 0;
-    const filterDeltaP = getValue('MediaFilterDeltaP') || 0;
+    // ✅ FIX: every key below now uses the "RO5-" prefix, matching how
+    // DataContext.jsx actually stores sensor readings (see KEY_MAPPING /
+    // toShortName there). Without the prefix, getValue() never found a
+    // match and silently fell back to 0 for every single field — which is
+    // why every generated/exported report showed all zeros.
+    const feedFlow = getValue('RO5-FEEDFlow') || 0;
+    const permeateFlow = getValue('RO5-Permeateflow') || 0;
+    const concentrateFlow = getValue('RO5-ConcetrateFlow') || 0;
+    const roPressure = getValue('RO5-ROPressure') || 0;
+    const recovery = getValue('RO5-SystemRecovery') || 0;
+    const pureWaterEC = getValue('RO5-PureWaterEc') || 0;
+    const stage1Delta = getValue('RO5-Stage1Delta') || 0;
+    const stage2Delta = getValue('RO5-Stage2Delta') || 0;
+    const filterDeltaP = getValue('RO5-MediaFilterDeltaP') || 0;
 
-    const feedHistory = getHistory('FEEDFlow');
-    const permeateHistory = getHistory('Permeateflow');
+    const feedHistory = getHistory('RO5-FEEDFlow');
+    const permeateHistory = getHistory('RO5-Permeateflow');
 
     // Calculate daily averages
     const dailyAvg = (data) => {
@@ -174,8 +179,8 @@ export function Reports() {
         summary: `RO Pressure: ${roPressure.toFixed(1)} bar | Stage 1 ΔP: ${stage1Delta.toFixed(2)} bar | Filter ΔP: ${filterDeltaP.toFixed(2)} bar`,
         data: {
           roPressure: roPressure,
-          interstagePress: getValue('InterstagePress') || 0,
-          concentratePress: getValue('ConcetratePress') || 0,
+          interstagePress: getValue('RO5-InterstagePress') || 0,
+          concentratePress: getValue('RO5-ConcetratePress') || 0,
           stage1Delta: stage1Delta,
           stage2Delta: stage2Delta,
           filterDeltaP: filterDeltaP
