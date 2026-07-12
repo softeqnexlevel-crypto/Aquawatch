@@ -73,7 +73,7 @@ export const Login = ({ onLoginSuccess, onClose, isModal = false }) => {
                     </button>
                 </form>
 
-                <div style={pageStyles.footer}>
+                {/* <div style={pageStyles.footer}>
                     <div style={pageStyles.demoAccounts}>
                         <strong>Demo Accounts:</strong>
                         <div style={pageStyles.demoList}>
@@ -82,7 +82,7 @@ export const Login = ({ onLoginSuccess, onClose, isModal = false }) => {
                             client@aquaops.co.ke / client123 (Client)
                         </div>
                     </div>
-                </div>
+                </div> */}
             </div>
         </div>
     );

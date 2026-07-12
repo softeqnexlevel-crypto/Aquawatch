@@ -129,12 +129,19 @@ export function AntiscalantDosing() {
   const recovery = getValue('RO5-SystemRecovery') || 0;
   const pureWaterEC = getValue('RO5-PureWaterEc') || 0;
 
+  // ✅ REAL DOSING STATUS — DataContext already normalizes this to 'ON' / 'OFF'
+  // regardless of whether the backend sends 1/0, true/false, or "ON"/"OFF".
+  const dosingStatusRaw = getValue('RO5-AntiscalantDosingActive'); // 'ON' | 'OFF'
+  const isDosingActive = dosingStatusRaw === 'ON';
+
   // === FIX: Dosing Rate set to 2.66 mg/L ===
   const DOSING_RATE = 2.66;
-  const dosingRate = DOSING_RATE;
+  // Actual dosing rate is 0 whenever the pump isn't running — otherwise every
+  // consumption figure below overstates usage even while the doser is off.
+  const dosingRate = isDosingActive ? DOSING_RATE : 0;
 
-  // Calculate consumption
-  const dailyConsumption = (permeateFlow * 24 * dosingRate) / 1000;
+  // Calculate consumption — gated on real pump state
+  const dailyConsumption = isDosingActive ? (permeateFlow * 24 * dosingRate) / 1000 : 0;
   const weeklyConsumption = dailyConsumption * 7;
   const monthlyConsumption = dailyConsumption * 30;
 
@@ -142,7 +149,7 @@ export function AntiscalantDosing() {
   const initialStock = 500;
   const daysSinceLastRefill = 15;
   const currentStock = Math.max(0, initialStock - dailyConsumption * daysSinceLastRefill);
-  const daysRemaining = dailyConsumption > 0 ? Math.floor(currentStock / dailyConsumption) : 0;
+  const daysRemaining = dailyConsumption > 0 ? Math.floor(currentStock / dailyConsumption) : Infinity;
 
   // Efficiency
   const efficiency = Math.min(100, 85 + (recovery / 100) * 15);
@@ -159,33 +166,33 @@ export function AntiscalantDosing() {
         const hour = format(subHours(now, i), 'HH:00');
         data.push({
           hour,
-          rate: DOSING_RATE * (0.95 + Math.random() * 0.1)
+          rate: isDosingActive ? DOSING_RATE * (0.95 + Math.random() * 0.1) : 0
         });
       }
       return data;
     }
-    
+
     const now = new Date();
     const startTime = timeRange === '24h' ? subHours(now, 24) : subHours(now, 1);
-    
+
     const filtered = feedHistory.filter(d => new Date(d.time) >= startTime);
     const grouped = {};
-    
+
     filtered.forEach(d => {
       const hour = format(new Date(d.time), 'HH:00');
       if (!grouped[hour]) grouped[hour] = { hour, rate: 0, count: 0 };
-      const rate = DOSING_RATE * (0.95 + (d.value / 100) * 0.1);
+      const rate = isDosingActive ? DOSING_RATE * (0.95 + (d.value / 100) * 0.1) : 0;
       grouped[hour].rate += rate;
       grouped[hour].count++;
     });
-    
+
     const result = Object.values(grouped).map(g => ({
       hour: g.hour,
       rate: g.rate / g.count
     }));
-    
+
     return result.sort((a, b) => a.hour.localeCompare(b.hour));
-  }, [feedHistory, timeRange]);
+  }, [feedHistory, timeRange, isDosingActive]);
 
   // Monthly consumption data
   const monthlyConsumptionData = useMemo(() => {
@@ -194,10 +201,13 @@ export function AntiscalantDosing() {
     return months.slice(0, 6).map((month, i) => {
       const monthIndex = (currentMonth - 5 + i + 12) % 12;
       const monthName = months[monthIndex];
-      const consumption = monthlyConsumption * (0.85 + Math.random() * 0.3);
+      // Only the current (partial) month reflects live dosing state;
+      // prior months are historical and unaffected by right-now's status.
+      const isCurrentMonth = i === 5;
+      const baseConsumption = isCurrentMonth ? monthlyConsumption : monthlyConsumption * (0.85 + Math.random() * 0.3);
       return {
         month: monthName,
-        consumption: consumption,
+        consumption: baseConsumption,
         target: monthlyConsumption
       };
     });
@@ -214,29 +224,32 @@ export function AntiscalantDosing() {
         return day >= startOfDay(date) && day < startOfDay(date) + 86400000;
       });
       const avgFeed = dayData.length > 0 ? dayData.reduce((sum, d) => sum + d.value, 0) / dayData.length : feedFlow;
-      const rate = DOSING_RATE * (0.95 + (avgFeed / 100) * 0.1);
+      // Today's row reflects the real, live dosing status; earlier days are
+      // historical estimates since we don't have per-day ON/OFF history stored.
+      const isToday = i === 0;
+      const rate = (isToday ? isDosingActive : true) ? DOSING_RATE * (0.95 + (avgFeed / 100) * 0.1) : 0;
       const consumption = (avgFeed * 24 * rate) / 1000;
       const production = avgFeed * 24;
       const dosePerM3 = rate / 1000;
       const isElevated = rate > DOSING_RATE * 1.15 || rate < DOSING_RATE * 0.85;
-      
+
       records.push({
         date: format(date, 'yyyy-MM-dd'),
-        rate: Math.min(Math.max(rate, 1.5), 3.5).toFixed(2),
+        rate: Math.min(Math.max(rate, 0), 3.5).toFixed(2),
         consumption: consumption.toFixed(1),
         production: Math.round(production).toLocaleString(),
         dosePerM3: dosePerM3.toFixed(3),
-        status: isElevated ? 'ELEVATED' : 'NORMAL',
-        ok: !isElevated
+        status: isToday && !isDosingActive ? 'STOPPED' : (isElevated ? 'ELEVATED' : 'NORMAL'),
+        ok: isToday ? isDosingActive && !isElevated : !isElevated
       });
     }
     return records;
-  }, [feedHistory, feedFlow]);
+  }, [feedHistory, feedFlow, isDosingActive]);
 
   // Generate alerts
   const alerts = useMemo(() => {
     const alertList = [];
-    if (dosingRate > 3.0) {
+    if (isDosingActive && dosingRate > 3.0) {
       alertList.push({
         id: 'ALERT-001',
         type: 'High Dosing Rate',
@@ -246,7 +259,7 @@ export function AntiscalantDosing() {
         severity: 'warning'
       });
     }
-    if (dosingRate < 1.8) {
+    if (isDosingActive && dosingRate < 1.8) {
       alertList.push({
         id: 'ALERT-002',
         type: 'Low Dosing Rate',
@@ -254,6 +267,16 @@ export function AntiscalantDosing() {
         value: `${dosingRate.toFixed(2)} mg/L`,
         threshold: '1.8 mg/L',
         severity: 'critical'
+      });
+    }
+    if (!isDosingActive && permeateFlow > 0) {
+      alertList.push({
+        id: 'ALERT-005',
+        type: 'Dosing Pump Stopped While System Running',
+        equipment: 'Antiscalant Pump',
+        value: 'OFF',
+        threshold: 'ON required while producing',
+        severity: 'warning'
       });
     }
     if (currentStock < 50) {
@@ -277,7 +300,7 @@ export function AntiscalantDosing() {
       });
     }
     return alertList;
-  }, [dosingRate, currentStock, pureWaterEC]);
+  }, [dosingRate, isDosingActive, permeateFlow, currentStock, pureWaterEC]);
 
   return (
     <div className="flex flex-col gap-4 p-4 overflow-auto h-full" style={{ scrollbarWidth: "none" }}>
@@ -292,11 +315,31 @@ export function AntiscalantDosing() {
             Real-time dosing monitoring • Last updated: {lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--'}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Clock size={14} style={{ color: "var(--muted-foreground)" }} />
-          <span style={{ fontSize: 10, color: "var(--muted-foreground)" }}>
-            Target: 2.66 mg/L
-          </span>
+        <div className="flex items-center gap-3">
+          {/* ✅ Live status badge driven by the real backend value */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '3px 10px',
+            borderRadius: 4,
+            background: isDosingActive ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+            border: `1px solid ${isDosingActive ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)'}`
+          }}>
+            <div style={{
+              width: 6, height: 6, borderRadius: '50%',
+              background: isDosingActive ? '#22c55e' : '#ef4444'
+            }} />
+            <span style={{ fontSize: 10, fontWeight: 600, color: isDosingActive ? '#22c55e' : '#ef4444' }}>
+              {isDosingActive ? 'RUNNING' : 'STOPPED'}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Clock size={14} style={{ color: "var(--muted-foreground)" }} />
+            <span style={{ fontSize: 10, color: "var(--muted-foreground)" }}>
+              Target: 2.66 mg/L
+            </span>
+          </div>
         </div>
       </div>
 
@@ -308,7 +351,7 @@ export function AntiscalantDosing() {
             value={dosingRate.toFixed(2)} 
             unit="mg/L" 
             color="#a78bfa"
-            sub="Target: 2.66 mg/L"
+            sub={isDosingActive ? 'Target: 2.66 mg/L' : '⛔ Pump stopped'}
           />
           <MetricCard 
             label="Daily Consumption" 
@@ -333,7 +376,7 @@ export function AntiscalantDosing() {
             value={Math.round(currentStock)} 
             unit="kg" 
             color={currentStock < 50 ? "#ef4444" : currentStock < 100 ? "#eab308" : "#22c55e"}
-            sub={`≈ ${daysRemaining} days remaining`}
+            sub={Number.isFinite(daysRemaining) ? `≈ ${daysRemaining} days remaining` : 'Pump idle — no drawdown'}
           />
           <MetricCard 
             label="Dosing Efficiency" 
@@ -397,7 +440,7 @@ export function AntiscalantDosing() {
               <LineChart data={hourlyDosingData} margin={{ top: 4, right: 4, left: -15, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" />
                 <XAxis dataKey="hour" tick={{ fontSize: 9, fill: "#4d7a9e" }} axisLine={false} tickLine={false} interval={hourlyDosingData.length > 20 ? Math.floor(hourlyDosingData.length / 10) : 0} />
-                <YAxis tick={{ fontSize: 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} axisLine={false} tickLine={false} domain={[1.5, 3.5]} tickFormatter={(v) => v.toFixed(1)} />
+                <YAxis tick={{ fontSize: 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} axisLine={false} tickLine={false} domain={[0, 3.5]} tickFormatter={(v) => v.toFixed(1)} />
                 <Tooltip content={<CustomTooltip />} />
                 <ReferenceLine y={2.0} stroke="#22c55e" strokeDasharray="3 2" strokeWidth={1} label={{ value: "Min", position: "right", fontSize: 9, fill: "#22c55e" }} />
                 <ReferenceLine y={3.0} stroke="#22c55e" strokeDasharray="3 2" strokeWidth={1} label={{ value: "Max", position: "right", fontSize: 9, fill: "#22c55e" }} />
@@ -509,4 +552,4 @@ export function AntiscalantDosing() {
   );
 }
 
-export default AntiscalantDosing; 
+export default AntiscalantDosing;

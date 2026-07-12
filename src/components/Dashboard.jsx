@@ -15,6 +15,7 @@ import { SystemHealthRadar } from './dashboardComponents/SystemHealthRadar';
 import { FlowBalanceChart } from './dashboardComponents/FlowBalanceChart';
 import { DistributionHistogram } from './dashboardComponents/DistributionHistogram';
 
+
 /* ============================================================
   Shared color palette
   ============================================================ */
@@ -78,7 +79,7 @@ const safeNumber = (value, fallback = 0) => {
 export const SENSOR_MAP = {
   'RO5-FEEDFlow': { label: 'Feed Flow', unit: 'm³/h', icon: Droplets, color: COLORS.primary, shortName: 'FEEDFlow' },
   'RO5-Permeateflow': { label: 'Permeate Flow', unit: 'm³/h', icon: Droplets, color: COLORS.secondary, shortName: 'Permeateflow' },
-  'RO5-ConcetrateFlow': { label: 'Concentrate Flow', unit: 'm³/h', icon: Activity, color: COLORS.warning, shortName: 'ConcetrateFlow' },
+  'RO5-ConcetrateFlow': { label: 'Concentrate Flow', unit: 'm³/h', icon: Activity, color: COLORS.warning, shortName: 'ConcentrateFlow' },
   'RO5-ROPressure': { label: 'RO Pressure', unit: 'bar', icon: Gauge, color: COLORS.danger, shortName: 'ROPressure' },
   'RO5-InterstagePress': { label: 'Interstage Pressure', unit: 'bar', icon: Gauge, color: COLORS.orange, shortName: 'InterstagePress' },
   'RO5-ConcetratePress': { label: 'Concentrate Pressure', unit: 'bar', icon: Gauge, color: COLORS.yellow, shortName: 'ConcetratePress' },
@@ -354,11 +355,15 @@ export function Dashboard() {
   const [dataInitialized, setDataInitialized] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
 
+  // Raw value — use for status/boolean-style parameters via isActive().
   const getValue = (key) => {
     const val = sensorData[key]?.value;
     return val !== undefined && val !== null ? val : 0;
   };
 
+  // Numeric-coerced value — ALWAYS use for anything rendered with
+  // .toFixed()/safeFormat(). Safe even if a bit/boolean value ever ends up
+  // here, since safeNumber() falls back to 0 rather than throwing.
   const getNumber = (key) => safeNumber(getValue(key));
 
   // ==================== DAILY PRODUCTION ====================
@@ -500,6 +505,9 @@ export function Dashboard() {
       Object.entries(readings).forEach(([key, value]) => {
         const shortName = toShortName(key);
         const info = getSensorInfo(key);
+        // Preserve the raw value as-is here (could be a number, or "ON"/"OFF"
+        // for bit-type parameters) — do NOT coerce with safeNumber(), or
+        // dosing/system status values get silently zeroed out.
         formatted[shortName] = {
           value: value,
           timestamp: new Date().toISOString(),
@@ -518,7 +526,13 @@ export function Dashboard() {
           if (!newHistory[key]) {
             newHistory[key] = [];
           }
-          const numValue = safeNumber(formatted[key].value);
+          // History is used for charting, so always store a numeric
+          // representation there (ON/1 -> 1, OFF/0 -> 0 via safeNumber/isActive
+          // fallback), even though sensorData itself keeps the raw value.
+          const rawVal = formatted[key].value;
+          const numValue = typeof rawVal === 'string' && isNaN(parseFloat(rawVal))
+            ? (isActive(rawVal) ? 1 : 0)
+            : safeNumber(rawVal);
           newHistory[key].push({
             time: new Date().toISOString(),
             value: numValue
@@ -583,12 +597,17 @@ export function Dashboard() {
       const info = getSensorInfo(data.parameter);
       const timestamp = data.timestamp || new Date().toISOString();
 
-      const numericValue = safeNumber(data.value);
-      
+      // ✅ FIX: only coerce numeric readings to a number. Bit/boolean
+      // parameters (dosing status, system operation/mode) come through with
+      // dataType: 'bit' and a value of "ON"/"OFF" from the backend — running
+      // safeNumber() on those turns them into 0 and silently breaks
+      // isActive()/isDosingActive on every live update after the first fetch.
+      const value = data.dataType === 'bit' ? data.value : safeNumber(data.value);
+
       setSensorData(prev => ({
         ...prev,
         [shortName]: {
-          value: numericValue,
+          value,
           timestamp,
           simulated: data.simulated || false,
           unit: data.unit || info.unit,
@@ -598,7 +617,10 @@ export function Dashboard() {
 
       setHistory(prev => {
         const existing = prev[shortName] || [];
-        const updated = [...existing, { time: timestamp, value: numericValue }].slice(-MAX_HISTORY_POINTS);
+        // History is for charts — always store a numeric representation,
+        // converting ON/OFF to 1/0, regardless of dataType.
+        const historyValue = data.dataType === 'bit' ? (isActive(data.value) ? 1 : 0) : value;
+        const updated = [...existing, { time: timestamp, value: historyValue }].slice(-MAX_HISTORY_POINTS);
         return { ...prev, [shortName]: updated };
       });
 
@@ -669,10 +691,11 @@ export function Dashboard() {
   const systemMode = getValue('RO5-SystemMode');
   const dosingActive = getValue('RO5-AntiscalantDosingActive');
   
-  // ✅ FIX: Better system detection - if data is flowing, system is ON
+  // ✅ Better system detection - if data is flowing, system is ON
   const isSystemOn = isActive(systemOperation) || feedFlow > 5 || permeateFlow > 5;
   const isAutoMode = isActive(systemMode);
-  const isDosingActive = isActive(dosingActive) || dosingActive === 1 || dosingActive === 'ON';
+  // isActive() already covers 1 / 'ON' / true / etc. — no need to OR them in again.
+  const isDosingActive = isActive(dosingActive);
   
   const dosingRate = isDosingActive ? 2.4 : 0;
   const dosingRuntime = isDosingActive ? 3.5 : 0;

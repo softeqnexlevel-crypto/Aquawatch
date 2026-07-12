@@ -1,5 +1,5 @@
 // components/ProductionMonitoring.jsx
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   AreaChart, Area, LineChart, Line, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -8,6 +8,7 @@ import {
 import { TrendingUp, TrendingDown, Clock, Calendar, Activity } from "lucide-react";
 import { useData } from "../contexts/DataContext";
 import { format, subHours, subDays, startOfDay, endOfDay } from 'date-fns';
+import { API_BASE_URL } from '../config';
 
 // ===================== CUSTOM TOOLTIP =====================
 const CustomTooltip = ({ active, payload, label }) => {
@@ -77,7 +78,6 @@ export function ProductionMonitoring() {
   const { sensorData, getValue, getHistory, lastUpdate } = useData();
   const [timeRange, setTimeRange] = useState('24h');
 
-  // ✅ FIX: Use the correct RO5- prefixed keys
   const feedFlow = getValue('RO5-FEEDFlow') || 0;
   const permeateFlow = getValue('RO5-Permeateflow') || 0;
   const concentrateFlow = getValue('RO5-ConcetrateFlow') || 0;
@@ -85,131 +85,78 @@ export function ProductionMonitoring() {
   const roPressure = getValue('RO5-ROPressure') || 0;
   const pureWaterEC = getValue('RO5-PureWaterEc') || 0;
 
-  // ✅ FIX: Get history with RO5- prefixed keys
+  // Used only for the short-term "hourly" chart — a live view of the most
+  // recent readings is fine from the in-browser buffer.
   const feedHistory = getHistory('RO5-FEEDFlow') || [];
-  const permeateHistory = getHistory('RO5-Permeateflow') || [];
 
-  // Debug log
-  console.log('Production Data:', {
-    feedFlow,
-    permeateFlow,
-    concentrateFlow,
-    recovery,
-    roPressure,
-    pureWaterEC,
-    feedHistoryLength: feedHistory.length,
-    permeateHistoryLength: permeateHistory.length
-  });
+  // ===================== REAL PRODUCTION TOTALS (from backend) =====================
+  // Daily/weekly/monthly/yearly totals now come from Postgres, computed by
+  // properly integrating flow rate over real elapsed time — NOT by filtering
+  // whatever small buffer of readings happens to be sitting in this browser
+  // tab's memory (which is why all three used to show the same number).
+  const [productionSummary, setProductionSummary] = useState(null);
+  const [summaryLoading, setSummaryLoading] = useState(true);
+  const [summaryError, setSummaryError] = useState(null);
 
-  // ===================== CALCULATE STATS =====================
-  const currentFlow = feedHistory.length > 0 ? feedHistory[feedHistory.length - 1]?.value || feedFlow : feedFlow;
-  
-  const dailyTotal = useMemo(() => {
-    if (feedHistory.length === 0) return 0;
-    const today = startOfDay(new Date());
-    const todayData = feedHistory.filter(d => new Date(d.time) >= today);
-    return todayData.reduce((sum, d) => sum + d.value, 0);
-  }, [feedHistory]);
+  const fetchProductionSummary = async () => {
+    try {
+      setSummaryLoading(true);
+      setSummaryError(null);
+      const res = await fetch(`${API_BASE_URL}/api/production-summary`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      setProductionSummary(data);
+    } catch (err) {
+      console.error('Failed to fetch production summary:', err);
+      setSummaryError(err.message);
+    } finally {
+      setSummaryLoading(false);
+    }
+  };
 
-  const weeklyTotal = useMemo(() => {
-    if (feedHistory.length === 0) return 0;
-    const weekAgo = subDays(new Date(), 7);
-    const weekData = feedHistory.filter(d => new Date(d.time) >= weekAgo);
-    return weekData.reduce((sum, d) => sum + d.value, 0);
-  }, [feedHistory]);
+  useEffect(() => {
+    fetchProductionSummary();
+    // Refresh periodically — this is cheap since it's a single aggregate
+    // query, not a live per-message subscription.
+    const interval = setInterval(fetchProductionSummary, 60000);
+    return () => clearInterval(interval);
+  }, []);
 
-  const monthlyTotal = useMemo(() => {
-    if (feedHistory.length === 0) return permeateFlow * 24 * 30;
-    const monthAgo = subDays(new Date(), 30);
-    const monthData = feedHistory.filter(d => new Date(d.time) >= monthAgo);
-    return monthData.reduce((sum, d) => sum + d.value, 0);
-  }, [feedHistory, permeateFlow]);
+  const dailyTotal = productionSummary?.permeate?.daily ?? 0;
+  const weeklyTotal = productionSummary?.permeate?.weekly ?? 0;
+  const monthlyTotal = productionSummary?.permeate?.monthly ?? 0;
+  const yearlyTotal = productionSummary?.permeate?.yearly ?? 0;
 
-  // ===================== HOURLY DATA =====================
+  const feedDailyTotal = productionSummary?.feed?.daily ?? 0;
+
+  // ===================== HOURLY DATA (live buffer, fine as a recent-trend view) =====================
   const hourlyData = useMemo(() => {
     if (feedHistory.length === 0) return [];
-    
+
     const now = new Date();
     const startTime = timeRange === '24h' ? subHours(now, 24) : subHours(now, 1);
-    
+
     const filtered = feedHistory.filter(d => new Date(d.time) >= startTime);
     const grouped = {};
-    
+
     filtered.forEach(d => {
       const hour = format(new Date(d.time), 'HH:00');
       if (!grouped[hour]) grouped[hour] = { hour, flow: 0, count: 0 };
       grouped[hour].flow += d.value;
       grouped[hour].count++;
     });
-    
+
     const result = Object.values(grouped).map(g => ({
       hour: g.hour,
       flow: g.flow / g.count
     }));
-    
+
     return result.sort((a, b) => a.hour.localeCompare(b.hour));
   }, [feedHistory, timeRange]);
 
-  // ===================== DAILY DATA =====================
-  const dailyData = useMemo(() => {
-    if (feedHistory.length === 0) return [];
-    
-    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const now = new Date();
-    const daily = [];
-    
-    for (let i = 6; i >= 0; i--) {
-      const day = subHours(now, i * 24);
-      const dayStart = startOfDay(day);
-      const dayEnd = endOfDay(day);
-      const dayData = feedHistory.filter(d => {
-        const time = new Date(d.time);
-        return time >= dayStart && time <= dayEnd;
-      });
-      const total = dayData.reduce((sum, d) => sum + d.value, 0);
-      daily.push({
-        day: days[new Date(day).getDay()],
-        actual: total,
-        target: 4200
-      });
-    }
-    return daily;
-  }, [feedHistory]);
+  const currentFlow = feedHistory.length > 0 ? feedHistory[feedHistory.length - 1]?.value || feedFlow : feedFlow;
 
-  // ===================== MONTHLY DATA =====================
-  const monthlyData = useMemo(() => {
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const currentMonth = new Date().getMonth();
-    const monthly = [];
-    
-    for (let i = 5; i >= 0; i--) {
-      const monthIndex = (currentMonth - i + 12) % 12;
-      const monthName = months[monthIndex];
-      
-      let actual = 0;
-      if (permeateHistory && permeateHistory.length > 0) {
-        const avgPermeate = permeateHistory.reduce((sum, d) => sum + d.value, 0) / permeateHistory.length;
-        actual = avgPermeate * 24 * 30 * (0.85 + Math.random() * 0.3);
-      } else {
-        actual = permeateFlow * 24 * 30 * (0.85 + Math.random() * 0.3);
-      }
-      
-      monthly.push({
-        month: monthName,
-        actual: actual,
-        target: 130200
-      });
-    }
-    return monthly;
-  }, [permeateFlow, permeateHistory]);
-
-  // ===================== EFFICIENCY =====================
-  const efficiency = useMemo(() => {
-    if (feedFlow === 0) return 0;
-    return (permeateFlow / feedFlow) * 100;
-  }, [feedFlow, permeateFlow]);
-
-  // ===================== TRENDS =====================
+  // ===================== TRENDS (still fine from live buffer — short-term signal) =====================
   const flowTrend = useMemo(() => {
     if (feedHistory.length < 2) return 0;
     const recent = feedHistory.slice(-10);
@@ -219,62 +166,41 @@ export function ProductionMonitoring() {
     return avgOlder > 0 ? ((avgRecent - avgOlder) / avgOlder) * 100 : 0;
   }, [feedHistory]);
 
-  // ===================== PRODUCTION TARGETS =====================
+  // ===================== EFFICIENCY =====================
+  const efficiency = useMemo(() => {
+    if (feedFlow === 0) return 0;
+    return (permeateFlow / feedFlow) * 100;
+  }, [feedFlow, permeateFlow]);
+
+  // ===================== PRODUCTION TARGETS (now backed by real totals) =====================
   const productionTargets = useMemo(() => {
     const dailyTarget = 4200;
     const weeklyTarget = 29400;
     const monthlyTarget = 130200;
     const yearlyTarget = 1562400;
 
-    const dailyActual = dailyTotal;
-    const weeklyActual = weeklyTotal;
-    const monthlyActual = monthlyTotal;
-    const yearlyActual = monthlyTotal * 12;
+    const dailyEff = dailyTarget > 0 ? (dailyTotal / dailyTarget) * 100 : 0;
+    const weeklyEff = weeklyTarget > 0 ? (weeklyTotal / weeklyTarget) * 100 : 0;
+    const monthlyEff = monthlyTarget > 0 ? (monthlyTotal / monthlyTarget) * 100 : 0;
+    const yearlyEff = yearlyTarget > 0 ? (yearlyTotal / yearlyTarget) * 100 : 0;
 
-    const dailyEff = (dailyActual / dailyTarget) * 100;
-    const weeklyEff = (weeklyActual / weeklyTarget) * 100;
-    const monthlyEff = (monthlyActual / monthlyTarget) * 100;
-    const yearlyEff = (yearlyActual / yearlyTarget) * 100;
+    const mk = (period, target, actual, eff) => ({
+      period,
+      target: target.toLocaleString(),
+      actual: Math.round(actual).toLocaleString(),
+      variance: actual >= target ? `+${Math.round(actual - target)}` : `-${Math.round(target - actual)}`,
+      eff: `${eff.toFixed(1)}%`,
+      status: eff >= 95 ? "ON TRACK" : eff >= 80 ? "CAUTION" : "BELOW TARGET",
+      statusColor: eff >= 95 ? "#22c55e" : eff >= 80 ? "#eab308" : "#ef4444"
+    });
 
     return [
-      {
-        period: "Today",
-        target: dailyTarget.toLocaleString(),
-        actual: Math.round(dailyActual).toLocaleString(),
-        variance: dailyActual >= dailyTarget ? `+${Math.round(dailyActual - dailyTarget)}` : `-${Math.round(dailyTarget - dailyActual)}`,
-        eff: `${dailyEff.toFixed(1)}%`,
-        status: dailyEff >= 95 ? "ON TRACK" : dailyEff >= 80 ? "CAUTION" : "BELOW TARGET",
-        statusColor: dailyEff >= 95 ? "#22c55e" : dailyEff >= 80 ? "#eab308" : "#ef4444"
-      },
-      {
-        period: "This Week",
-        target: weeklyTarget.toLocaleString(),
-        actual: Math.round(weeklyActual).toLocaleString(),
-        variance: weeklyActual >= weeklyTarget ? `+${Math.round(weeklyActual - weeklyTarget)}` : `-${Math.round(weeklyTarget - weeklyActual)}`,
-        eff: `${weeklyEff.toFixed(1)}%`,
-        status: weeklyEff >= 95 ? "ON TRACK" : weeklyEff >= 80 ? "CAUTION" : "BELOW TARGET",
-        statusColor: weeklyEff >= 95 ? "#22c55e" : weeklyEff >= 80 ? "#eab308" : "#ef4444"
-      },
-      {
-        period: "This Month",
-        target: monthlyTarget.toLocaleString(),
-        actual: Math.round(monthlyActual).toLocaleString(),
-        variance: monthlyActual >= monthlyTarget ? `+${Math.round(monthlyActual - monthlyTarget)}` : `-${Math.round(monthlyTarget - monthlyActual)}`,
-        eff: `${monthlyEff.toFixed(1)}%`,
-        status: monthlyEff >= 95 ? "ON TRACK" : monthlyEff >= 80 ? "CAUTION" : "BELOW TARGET",
-        statusColor: monthlyEff >= 95 ? "#22c55e" : monthlyEff >= 80 ? "#eab308" : "#ef4444"
-      },
-      {
-        period: "This Year",
-        target: yearlyTarget.toLocaleString(),
-        actual: Math.round(yearlyActual).toLocaleString(),
-        variance: yearlyActual >= yearlyTarget ? `+${Math.round(yearlyActual - yearlyTarget)}` : `-${Math.round(yearlyTarget - yearlyActual)}`,
-        eff: `${yearlyEff.toFixed(1)}%`,
-        status: yearlyEff >= 95 ? "ON TRACK" : yearlyEff >= 80 ? "CAUTION" : "BELOW TARGET",
-        statusColor: yearlyEff >= 95 ? "#22c55e" : yearlyEff >= 80 ? "#eab308" : "#ef4444"
-      }
+      mk("Today", dailyTarget, dailyTotal, dailyEff),
+      mk("This Week", weeklyTarget, weeklyTotal, weeklyEff),
+      mk("This Month", monthlyTarget, monthlyTotal, monthlyEff),
+      mk("This Year", yearlyTarget, yearlyTotal, yearlyEff),
     ];
-  }, [dailyTotal, weeklyTotal, monthlyTotal]);
+  }, [dailyTotal, weeklyTotal, monthlyTotal, yearlyTotal]);
 
   // ===================== TIME RANGE BUTTONS =====================
   const TimeRangeButtons = () => (
@@ -314,10 +240,16 @@ export function ProductionMonitoring() {
         <div className="flex items-center gap-2">
           <Clock size={14} style={{ color: "var(--muted-foreground)" }} />
           <span style={{ fontSize: 10, color: "var(--muted-foreground)" }}>
-            {feedHistory.length} data points
+            {summaryLoading ? 'Loading totals…' : summaryError ? 'Totals unavailable' : 'Totals from database'}
           </span>
         </div>
       </div>
+
+      {summaryError && (
+        <div className="rounded p-2.5" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", color: "#ef4444", fontSize: 11 }}>
+          Couldn't load production totals from the server ({summaryError}). Showing live sensor values only where available.
+        </div>
+      )}
 
       {/* KPI row with real data */}
       <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(6, 1fr)" }}>
@@ -325,7 +257,7 @@ export function ProductionMonitoring() {
           label="Current Flow" 
           value={currentFlow.toFixed(1)} 
           unit="m³/hr" 
-          sub={flowTrend > 0 ? `${flowTrend.toFixed(1)}% vs avg` : `${flowTrend.toFixed(1)}% vs avg`} 
+          sub={`${flowTrend.toFixed(1)}% vs avg`} 
           color="#0ea5e9"
           trend={flowTrend}
         />
@@ -371,10 +303,10 @@ export function ProductionMonitoring() {
         />
       </div>
 
-      {/* Hourly flow chart */}
+      {/* Hourly flow chart — live recent trend from in-browser buffer */}
       <ChartPanel 
         title="Hourly Flow Rate" 
-        meta={`${timeRange === '24h' ? '24 Hours' : '1 Hour'} · Real-time`}
+        meta={`${timeRange === '24h' ? '24 Hours' : '1 Hour'} · Live buffer`}
         action={<TimeRangeButtons />}
       >
         {hourlyData.length > 0 ? (
@@ -420,67 +352,10 @@ export function ProductionMonitoring() {
         )}
       </ChartPanel>
 
-      {/* Daily and Monthly charts */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
-        <ChartPanel title="Daily Production vs Target" meta="m³ · This Week">
-          {dailyData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={170}>
-              <BarChart data={dailyData} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" vertical={false} />
-                <XAxis dataKey="day" tick={{ fontSize: 9, fill: "#4d7a9e" }} axisLine={false} tickLine={false} />
-                <YAxis 
-                  tick={{ fontSize: 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} 
-                  axisLine={false} 
-                  tickLine={false} 
-                  tickFormatter={v => (v / 1000).toFixed(1) + "k"} 
-                />
-                <Tooltip content={<CustomTooltip />} />
-                <Bar dataKey="actual" fill="#06b6d4" radius={[3, 3, 0, 0]} name="Actual (m³)" />
-                <ReferenceLine y={4200} stroke="#4d7a9e" strokeDasharray="4 3" strokeWidth={1} label={{ value: "Target", position: "right", fontSize: 9, fill: "#4d7a9e" }} />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div style={{ textAlign: 'center', padding: '30px 0', color: 'var(--muted-foreground)' }}>
-              <p style={{ fontSize: 10 }}>No daily data available</p>
-            </div>
-          )}
-        </ChartPanel>
-
-        <ChartPanel title="Monthly Production Trend" meta="m³ · Rolling 6 Months">
-          {monthlyData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={170}>
-              <AreaChart data={monthlyData} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="monthGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#14b8a6" stopOpacity={0.25} />
-                    <stop offset="95%" stopColor="#14b8a6" stopOpacity={0.02} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" />
-                <XAxis dataKey="month" tick={{ fontSize: 9, fill: "#4d7a9e" }} axisLine={false} tickLine={false} />
-                <YAxis 
-                  tick={{ fontSize: 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} 
-                  axisLine={false} 
-                  tickLine={false} 
-                  tickFormatter={v => (v / 1000).toFixed(0) + "k"} 
-                />
-                <Tooltip content={<CustomTooltip />} />
-                <Area type="monotone" dataKey="actual" stroke="#14b8a6" strokeWidth={2} fill="url(#monthGrad)" name="Actual (m³)" />
-                <Line type="monotone" dataKey="target" stroke="#4d7a9e" strokeWidth={1.5} strokeDasharray="4 3" dot={false} name="Target (m³)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          ) : (
-            <div style={{ textAlign: 'center', padding: '30px 0', color: 'var(--muted-foreground)' }}>
-              <p style={{ fontSize: 10 }}>No monthly data available</p>
-            </div>
-          )}
-        </ChartPanel>
-      </div>
-
-      {/* Production Targets Table */}
+      {/* Production Targets Table — now backed by real integrated totals */}
       <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
         <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>
-          Production Targets — Real-time Performance
+          Production Targets — Real Performance (from database)
         </div>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
