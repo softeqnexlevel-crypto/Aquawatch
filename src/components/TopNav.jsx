@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router"; // 🔑 added
-import { Bell, Search, Sun, Moon, User, Wifi, ChevronDown, X, Settings, LogOut, UserCircle, CheckCircle, AlertTriangle, Info } from "lucide-react";
+import { useNavigate } from "react-router";
+import { Bell, Search, Sun, Moon, User, ChevronDown, X, Settings, LogOut, UserCircle, CheckCircle, AlertTriangle, Info } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 
 // ── Sample alerts ──────────────────────────────────────────────────────────────
@@ -149,7 +149,6 @@ function UserDropdown({ open, onClose, onLogout, onNavigateProfile, onNavigateSe
         <div style={{ fontSize: 9, marginTop: 3, color: "#22c55e", background: "rgba(34,197,94,0.1)", display: "inline-block", borderRadius: 3, padding: "1px 6px", fontWeight: 600 }}>{user?.title || ""}</div>
       </div>
 
-      {/* 🔑 Fixed — added onClick + onClose so the dropdown closes after navigating */}
       <button
         onClick={() => { onNavigateProfile(); onClose(); }}
         style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "9px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "var(--foreground)", textAlign: "left" }}
@@ -159,7 +158,6 @@ function UserDropdown({ open, onClose, onLogout, onNavigateProfile, onNavigateSe
         <UserCircle size={13} /> My Profile
       </button>
 
-      {/* 🔑 Fixed — same here */}
       <button
         onClick={() => { onNavigateSettings(); onClose(); }}
         style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "9px 14px", background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "var(--foreground)", textAlign: "left" }}
@@ -184,7 +182,7 @@ function UserDropdown({ open, onClose, onLogout, onNavigateProfile, onNavigateSe
 // ── TopNav ─────────────────────────────────────────────────────────────────────
 export function TopNav({ darkMode, onToggleDark, alertCount, title }) {
   const { user, logout } = useAuth();
-  const navigate = useNavigate(); // 🔑 added
+  const navigate = useNavigate();
 
   const [searchOpen, setSearchOpen]   = useState(false);
   const [notifOpen, setNotifOpen]     = useState(false);
@@ -200,11 +198,10 @@ export function TopNav({ darkMode, onToggleDark, alertCount, title }) {
   const handleLogout = () => {
     if (window.confirm("Are you sure you want to sign out?")) {
       logout();
-      navigate("/"); // 🔑 fixed — was window.location.href, which wiped auth state on reload
+      navigate("/");
     }
   };
 
-  // 🔑 Added — both go to the same Settings page, per your requirements
   const handleNavigateProfile  = () => navigate("/app/settings");
   const handleNavigateSettings = () => navigate("/app/settings");
 
@@ -224,6 +221,16 @@ export function TopNav({ darkMode, onToggleDark, alertCount, title }) {
   const timeStr = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
   const dateStr = now.toLocaleDateString("en-US",  { weekday: "short", day: "2-digit", month: "short", year: "numeric" });
 
+  // ✅ Get user display name
+  const displayName = user?.firstName && user?.lastName 
+    ? `${user.firstName} ${user.lastName}` 
+    : user?.name || "Guest";
+  
+  // ✅ Get user role
+  const displayRole = user?.role 
+    ? user.role.charAt(0).toUpperCase() + user.role.slice(1) 
+    : "User";
+
   return (
     <>
       <header
@@ -235,10 +242,12 @@ export function TopNav({ darkMode, onToggleDark, alertCount, title }) {
           <span style={{ fontSize: 13, fontWeight: 600, color: "var(--foreground)" }}>{title}</span>
         </div>
 
-        {/* Plant status */}
-        <div className="flex items-center gap-1.5 px-2 py-1 rounded" style={{ background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.2)" }}>
-          <Wifi size={11} style={{ color: "#22c55e" }} />
-          <span style={{ fontSize: 10, color: "#22c55e", fontFamily: "var(--font-mono)", fontWeight: 500, letterSpacing: "0.05em" }}>PLANT ONLINE</span>
+        {/* ✅ FIXED: Show user name instead of PLANT ONLINE */}
+        <div className="flex items-center gap-1.5 px-2 py-1 rounded" style={{ background: "rgba(14,165,233,0.08)", border: "1px solid rgba(14,165,233,0.15)" }}>
+          <User size={11} style={{ color: "#0ea5e9" }} />
+          <span style={{ fontSize: 10, color: "#0ea5e9", fontFamily: "var(--font-mono)", fontWeight: 500, letterSpacing: "0.05em" }}>
+            Welcome, {displayName}
+          </span>
         </div>
 
         {/* Date/time */}
@@ -298,8 +307,8 @@ export function TopNav({ darkMode, onToggleDark, alertCount, title }) {
               <User size={12} style={{ color: "#020810" }} />
             </div>
             <div>
-              <div style={{ fontSize: 11, fontWeight: 500, color: "var(--foreground)", lineHeight: 1 }}>{user?.name || "Guest"}</div>
-              <div style={{ fontSize: 9, color: "var(--muted-foreground)", lineHeight: 1.2 }}>{user?.title || "User"}</div>
+              <div style={{ fontSize: 11, fontWeight: 500, color: "var(--foreground)", lineHeight: 1 }}>{displayName}</div>
+              <div style={{ fontSize: 9, color: "var(--muted-foreground)", lineHeight: 1.2 }}>{displayRole}</div>
             </div>
             <ChevronDown size={11} style={{ color: "var(--muted-foreground)", transform: userOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
           </button>
@@ -310,7 +319,7 @@ export function TopNav({ darkMode, onToggleDark, alertCount, title }) {
             onLogout={handleLogout}
             onNavigateProfile={handleNavigateProfile}
             onNavigateSettings={handleNavigateSettings}
-            user={user}
+            user={{ ...user, name: displayName, title: displayRole }}
           />
         </div>
       </header>

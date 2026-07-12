@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { Link } from "react-router-dom";  // ✅ ADD THIS IMPORT
 import { RefreshCw, CheckCircle, Download, Upload, Settings as SettingsIcon, Users, ExternalLink } from "lucide-react";
 import { useData } from "../contexts/DataContext";
 import { useAuth } from "../contexts/AuthContext";
@@ -37,7 +38,7 @@ function useToast() {
   return { toast, show };
 }
 
-// ── API helper (same pattern used across the app) ───────────────────────────────
+// ── API helper ───────────────────────────────────────────────────────────────
 async function apiCall(endpoint, options = {}) {
   const token = localStorage.getItem('accessToken');
   const headers = {
@@ -130,10 +131,9 @@ export function Settings() {
   const [form, setForm] = useState({ ...DEFAULTS });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [settingsMeta, setSettingsMeta] = useState(null); // { updatedAt, updatedBy }
+  const [settingsMeta, setSettingsMeta] = useState(null);
   const { toast, show } = useToast();
 
-  // Real system info, pulled from actual endpoints instead of hardcoded strings.
   const [systemInfo, setSystemInfo] = useState(null);
   const [mqttStatus, setMqttStatus] = useState(null);
 
@@ -202,7 +202,7 @@ export function Settings() {
     return errors;
   }
 
-  // ==================== REAL SAVE — actually persists to Postgres ====================
+  // ==================== REAL SAVE ====================
   async function handleSave() {
     if (!isAdmin) {
       show('❌ Only admins can change settings', true, true);
@@ -266,6 +266,15 @@ export function Settings() {
     };
     reader.readAsText(file);
     e.target.value = '';
+  }
+
+  function formatUptime(seconds) {
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    if (days > 0) return `${days}d ${hours}h ${mins}m`;
+    if (hours > 0) return `${hours}h ${mins}m`;
+    return `${mins}m`;
   }
 
   return (
@@ -395,13 +404,16 @@ export function Settings() {
               ))}
             </Section>
 
-            {/* User Management — points to the real page instead of duplicating fake data */}
+            {/* ✅ FIXED: User Management - Uses React Router Link */}
             <Section
               title="User Management"
               action={
-                <a href="/user-management" style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, color: "#0ea5e9", textDecoration: "none" }}>
+                <Link 
+                  to="/app/user" 
+                  style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, color: "#0ea5e9", textDecoration: "none" }}
+                >
                   Open <ExternalLink size={11} />
-                </a>
+                </Link>
               }
             >
               <div className="flex flex-col items-center justify-center gap-2" style={{ padding: "24px 0", color: "var(--muted-foreground)" }}>
@@ -412,7 +424,7 @@ export function Settings() {
               </div>
             </Section>
 
-            {/* System Information — real values, not hardcoded strings */}
+            {/* System Information */}
             <Section title="System Information">
               <SettingRow label="Environment">
                 <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "#0ea5e9" }}>
@@ -473,15 +485,6 @@ export function Settings() {
       <Toast toast={toast} />
     </div>
   );
-}
-
-function formatUptime(seconds) {
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
-  const mins = Math.floor((seconds % 3600) / 60);
-  if (days > 0) return `${days}d ${hours}h ${mins}m`;
-  if (hours > 0) return `${hours}h ${mins}m`;
-  return `${mins}m`;
 }
 
 export default Settings;

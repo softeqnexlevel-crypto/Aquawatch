@@ -697,16 +697,16 @@ export function Dashboard() {
   
   const systemOperation = getValue('RO5-SystemOperation');
   const systemMode = getValue('RO5-SystemMode');
-  const dosingActive = getValue('RO5-AntiscalantDosingActive');
+  // const dosingActive = getValue('RO5-AntiscalantDosingActive');
   
   const isSystemOn = isActive(systemOperation) || feedFlow > 5 || permeateFlow > 5;
   const isAutoMode = isActive(systemMode);
-  const isDosingActive = isActive(dosingActive);
+  // const isDosingActive = isActive(dosingActive);
   
-  // ✅ Get real antiscalant values from sensor data
-  const dosingRate = isDosingActive ? (getNumber('AntiscalantDosingRate') || 2.7) : 0;
-  const dosingRuntime = isDosingActive ? (getNumber('AntiscalantRuntime') || 0) : 0;
-  const totalDosed = isDosingActive ? (getNumber('AntiscalantTotalDosed') || 0) : 0;
+  // // ✅ Get real antiscalant values from sensor data
+  // const dosingRate = isDosingActive ? (getNumber('AntiscalantDosingRate') || 2.7) : 0;
+  // const dosingRuntime = isDosingActive ? (getNumber('AntiscalantRuntime') || 0) : 0;
+  // const totalDosed = isDosingActive ? (getNumber('AntiscalantTotalDosed') || 0) : 0;
 
   // ✅ Use production summary from API instead of browser calculation
   const dailyProdDisplay = summaryLoading ? '...' : Math.round(dailyProduction).toLocaleString();
@@ -847,7 +847,7 @@ export function Dashboard() {
           </span>
         </div>
         
-        <SystemStatus isOn={isDosingActive} label="Dosing Active" icon={FlaskConical} />
+        {/* <SystemStatus isOn={isDosingActive} label="Dosing Active" icon={FlaskConical} /> */}
       </div>
 
       {/* ============================================================
@@ -927,13 +927,13 @@ export function Dashboard() {
         </div>
       </div>
 
-      {/* Dosing Runtime Card */}
+      {/* Dosing Runtime Card
       <DosingRuntimeCard 
         isActive={isDosingActive}
         rate={dosingRate}
         runtimeHours={dosingRuntime}
         totalDosed={totalDosed}
-      />
+      /> */}
 
       {/* Pressure Monitoring Row */}
       <div>
