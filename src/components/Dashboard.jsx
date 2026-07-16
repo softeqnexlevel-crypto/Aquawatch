@@ -768,7 +768,7 @@ export function Dashboard() {
                   <EquipmentStatusItem icon={Wrench} label="High Pressure Pump" state={isSystemOn ? 'on' : 'off'} />
                   <EquipmentStatusItem icon={Wrench} label="Booster Pump" state={isSystemOn ? 'on' : 'off'} />
                   <EquipmentStatusItem icon={FlaskConical} label="Dosing Pump" state={isDosingOn ? 'on' : 'off'} />
-                  <EquipmentStatusItem icon={Sun} label="UV System" state="unknown" />
+                  {/* <EquipmentStatusItem icon={Sun} label="UV System" state="unknown" /> */}
                 </div>
               </div>
             </div>
