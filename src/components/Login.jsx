@@ -355,7 +355,7 @@ function ContactSection() {
           </p>
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <ContactItem icon={MapPin} label="Address" value="Nairobi, Kenya" />
-            <ContactItem icon={Mail} label="Email" value="info@aquasystemtech.co.ke" href="mailto:info@aquasystemtech.co.ke" />
+            <ContactItem icon={Mail} label="Email" value="aquasystemtech.co.ke@gmail.com" href="mailto:info@aquasystemtech.co.ke" />
             <ContactItem icon={Phone} label="Phone" value="+254 728 536124" href="tel:+254728536124" />
           </div>
         </div>
