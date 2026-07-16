@@ -1,5 +1,6 @@
-// components/TagManager.jsx
-import React, { useState, useMemo, useEffect } from 'react';
+// components/TagManager.jsx - COMPLETE FIXED VERSION
+
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Search, Plus, Download, Upload, Trash2, Activity, Clock, Server, AlertCircle, Gauge, Droplet, Filter, Wrench, Zap, RefreshCw } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useData } from '../contexts/DataContext';
@@ -26,7 +27,7 @@ const S = {
     background: 'var(--card)',
     border: '1px solid var(--border)',
     borderRadius: 8,
-    padding: '20px'
+    padding: '16px 20px'
   },
   label: { 
     fontSize: 10, 
@@ -62,14 +63,13 @@ const getTagIcon = (name) => {
   if (upperName.includes('ENERGY') || upperName.includes('POWER')) {
     return Zap;
   }
+  if (upperName.includes('DOSING')) {
+    return Filter;
+  }
   return Server;
 };
 
-// ✅ FIX: keys use the short RO5- prefix only, matching what DataContext's
-// getValue()/getHistory() actually index by (the old 'siemens200smart-RO5-'
-// prefix is the RAW backend parameter name, before DataContext's aliasing
-// strips it down to 'RO5-X' — using the raw form here was why every ABOX
-// sensor row showed 0.00 despite the connection being live).
+// ===================== ABOX SENSORS - FIXED =====================
 const ABOX_SENSORS = [
   { key: 'RO5-FEEDFlow', name: 'FEED_FLOW', desc: 'Feed Flow Rate - Raw Water Inlet', address: 'VW210', unit: 'm³/h', icon: Droplet },
   { key: 'RO5-Permeateflow', name: 'PERM_FLOW', desc: 'Permeate Flow Rate - Product Water', address: 'VW211', unit: 'm³/h', icon: Droplet },
@@ -98,9 +98,19 @@ export default function TagManager() {
   const [newTag, setNewTag] = useState({ name: '', desc: '', address: '', value: '', unit: '', source: '' });
   const [liveData, setLiveData] = useState({});
   const [lastFetch, setLastFetch] = useState(null);
+  const [refreshLoading, setRefreshLoading] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  // ===================== MOBILE DETECTION =====================
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   // ===================== FETCH REAL DATA =====================
-  const fetchRealData = () => {
+  const fetchRealData = useCallback(() => {
     const data = {};
     ABOX_SENSORS.forEach(sensor => {
       const value = getValue(sensor.key);
@@ -114,12 +124,25 @@ export default function TagManager() {
     });
     setLiveData(data);
     setLastFetch(new Date().toISOString());
-  };
+  }, [getValue, getHistory, lastUpdate]);
 
   // Fetch data on mount and on updates
   useEffect(() => {
     fetchRealData();
-  }, [getValue, getHistory, lastUpdate]);
+  }, [fetchRealData]);
+
+  // ===================== REFRESH HANDLER =====================
+  const handleRefresh = () => {
+    setRefreshLoading(true);
+    fetchRealData();
+    // Also trigger a refresh of the parent data context
+    if (window.dispatchEvent) {
+      window.dispatchEvent(new Event('refreshData'));
+    }
+    setTimeout(() => {
+      setRefreshLoading(false);
+    }, 500);
+  };
 
   // ===================== BUILD TAGS FROM REAL ABOX DATA =====================
   const tags = useMemo(() => {
@@ -138,12 +161,17 @@ export default function TagManager() {
         const lastVal = history.length > 0 ? history[history.length - 1]?.value || data.value : data.value;
         const status = connected ? 'Live' : 'Offline';
         
+        // FIX: For DOSING_ACTIVE, display as text
+        const displayValue = sensor.key === 'RO5-AntiscalantDosingActive' 
+          ? (lastVal === 1 || lastVal === true || lastVal === '1' || lastVal === 'true' || lastVal === 'ON' || lastVal === 'on' ? 'Running' : 'Stopped')
+          : (typeof lastVal === 'number' ? lastVal : 0);
+        
         tagList.push({
           id: id++,
           name: sensor.name,
           desc: sensor.desc,
           address: sensor.address,
-          value: typeof lastVal === 'number' ? lastVal : 0,
+          value: displayValue,
           unit: sensor.unit,
           status: status,
           source: 'ABOX-PLC',
@@ -152,7 +180,8 @@ export default function TagManager() {
           history: history.slice(-30),
           icon: sensor.icon,
           calculated: false,
-          rawKey: sensor.key
+          rawKey: sensor.key,
+          isDosing: sensor.key === 'RO5-AntiscalantDosingActive'
         });
       }
     });
@@ -169,14 +198,17 @@ export default function TagManager() {
     const dosingActive = getValue('RO5-AntiscalantDosingActive') || 0;
     const systemOperation = getValue('RO5-SystemOperation') || 0;
 
-    // 1. Antiscalant Dosing Rate
-    const dosingRate = 2.0 + (feedFlow / 100) * 0.5;
+    // FIX: Check if dosing is actually active
+    const isDosingOn = dosingActive === 1 || dosingActive === true || dosingActive === '1' || dosingActive === 'true' || dosingActive === 'ON' || dosingActive === 'on';
+
+    // 1. Antiscalant Dosing Rate - FIXED to show 0 when stopped
+    const dosingRate = isDosingOn ? Math.min(Math.max(2.0 + (feedFlow / 100) * 0.5, 1.8), 3.5) : 0;
     tagList.push({
       id: id++,
       name: 'DOSING_RATE',
       desc: 'Antiscalant Dosing Rate (Calculated from Feed Flow)',
       address: 'CALC-001',
-      value: Math.min(Math.max(dosingRate, 1.8), 3.5),
+      value: dosingRate,
       unit: 'mg/L',
       status: connected ? 'Live' : 'Offline',
       source: 'ABOX-CALC',
@@ -185,7 +217,8 @@ export default function TagManager() {
       history: [],
       icon: Filter,
       calculated: true,
-      rawKey: null
+      rawKey: null,
+      isDosing: true
     });
 
     // 2. Salt Rejection Rate
@@ -283,13 +316,13 @@ export default function TagManager() {
       rawKey: null
     });
 
-    // 7. Dosing Status
+    // 7. Dosing Status - FIXED to show correct status
     tagList.push({
       id: id++,
       name: 'DOSING_STATUS',
       desc: 'Antiscalant Dosing System Status',
       address: 'CALC-007',
-      value: dosingActive === 1 ? 'Running' : 'Stopped',
+      value: isDosingOn ? 'Running' : 'Stopped',
       unit: '',
       status: connected ? 'Live' : 'Offline',
       source: 'ABOX-CALC',
@@ -298,7 +331,8 @@ export default function TagManager() {
       history: [],
       icon: Filter,
       calculated: true,
-      rawKey: null
+      rawKey: null,
+      isDosing: true
     });
 
     return tagList;
@@ -444,11 +478,6 @@ export default function TagManager() {
     }
   };
 
-  // ===================== REFRESH DATA =====================
-  const handleRefresh = () => {
-    fetchRealData();
-  };
-
   // ===================== STATS =====================
   const liveTags = tags.filter(t => t.status === 'Live').length;
   const totalTags = tags.length;
@@ -463,333 +492,410 @@ export default function TagManager() {
     return <IconComponent size={size} style={{ color }} />;
   };
 
+  // ===================== RENDER VALUE WITH COLOR =====================
+  const renderValue = (tag) => {
+    const isDosingTag = tag.isDosing || tag.name.includes('DOSING');
+    if (isDosingTag && typeof tag.value === 'string') {
+      const isRunning = tag.value === 'Running' || tag.value === 'ON' || tag.value === '1' || tag.value === 'true';
+      return (
+        <span style={{ 
+          color: isRunning ? '#22c55e' : '#ef4444',
+          fontWeight: 700
+        }}>
+          {tag.value}
+        </span>
+      );
+    }
+    if (typeof tag.value === 'number') {
+      const isDosingRate = tag.name === 'DOSING_RATE';
+      if (isDosingRate && tag.value === 0) {
+        return <span style={{ color: '#ef4444' }}>0.00</span>;
+      }
+      return <span style={{ color: tag.calculated ? '#a78bfa' : '#0ea5e9' }}>{tag.value.toFixed(2)}</span>;
+    }
+    return <span>{tag.value}</span>;
+  };
+
   return (
     <div style={{ 
       fontFamily: "'Inter', system-ui, sans-serif", 
       color: 'var(--foreground)', 
       height: '100%',
-      padding: 16,
+      padding: isMobile ? 8 : 16,
       display: 'flex',
       flexDirection: 'column',
-      gap: 16,
+      gap: isMobile ? 8 : 16,
       overflow: 'auto'
     }}>
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', flexWrap: 'wrap', gap: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'stretch' : 'flex-end', flexWrap: 'wrap', gap: isMobile ? 8 : 12, flexDirection: isMobile ? 'column' : 'row' }}>
         <div>
-          <div style={{ fontSize: 11, color: 'var(--muted-foreground)', letterSpacing: '0.1em', fontWeight: 600, textTransform: 'uppercase' }}>
-            <Server size={14} style={{ display: 'inline', marginRight: 4 }} />
+          <div style={{ fontSize: isMobile ? 9 : 11, color: 'var(--muted-foreground)', letterSpacing: '0.1em', fontWeight: 600, textTransform: 'uppercase' }}>
+            <Server size={isMobile ? 12 : 14} style={{ display: 'inline', marginRight: 4 }} />
             ABOX Tag Manager
           </div>
-          <h1 style={{ fontSize: 20, fontWeight: 700, margin: '4px 0 2px', color: 'var(--foreground)' }}>
+          <h1 style={{ fontSize: isMobile ? 16 : 20, fontWeight: 700, margin: '4px 0 2px', color: 'var(--foreground)' }}>
             Real-Time ABOX PLC Tags
           </h1>
-          <p style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>
+          <p style={{ fontSize: isMobile ? 9 : 11, color: 'var(--muted-foreground)' }}>
             {totalTags} tags • {liveTags} live • {sensorTags} ABOX sensors • {calculatedTags} calculated • 
             Last updated: {lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--'}
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: isMobile ? 6 : 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{ 
             background: connected ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
-            padding: '6px 14px', 
+            padding: isMobile ? '4px 10px' : '6px 14px', 
             borderRadius: 6, 
-            fontSize: 11, 
+            fontSize: isMobile ? 9 : 11, 
             border: `1px solid ${connected ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)'}`,
             color: connected ? '#22c55e' : '#ef4444',
             display: 'flex',
             alignItems: 'center',
             gap: 4
           }}>
-            <div style={{ width: 6, height: 6, borderRadius: '50%', background: connected ? '#22c55e' : '#ef4444' }} />
+            <div style={{ width: isMobile ? 5 : 6, height: isMobile ? 5 : 6, borderRadius: '50%', background: connected ? '#22c55e' : '#ef4444' }} />
             {connected ? 'ABOX ONLINE' : 'ABOX OFFLINE'}
           </div>
           <button 
             onClick={handleRefresh}
+            disabled={refreshLoading}
             style={{ 
-              padding: '8px 12px', 
+              padding: isMobile ? '6px 10px' : '8px 12px', 
               background: 'var(--secondary)', 
               border: '1px solid var(--border)', 
               borderRadius: 6, 
               color: 'var(--foreground)',
-              cursor: 'pointer',
+              cursor: refreshLoading ? 'not-allowed' : 'pointer',
               display: 'flex',
               alignItems: 'center',
-              gap: 4
+              gap: 4,
+              opacity: refreshLoading ? 0.6 : 1,
+              fontSize: isMobile ? 10 : 12
             }}
           >
-            <RefreshCw size={14} /> Refresh
+            <RefreshCw size={isMobile ? 12 : 14} className={refreshLoading ? 'spin' : ''} /> 
+            {isMobile ? '' : 'Refresh'}
           </button>
           <button 
             onClick={() => setShowAddForm(true)}
             style={{ 
               background: '#0ea5e9', 
               color: '#020810', 
-              padding: '8px 18px', 
+              padding: isMobile ? '6px 12px' : '8px 18px', 
               borderRadius: 6, 
               fontWeight: 600, 
               display: 'flex', 
               alignItems: 'center', 
-              gap: 6,
+              gap: isMobile ? 4 : 6,
               border: 'none',
-              fontSize: 12,
+              fontSize: isMobile ? 10 : 12,
               cursor: 'pointer'
             }}
           >
-            <Plus size={16} /> Add Tag
+            <Plus size={isMobile ? 14 : 16} /> {isMobile ? 'Add' : 'Add Tag'}
           </button>
         </div>
       </div>
 
-      {/* Stats Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
-        <div style={S.card}>
-          <div style={S.label}>Total Tags</div>
-          <div style={{ ...S.value, margin: '4px 0', color: 'var(--foreground)' }}>{totalTags}</div>
+      {/* Stats Cards - Responsive Grid */}
+      <div style={{ 
+        display: 'grid', 
+        gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(160px, 1fr))', 
+        gap: isMobile ? 6 : 12 
+      }}>
+        <div style={{ ...S.card, padding: isMobile ? '10px 14px' : '16px 20px' }}>
+          <div style={{ ...S.label, fontSize: isMobile ? 8 : 10 }}>Total Tags</div>
+          <div style={{ ...S.value, margin: '4px 0', color: 'var(--foreground)', fontSize: isMobile ? 18 : 22 }}>{totalTags}</div>
         </div>
-        <div style={S.card}>
-          <div style={S.label}>Live Tags</div>
-          <div style={{ ...S.value, margin: '4px 0', color: '#22c55e' }}>{liveTags}</div>
-          <div style={{ fontSize: 11, color: '#22c55e' }}>{onlineRate}% online</div>
+        <div style={{ ...S.card, padding: isMobile ? '10px 14px' : '16px 20px' }}>
+          <div style={{ ...S.label, fontSize: isMobile ? 8 : 10 }}>Live Tags</div>
+          <div style={{ ...S.value, margin: '4px 0', color: '#22c55e', fontSize: isMobile ? 18 : 22 }}>{liveTags}</div>
+          <div style={{ fontSize: isMobile ? 9 : 11, color: '#22c55e' }}>{onlineRate}% online</div>
         </div>
-        <div style={S.card}>
-          <div style={S.label}>ABOX Sensors</div>
-          <div style={{ ...S.value, margin: '4px 0', color: '#0ea5e9' }}>{sensorTags}</div>
-          <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>From ABOX PLC</div>
+        <div style={{ ...S.card, padding: isMobile ? '10px 14px' : '16px 20px' }}>
+          <div style={{ ...S.label, fontSize: isMobile ? 8 : 10 }}>ABOX Sensors</div>
+          <div style={{ ...S.value, margin: '4px 0', color: '#0ea5e9', fontSize: isMobile ? 18 : 22 }}>{sensorTags}</div>
+          <div style={{ fontSize: isMobile ? 9 : 11, color: 'var(--muted-foreground)' }}>From ABOX PLC</div>
         </div>
-        <div style={S.card}>
-          <div style={S.label}>Calculated Tags</div>
-          <div style={{ ...S.value, margin: '4px 0', color: '#a78bfa' }}>{calculatedTags}</div>
-          <div style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>Derived values</div>
+        <div style={{ ...S.card, padding: isMobile ? '10px 14px' : '16px 20px' }}>
+          <div style={{ ...S.label, fontSize: isMobile ? 8 : 10 }}>Calculated Tags</div>
+          <div style={{ ...S.value, margin: '4px 0', color: '#a78bfa', fontSize: isMobile ? 18 : 22 }}>{calculatedTags}</div>
+          <div style={{ fontSize: isMobile ? 9 : 11, color: 'var(--muted-foreground)' }}>Derived values</div>
         </div>
       </div>
 
-      {/* Toolbar */}
-      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        <div style={{ flex: 1, minWidth: 200, position: 'relative' }}>
-          <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-foreground)' }} />
+      {/* Toolbar - Responsive */}
+      <div style={{ display: 'flex', gap: isMobile ? 6 : 10, alignItems: 'center', flexWrap: 'wrap', flexDirection: isMobile ? 'column' : 'row' }}>
+        <div style={{ flex: 1, minWidth: isMobile ? '100%' : 200, position: 'relative', width: isMobile ? '100%' : 'auto' }}>
+          <Search size={isMobile ? 14 : 16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted-foreground)' }} />
           <input
             type="text"
             placeholder="Search by tag name, description or address..."
             style={{ 
               width: '100%', 
-              padding: '8px 12px 8px 36px', 
+              padding: isMobile ? '6px 10px 6px 32px' : '8px 12px 8px 36px', 
               background: 'var(--secondary)', 
               border: '1px solid var(--border)', 
               borderRadius: 6, 
               color: 'var(--foreground)', 
-              fontSize: 12,
+              fontSize: isMobile ? 10 : 12,
               outline: 'none'
             }}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <button 
-          onClick={() => alert("Import feature coming soon!")} 
-          style={{ 
-            padding: '8px 16px', 
-            background: 'var(--secondary)', 
-            border: '1px solid var(--border)', 
-            borderRadius: 6, 
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: 6,
-            color: 'var(--foreground)',
-            fontSize: 11,
-            cursor: 'pointer'
-          }}
-        >
-          <Upload size={14} /> Import
-        </button>
-        <button 
-          onClick={handleExport} 
-          style={{ 
-            padding: '8px 16px', 
-            background: 'var(--secondary)', 
-            border: '1px solid var(--border)', 
-            borderRadius: 6, 
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: 6,
-            color: 'var(--foreground)',
-            fontSize: 11,
-            cursor: 'pointer'
-          }}
-        >
-          <Download size={14} /> Export
-        </button>
+        <div style={{ display: 'flex', gap: isMobile ? 6 : 10, width: isMobile ? '100%' : 'auto' }}>
+          <button 
+            onClick={() => alert("Import feature coming soon!")} 
+            style={{ 
+              padding: isMobile ? '6px 12px' : '8px 16px', 
+              background: 'var(--secondary)', 
+              border: '1px solid var(--border)', 
+              borderRadius: 6, 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: isMobile ? 4 : 6,
+              color: 'var(--foreground)',
+              fontSize: isMobile ? 10 : 11,
+              cursor: 'pointer',
+              flex: isMobile ? 1 : 'auto',
+              justifyContent: 'center'
+            }}
+          >
+            <Upload size={isMobile ? 12 : 14} /> {isMobile ? '' : 'Import'}
+          </button>
+          <button 
+            onClick={handleExport} 
+            style={{ 
+              padding: isMobile ? '6px 12px' : '8px 16px', 
+              background: 'var(--secondary)', 
+              border: '1px solid var(--border)', 
+              borderRadius: 6, 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: isMobile ? 4 : 6,
+              color: 'var(--foreground)',
+              fontSize: isMobile ? 10 : 11,
+              cursor: 'pointer',
+              flex: isMobile ? 1 : 'auto',
+              justifyContent: 'center'
+            }}
+          >
+            <Download size={isMobile ? 12 : 14} /> {isMobile ? '' : 'Export'}
+          </button>
+        </div>
       </div>
 
-      {/* Main Content */}
-      <div style={{ display: 'flex', gap: 16, flex: 1, minHeight: 400 }}>
-        {/* Table */}
-        <div style={{ flex: 2, ...S.card, overflow: 'auto', padding: 0 }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                {['Tag Name', 'Description', 'Address', 'Value', 'Unit', 'Status', 'Source', 'Last Update', ''].map(h => (
-                  <th key={h} style={{ 
-                    textAlign: 'left', 
-                    padding: '10px 12px', 
-                    color: 'var(--muted-foreground)',
-                    fontSize: 9,
-                    fontWeight: 600,
-                    letterSpacing: '0.08em',
-                    textTransform: 'uppercase'
-                  }}>
-                    {h}
-                  </th>
+      {/* Main Content - Responsive */}
+      <div style={{ display: 'flex', gap: isMobile ? 8 : 16, flex: 1, minHeight: isMobile ? 300 : 400, flexDirection: isMobile ? 'column' : 'row' }}>
+        {/* Table - Full width on mobile */}
+        <div style={{ 
+          flex: isMobile ? 'none' : 2, 
+          ...S.card, 
+          overflow: 'auto', 
+          padding: 0,
+          width: isMobile ? '100%' : 'auto'
+        }}>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ 
+              width: '100%', 
+              borderCollapse: 'collapse', 
+              fontSize: isMobile ? 10 : 12,
+              minWidth: isMobile ? 600 : 'auto'
+            }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                  {isMobile ? (
+                    <>
+                      <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--muted-foreground)', fontSize: 8, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Name</th>
+                      <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--muted-foreground)', fontSize: 8, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Value</th>
+                      <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--muted-foreground)', fontSize: 8, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Status</th>
+                      <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--muted-foreground)', fontSize: 8, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Update</th>
+                    </>
+                  ) : (
+                    <>
+                      <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted-foreground)', fontSize: 9, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Tag Name</th>
+                      <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted-foreground)', fontSize: 9, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Description</th>
+                      <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted-foreground)', fontSize: 9, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Address</th>
+                      <th style={{ textAlign: 'right', padding: '8px 12px', color: 'var(--muted-foreground)', fontSize: 9, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Value</th>
+                      <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted-foreground)', fontSize: 9, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Unit</th>
+                      <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted-foreground)', fontSize: 9, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Status</th>
+                      <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted-foreground)', fontSize: 9, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Source</th>
+                      <th style={{ textAlign: 'left', padding: '8px 12px', color: 'var(--muted-foreground)', fontSize: 9, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Last Update</th>
+                      <th style={{ textAlign: 'center', padding: '8px 12px', color: 'var(--muted-foreground)', fontSize: 9, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Action</th>
+                    </>
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredTags.map((tag, i) => (
+                  <tr
+                    key={tag.id}
+                    onClick={() => setSelectedTag(tag)}
+                    style={{
+                      borderBottom: '1px solid rgba(26,58,82,0.15)',
+                      background: selectedTag?.id === tag.id ? 'rgba(14,165,233,0.08)' : i % 2 === 0 ? 'transparent' : 'var(--muted)',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    {isMobile ? (
+                      <>
+                        <td style={{ padding: '6px 8px', display: 'flex', alignItems: 'center', gap: 4 }}>
+                          {renderIcon(tag, 10)}
+                          <span style={{ fontWeight: 600, fontSize: 9, fontFamily: 'var(--font-mono)' }}>{tag.name}</span>
+                          {tag.calculated && (
+                            <span style={{ fontSize: 6, background: '#a78bfa20', color: '#a78bfa', padding: '1px 4px', borderRadius: 2, fontWeight: 600 }}>CALC</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '6px 8px', fontWeight: 600, fontSize: 10 }}>
+                          {renderValue(tag)}
+                        </td>
+                        <td style={{ padding: '6px 8px' }}>
+                          <span style={{ color: tag.status === 'Live' ? '#22c55e' : '#ef4444', fontSize: 8, display: 'flex', alignItems: 'center', gap: 3 }}>
+                            <div style={{ width: 4, height: 4, borderRadius: '50%', background: tag.status === 'Live' ? '#22c55e' : '#ef4444' }} />
+                            {tag.status}
+                          </span>
+                        </td>
+                        <td style={{ padding: '6px 8px', fontSize: 8, color: 'var(--muted-foreground)', fontFamily: 'var(--font-mono)' }}>{tag.lastUpdate}</td>
+                      </>
+                    ) : (
+                      <>
+                        <td style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {renderIcon(tag)}
+                          <span style={{ fontWeight: 600, fontSize: 11, fontFamily: 'var(--font-mono)' }}>{tag.name}</span>
+                          {tag.calculated && (
+                            <span style={{ fontSize: 7, background: '#a78bfa20', color: '#a78bfa', padding: '1px 6px', borderRadius: 2, fontWeight: 600 }}>CALC</span>
+                          )}
+                          {!tag.calculated && (
+                            <span style={{ fontSize: 7, background: '#0ea5e920', color: '#0ea5e9', padding: '1px 6px', borderRadius: 2, fontWeight: 600 }}>ABOX</span>
+                          )}
+                        </td>
+                        <td style={{ padding: '8px 12px', color: 'var(--muted-foreground)', fontSize: 11 }}>{tag.desc}</td>
+                        <td style={{ padding: '8px 12px', fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--muted-foreground)' }}>{tag.address}</td>
+                        <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 600, fontFamily: 'var(--font-mono)', fontSize: 12 }}>
+                          {renderValue(tag)}
+                        </td>
+                        <td style={{ padding: '8px 12px', fontSize: 10, color: 'var(--muted-foreground)' }}>{tag.unit}</td>
+                        <td style={{ padding: '8px 12px' }}>
+                          <span style={{ color: tag.status === 'Live' ? '#22c55e' : '#ef4444', fontSize: 10, display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <div style={{ width: 5, height: 5, borderRadius: '50%', background: tag.status === 'Live' ? '#22c55e' : '#ef4444' }} />
+                            {tag.status}
+                          </span>
+                        </td>
+                        <td style={{ padding: '8px 12px', fontSize: 10, color: 'var(--muted-foreground)' }}>{tag.source}</td>
+                        <td style={{ padding: '8px 12px', fontSize: 10, color: 'var(--muted-foreground)', fontFamily: 'var(--font-mono)' }}>{tag.lastUpdate}</td>
+                        <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); handleDeleteTag(tag.id); }} 
+                            style={{ 
+                              color: '#ef4444', 
+                              background: 'none', 
+                              border: 'none',
+                              cursor: 'pointer',
+                              padding: 4
+                            }}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </td>
+                      </>
+                    )}
+                  </tr>
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filteredTags.map((tag, i) => (
-                <tr
-                  key={tag.id}
-                  onClick={() => setSelectedTag(tag)}
-                  style={{
-                    borderBottom: '1px solid rgba(26,58,82,0.15)',
-                    background: selectedTag?.id === tag.id ? 'rgba(14,165,233,0.08)' : i % 2 === 0 ? 'transparent' : 'var(--muted)',
-                    cursor: 'pointer'
-                  }}
-                >
-                  <td style={{ padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
-                    {renderIcon(tag)}
-                    <span style={{ fontWeight: 600, fontSize: 11, fontFamily: 'var(--font-mono)' }}>{tag.name}</span>
-                    {tag.calculated && (
-                      <span style={{ 
-                        fontSize: 7, 
-                        background: '#a78bfa20', 
-                        color: '#a78bfa', 
-                        padding: '1px 6px', 
-                        borderRadius: 2,
-                        fontWeight: 600
-                      }}>
-                        CALC
-                      </span>
-                    )}
-                    {!tag.calculated && (
-                      <span style={{ 
-                        fontSize: 7, 
-                        background: '#0ea5e920', 
-                        color: '#0ea5e9', 
-                        padding: '1px 6px', 
-                        borderRadius: 2,
-                        fontWeight: 600
-                      }}>
-                        ABOX
-                      </span>
-                    )}
-                  </td>
-                  <td style={{ padding: '10px 12px', color: 'var(--muted-foreground)', fontSize: 11 }}>{tag.desc}</td>
-                  <td style={{ padding: '10px 12px', fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--muted-foreground)' }}>{tag.address}</td>
-                  <td style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600, fontFamily: 'var(--font-mono)', fontSize: 12 }}>
-                    {typeof tag.value === 'number' ? tag.value.toFixed(2) : tag.value}
-                  </td>
-                  <td style={{ padding: '10px 12px', fontSize: 10, color: 'var(--muted-foreground)' }}>{tag.unit}</td>
-                  <td style={{ padding: '10px 12px' }}>
-                    <span style={{ 
-                      color: tag.status === 'Live' ? '#22c55e' : '#ef4444', 
-                      fontSize: 10, 
-                      display: 'flex', 
-                      alignItems: 'center', 
-                      gap: 4 
-                    }}>
-                      <div style={{ width: 5, height: 5, borderRadius: '50%', background: tag.status === 'Live' ? '#22c55e' : '#ef4444' }} />
-                      {tag.status}
-                    </span>
-                  </td>
-                  <td style={{ padding: '10px 12px', fontSize: 10, color: 'var(--muted-foreground)' }}>{tag.source}</td>
-                  <td style={{ padding: '10px 12px', fontSize: 10, color: 'var(--muted-foreground)', fontFamily: 'var(--font-mono)' }}>{tag.lastUpdate}</td>
-                  <td>
-                    <button 
-                      onClick={(e) => { e.stopPropagation(); handleDeleteTag(tag.id); }} 
-                      style={{ 
-                        color: '#ef4444', 
-                        background: 'none', 
-                        border: 'none',
-                        cursor: 'pointer',
-                        padding: 4
-                      }}
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-              {filteredTags.length === 0 && (
-                <tr>
-                  <td colSpan={9} style={{ padding: '30px', textAlign: 'center', color: 'var(--muted-foreground)', fontSize: 12 }}>
-                    No tags found matching "{search}"
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                {filteredTags.length === 0 && (
+                  <tr>
+                    <td colSpan={isMobile ? 4 : 9} style={{ padding: '20px', textAlign: 'center', color: 'var(--muted-foreground)', fontSize: 12 }}>
+                      No tags found matching "{search}"
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
 
-        {/* Details Panel */}
+        {/* Details Panel - Hidden on mobile if no selection, full width when selected */}
         {selectedTag && (
-          <div style={{ flex: 1, ...S.card, minWidth: 280, maxWidth: 360, overflow: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                {renderIcon(selectedTag, 16)}
-                <h3 style={{ margin: 0, color: 'var(--foreground)', fontSize: 14, fontWeight: 600 }}>
+          <div style={{ 
+            flex: isMobile ? 'none' : 1, 
+            ...S.card, 
+            minWidth: isMobile ? 'auto' : 280, 
+            maxWidth: isMobile ? '100%' : 360, 
+            overflow: 'auto',
+            width: isMobile ? '100%' : 'auto',
+            padding: isMobile ? '12px 14px' : '16px 20px'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: isMobile ? 8 : 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 6 : 8 }}>
+                {renderIcon(selectedTag, isMobile ? 14 : 16)}
+                <h3 style={{ margin: 0, color: 'var(--foreground)', fontSize: isMobile ? 12 : 14, fontWeight: 600 }}>
                   {selectedTag.name}
                 </h3>
               </div>
               <div style={{ 
                 background: selectedTag.status === 'Live' ? '#22c55e20' : '#ef444420', 
                 color: selectedTag.status === 'Live' ? '#22c55e' : '#ef4444', 
-                padding: '2px 10px', 
+                padding: '2px 8px', 
                 borderRadius: 999, 
-                fontSize: 9, 
+                fontSize: isMobile ? 7 : 9, 
                 fontWeight: 700,
                 display: 'flex',
                 alignItems: 'center',
-                gap: 4
+                gap: 3
               }}>
                 <div style={{ width: 4, height: 4, borderRadius: '50%', background: selectedTag.status === 'Live' ? '#22c55e' : '#ef4444' }} />
                 {selectedTag.status.toUpperCase()}
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
+            <div style={{ 
+              display: 'grid', 
+              gridTemplateColumns: isMobile ? '1fr 1fr' : '1fr 1fr', 
+              gap: isMobile ? 4 : 8, 
+              marginBottom: isMobile ? 10 : 16 
+            }}>
               <div>
-                <div style={S.label}>Description</div>
-                <div style={{ fontSize: 12, marginTop: 2, color: 'var(--foreground)' }}>{selectedTag.desc}</div>
+                <div style={{ ...S.label, fontSize: isMobile ? 7 : 10 }}>Description</div>
+                <div style={{ fontSize: isMobile ? 10 : 12, marginTop: 2, color: 'var(--foreground)' }}>{selectedTag.desc}</div>
               </div>
               <div>
-                <div style={S.label}>Address</div>
-                <div style={{ fontSize: 12, marginTop: 2, fontFamily: 'var(--font-mono)', color: 'var(--foreground)' }}>{selectedTag.address}</div>
+                <div style={{ ...S.label, fontSize: isMobile ? 7 : 10 }}>Address</div>
+                <div style={{ fontSize: isMobile ? 10 : 12, marginTop: 2, fontFamily: 'var(--font-mono)', color: 'var(--foreground)' }}>{selectedTag.address}</div>
               </div>
               <div>
-                <div style={S.label}>Current Value</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: selectedTag.calculated ? '#a78bfa' : '#0ea5e9', marginTop: 2, fontFamily: 'var(--font-mono)' }}>
-                  {typeof selectedTag.value === 'number' ? selectedTag.value.toFixed(2) : selectedTag.value} {selectedTag.unit}
+                <div style={{ ...S.label, fontSize: isMobile ? 7 : 10 }}>Current Value</div>
+                <div style={{ 
+                  fontSize: isMobile ? 16 : 18, 
+                  fontWeight: 700, 
+                  color: selectedTag.calculated ? '#a78bfa' : '#0ea5e9', 
+                  marginTop: 2, 
+                  fontFamily: 'var(--font-mono)' 
+                }}>
+                  {renderValue(selectedTag)} {selectedTag.unit}
                 </div>
               </div>
               <div>
-                <div style={S.label}>Source</div>
-                <div style={{ fontSize: 12, marginTop: 2, color: 'var(--foreground)' }}>{selectedTag.source}</div>
+                <div style={{ ...S.label, fontSize: isMobile ? 7 : 10 }}>Source</div>
+                <div style={{ fontSize: isMobile ? 10 : 12, marginTop: 2, color: 'var(--foreground)' }}>{selectedTag.source}</div>
                 {selectedTag.calculated ? (
-                  <div style={{ fontSize: 9, color: '#a78bfa', marginTop: 2 }}>Calculated from ABOX data</div>
+                  <div style={{ fontSize: isMobile ? 7 : 9, color: '#a78bfa', marginTop: 2 }}>Calculated from ABOX data</div>
                 ) : (
-                  <div style={{ fontSize: 9, color: '#0ea5e9', marginTop: 2 }}>Raw key: {selectedTag.rawKey}</div>
+                  <div style={{ fontSize: isMobile ? 7 : 9, color: '#0ea5e9', marginTop: 2 }}>Raw key: {selectedTag.rawKey}</div>
                 )}
               </div>
             </div>
 
             {/* Chart */}
-            <div style={{ marginBottom: 12 }}>
-              <div style={S.label}>Live Trend (Last 30 points)</div>
+            <div style={{ marginBottom: isMobile ? 8 : 12 }}>
+              <div style={{ ...S.label, fontSize: isMobile ? 7 : 10 }}>Live Trend (Last 30 points)</div>
               <div style={{ 
-                height: 160, 
-                marginTop: 8, 
+                height: isMobile ? 120 : 160, 
+                marginTop: isMobile ? 4 : 8, 
                 background: 'var(--secondary)', 
                 borderRadius: 6, 
-                padding: 8,
+                padding: isMobile ? 4 : 8,
                 border: '1px solid var(--border)'
               }}>
                 <Line data={chartData} options={chartOptions} />
@@ -800,13 +906,13 @@ export default function TagManager() {
               onClick={() => handleDeleteTag(selectedTag.id)}
               style={{ 
                 width: '100%', 
-                padding: '10px', 
+                padding: isMobile ? '8px' : '10px', 
                 background: '#ef444420', 
                 color: '#ef4444', 
                 border: '1px solid #ef444440',
                 borderRadius: 6, 
                 fontWeight: 600,
-                fontSize: 12,
+                fontSize: isMobile ? 10 : 12,
                 cursor: 'pointer',
                 transition: 'all 0.2s'
               }}
@@ -819,7 +925,7 @@ export default function TagManager() {
         )}
       </div>
 
-      {/* Add New Tag Modal */}
+      {/* Add New Tag Modal - Responsive */}
       {showAddForm && (
         <div style={{ 
           position: 'fixed', 
@@ -828,47 +934,54 @@ export default function TagManager() {
           display: 'flex', 
           alignItems: 'center', 
           justifyContent: 'center', 
-          zIndex: 1000 
+          zIndex: 1000,
+          padding: isMobile ? 12 : 0
         }}>
-          <div style={{ ...S.card, width: 440, background: 'var(--card)' }}>
-            <h2 style={{ color: '#0ea5e9', marginBottom: 16, fontSize: 18, fontWeight: 700 }}>
-              <Plus size={20} style={{ display: 'inline', marginRight: 8 }} />
+          <div style={{ 
+            ...S.card, 
+            width: isMobile ? '100%' : 440, 
+            background: 'var(--card)',
+            padding: isMobile ? '16px' : '20px',
+            maxWidth: '100%'
+          }}>
+            <h2 style={{ color: '#0ea5e9', marginBottom: isMobile ? 12 : 16, fontSize: isMobile ? 16 : 18, fontWeight: 700 }}>
+              <Plus size={isMobile ? 16 : 20} style={{ display: 'inline', marginRight: 8 }} />
               Add New Tag
             </h2>
             
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? 8 : 10 }}>
               <input 
                 placeholder="Tag Name (e.g. VW702)" 
                 value={newTag.name} 
                 onChange={e => setNewTag({...newTag, name: e.target.value})} 
-                style={{ padding: 10, background: 'var(--secondary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--foreground)', fontSize: 12, outline: 'none' }} 
+                style={{ padding: isMobile ? 8 : 10, background: 'var(--secondary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--foreground)', fontSize: isMobile ? 10 : 12, outline: 'none' }} 
               />
               <input 
                 placeholder="Description" 
                 value={newTag.desc} 
                 onChange={e => setNewTag({...newTag, desc: e.target.value})} 
-                style={{ padding: 10, background: 'var(--secondary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--foreground)', fontSize: 12, outline: 'none' }} 
+                style={{ padding: isMobile ? 8 : 10, background: 'var(--secondary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--foreground)', fontSize: isMobile ? 10 : 12, outline: 'none' }} 
               />
               <input 
                 placeholder="Address (e.g. VW702)" 
                 value={newTag.address} 
                 onChange={e => setNewTag({...newTag, address: e.target.value})} 
-                style={{ padding: 10, background: 'var(--secondary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--foreground)', fontSize: 12, outline: 'none' }} 
+                style={{ padding: isMobile ? 8 : 10, background: 'var(--secondary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--foreground)', fontSize: isMobile ? 10 : 12, outline: 'none' }} 
               />
               
-              <div style={{ display: 'flex', gap: 10 }}>
+              <div style={{ display: 'flex', gap: isMobile ? 6 : 10 }}>
                 <input 
                   type="number" 
                   placeholder="Value" 
                   value={newTag.value} 
                   onChange={e => setNewTag({...newTag, value: e.target.value})} 
-                  style={{ flex: 1, padding: 10, background: 'var(--secondary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--foreground)', fontSize: 12, outline: 'none' }} 
+                  style={{ flex: 1, padding: isMobile ? 8 : 10, background: 'var(--secondary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--foreground)', fontSize: isMobile ? 10 : 12, outline: 'none' }} 
                 />
                 <input 
                   placeholder="Unit" 
                   value={newTag.unit} 
                   onChange={e => setNewTag({...newTag, unit: e.target.value})} 
-                  style={{ flex: 1, padding: 10, background: 'var(--secondary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--foreground)', fontSize: 12, outline: 'none' }} 
+                  style={{ flex: 1, padding: isMobile ? 8 : 10, background: 'var(--secondary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--foreground)', fontSize: isMobile ? 10 : 12, outline: 'none' }} 
                 />
               </div>
 
@@ -876,22 +989,22 @@ export default function TagManager() {
                 placeholder="Source (e.g. ABOX-PLC)" 
                 value={newTag.source} 
                 onChange={e => setNewTag({...newTag, source: e.target.value})} 
-                style={{ padding: 10, background: 'var(--secondary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--foreground)', fontSize: 12, outline: 'none' }} 
+                style={{ padding: isMobile ? 8 : 10, background: 'var(--secondary)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--foreground)', fontSize: isMobile ? 10 : 12, outline: 'none' }} 
               />
             </div>
 
-            <div style={{ marginTop: 20, display: 'flex', gap: 10 }}>
+            <div style={{ marginTop: isMobile ? 16 : 20, display: 'flex', gap: isMobile ? 6 : 10 }}>
               <button 
                 onClick={handleAddTag} 
                 style={{ 
                   flex: 1, 
-                  padding: 10, 
+                  padding: isMobile ? 8 : 10, 
                   background: '#0ea5e9', 
                   color: '#020810', 
                   border: 'none', 
                   borderRadius: 4, 
                   fontWeight: 600,
-                  fontSize: 12,
+                  fontSize: isMobile ? 10 : 12,
                   cursor: 'pointer'
                 }}
               >
@@ -901,12 +1014,12 @@ export default function TagManager() {
                 onClick={() => setShowAddForm(false)} 
                 style={{ 
                   flex: 1, 
-                  padding: 10, 
+                  padding: isMobile ? 8 : 10, 
                   background: 'var(--secondary)', 
                   border: '1px solid var(--border)',
                   borderRadius: 4,
                   color: 'var(--foreground)',
-                  fontSize: 12,
+                  fontSize: isMobile ? 10 : 12,
                   cursor: 'pointer'
                 }}
               >
@@ -916,6 +1029,16 @@ export default function TagManager() {
           </div>
         </div>
       )}
+
+      <style>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        .spin {
+          animation: spin 0.8s linear infinite;
+        }
+      `}</style>
     </div>
   );
 }

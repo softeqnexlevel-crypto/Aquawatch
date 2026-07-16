@@ -1,6 +1,7 @@
-// routes.jsx
+// routes.jsx - FULLY RESPONSIVE WITH DARK MODE
+
 import { createBrowserRouter, Outlet, Navigate, useLocation, useNavigate, RouterProvider } from "react-router";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { DataProvider } from "./contexts/DataContext";
 import { ScrollContainer } from "./components/ScrollContainer";
 
@@ -18,7 +19,7 @@ import { Analytics } from "./components/Analytics";
 import { Reports } from "./components/Reports";
 import { AlertsCenter } from "./components/AlertsCenter";
 import { Settings } from "./components/Settings";
-import Login from "./components/Login"; // ← Changed from LandingPage
+import Login from "./components/Login";
 import TagRules from './components/TagRules';
 
 // Configuration Pages
@@ -80,15 +81,42 @@ const pageToPath = {
   user: "/app/user",
 };
 
-// ==================== LAYOUT ====================
-function DashboardLayout() {
+// ==================== DARK MODE PROVIDER ====================
+function useDarkMode() {
   const [darkMode, setDarkMode] = useState(() => {
     const saved = localStorage.getItem("aquaDarkMode");
     return saved !== null ? saved === "true" : true;
   });
 
+  useEffect(() => {
+    // Apply dark mode class to document
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem("aquaDarkMode", darkMode);
+  }, [darkMode]);
+
+  const toggleDark = () => setDarkMode(prev => !prev);
+
+  return { darkMode, toggleDark };
+}
+
+// ==================== LAYOUT ====================
+function DashboardLayout() {
+  const { darkMode, toggleDark } = useDarkMode();
   const location = useLocation();
   const navigate = useNavigate();
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Mobile detection
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   const activeAlerts = alerts.filter((a) => a.status === "Active").length;
   const currentPage = pathToPage[location.pathname] || "dashboard";
@@ -99,31 +127,54 @@ function DashboardLayout() {
     if (path) navigate(path);
   };
 
-  const handleToggleDark = () => {
-    const newMode = !darkMode;
-    setDarkMode(newMode);
-    localStorage.setItem("aquaDarkMode", newMode);
-  };
-
   return (
-    <div className={darkMode ? "dark" : ""} style={{ width: "100%", height: "100vh", display: "flex", overflow: "hidden", background: "var(--background)" }}>
-      <Sidebar
-        activePage={currentPage}
-        onNavigate={handleNavigate}
-        alertCount={activeAlerts}
-      />
+    <div 
+      className={darkMode ? "dark" : ""} 
+      style={{ 
+        width: "100%", 
+        height: "100vh", 
+        display: "flex", 
+        overflow: "hidden", 
+        background: "var(--background)",
+        position: "relative",
+      }}
+    >
+      {/* Sidebar - hidden on mobile when not open */}
+      <div style={{ 
+        flexShrink: 0,
+        zIndex: 50,
+      }}>
+        <Sidebar
+          activePage={currentPage}
+          onNavigate={handleNavigate}
+          alertCount={activeAlerts}
+        />
+      </div>
 
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+      {/* Main content */}
+      <div style={{ 
+        flex: 1, 
+        display: "flex", 
+        flexDirection: "column", 
+        overflow: "hidden",
+        minWidth: 0, // Prevents overflow
+      }}>
         <TopNav
           darkMode={darkMode}
-          onToggleDark={handleToggleDark}
+          onToggleDark={toggleDark}
           alertCount={activeAlerts}
           title={title}
         />
         
         <ScrollContainer>
           <DataProvider>
-            <Outlet />
+            <div style={{ 
+              padding: isMobile ? '8px' : '16px',
+              height: '100%',
+              overflow: 'auto',
+            }}>
+              <Outlet />
+            </div>
           </DataProvider>
         </ScrollContainer>
       </div>
@@ -135,7 +186,7 @@ function DashboardLayout() {
 function ProtectedRoute({ children }) {
   const { user } = useAuth();
   if (!user) {
-    return <Navigate to="/login" replace />; // ← Changed from "/" to "/login"
+    return <Navigate to="/login" replace />;
   }
   return children;
 }
@@ -143,24 +194,17 @@ function ProtectedRoute({ children }) {
 // ==================== LOGIN PAGE WRAPPER ====================
 function LoginPageWrapper() {
   const navigate = useNavigate();
-  const [darkMode, setDarkMode] = useState(() => {
-    const saved = localStorage.getItem("aquaDarkMode");
-    return saved !== null ? saved === "true" : true;
-  });
-
-  const handleToggleDark = () => {
-    const newMode = !darkMode;
-    setDarkMode(newMode);
-    localStorage.setItem("aquaDarkMode", newMode);
-  };
+  const { darkMode } = useDarkMode();
 
   const handleLoginSuccess = (user) => {
-    // Navigate to dashboard after successful login
     navigate("/app");
   };
 
   return (
-    <div className={darkMode ? "dark" : ""}>
+    <div className={darkMode ? "dark" : ""} style={{ 
+      minHeight: "100vh", 
+      background: "var(--background)" 
+    }}>
       <Login 
         onLoginSuccess={handleLoginSuccess}
         isModal={false}
@@ -177,7 +221,7 @@ const router = createBrowserRouter([
   },
   {
     path: "/",
-    element: <Navigate to="/login" replace />, // ← Redirect root to login
+    element: <Navigate to="/login" replace />,
   },
   {
     path: "/app",

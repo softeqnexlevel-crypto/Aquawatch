@@ -791,11 +791,7 @@ export function Dashboard() {
 
         {/* ── Advanced Charts Row ── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 mb-3 sm:mb-4">
-          <LiveTrendChart data={{ ...sensorData, history }} sensorKey={selectedSensors[0] || 'RO5-Permeateflow'} height={isMobile ? 180 : 220} />
-          <SystemHealthRadar data={sensorData} />
-        </div>
-
-        {/* ── Sensor Selector ── */}
+          {/* ── Sensor Selector ── */}
         <div className="mb-3 sm:mb-4">
           <div className="rounded-lg p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
             <span style={{ fontSize: isMobile ? 9 : 11, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 6, display: "block" }}>
@@ -829,6 +825,10 @@ export function Dashboard() {
             </div>
           </div>
         </div>
+          <SystemHealthRadar data={sensorData} />
+        </div>
+
+       
 
         {/* ── Flow balance, distribution charts ── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-3 sm:mb-4">
