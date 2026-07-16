@@ -1,5 +1,6 @@
-// pages/Reports.jsx
-import React, { useState, useRef, useMemo } from "react";
+// pages/Reports.jsx - FULLY MOBILE RESPONSIVE
+
+import React, { useState, useRef, useMemo, useEffect } from "react";
 import { 
   FileText, Download, Calendar, BarChart2, Droplets, 
   FlaskConical, Wrench, RefreshCw, CheckCircle, 
@@ -114,19 +115,22 @@ export function Reports() {
   const [toast, setToast] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
-  const [viewMode, setViewMode] = useState('table'); // 'table' | 'cards'
-  const [generatingReport, setGeneratingReport] = useState(null);
+  const [viewMode, setViewMode] = useState('table');
+  const [isMobile, setIsMobile] = useState(false);
   
   const timerRef = useRef(null);
   const intervalRef = useRef(null);
 
+  // Mobile detection
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
   // ===================== GENERATE REAL REPORTS FROM DATA =====================
   const generateReportsFromData = useMemo(() => {
-    // ✅ FIX: every key below now uses the "RO5-" prefix, matching how
-    // DataContext.jsx actually stores sensor readings (see KEY_MAPPING /
-    // toShortName there). Without the prefix, getValue() never found a
-    // match and silently fell back to 0 for every single field — which is
-    // why every generated/exported report showed all zeros.
     const feedFlow = getValue('RO5-FEEDFlow') || 0;
     const permeateFlow = getValue('RO5-Permeateflow') || 0;
     const concentrateFlow = getValue('RO5-ConcetrateFlow') || 0;
@@ -140,7 +144,6 @@ export function Reports() {
     const feedHistory = getHistory('RO5-FEEDFlow');
     const permeateHistory = getHistory('RO5-Permeateflow');
 
-    // Calculate daily averages
     const dailyAvg = (data) => {
       if (data.length === 0) return 0;
       const last24h = data.filter(d => new Date(d.time) >= subDays(new Date(), 1));
@@ -150,7 +153,6 @@ export function Reports() {
     const avgFeed = dailyAvg(feedHistory);
     const avgPermeate = dailyAvg(permeateHistory);
 
-    // Generate reports
     return [
       {
         id: "RPT-DAILY-001",
@@ -372,9 +374,8 @@ export function Reports() {
     },
   ];
 
-  // ===================== RENDER =====================
   return (
-    <div className="flex flex-col gap-4 p-4 overflow-auto h-full" >
+    <div className="flex flex-col gap-3 sm:gap-4 p-2 sm:p-4 overflow-auto h-full">
       <style>{`
         @keyframes spin {
           from { transform: rotate(0deg); }
@@ -387,12 +388,12 @@ export function Reports() {
       `}</style>
 
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
         <div>
-          <h2 style={{ fontSize: 16, fontWeight: 700, color: "var(--foreground)" }}>
+          <h2 style={{ fontSize: isMobile ? 14 : 16, fontWeight: 700, color: "var(--foreground)" }}>
             Reports & Analytics
           </h2>
-          <p style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 2 }}>
+          <p style={{ fontSize: isMobile ? 10 : 11, color: "var(--muted-foreground)", marginTop: 2 }}>
             {generateReportsFromData.length} reports available • Last updated: {lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--'}
           </p>
         </div>
@@ -400,31 +401,33 @@ export function Reports() {
           <button
             onClick={() => setViewMode(viewMode === 'table' ? 'cards' : 'table')}
             style={{
-              padding: '6px 12px',
+              padding: isMobile ? '4px 10px' : '6px 12px',
               borderRadius: 4,
               background: 'var(--secondary)',
               border: '1px solid var(--border)',
               color: 'var(--foreground)',
-              fontSize: 10,
+              fontSize: isMobile ? 9 : 10,
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              gap: 4
+              gap: 4,
+              width: isMobile ? '100%' : 'auto',
+              justifyContent: 'center'
             }}
           >
-            {viewMode === 'table' ? <EyeOff size={14} /> : <Eye size={14} />}
+            {viewMode === 'table' ? <EyeOff size={isMobile ? 12 : 14} /> : <Eye size={isMobile ? 12 : 14} />}
             {viewMode === 'table' ? 'Cards' : 'Table'}
           </button>
         </div>
       </div>
 
-      {/* Quick Generate Buttons */}
-      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+      {/* Quick Generate Buttons - Responsive */}
+      <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)" }}>
         {generateButtons.map((r) => (
           <button
             key={r.label}
             onClick={() => handleGenerateReport(r.type, r.label)}
-            className="rounded p-3 text-left transition-all hover:scale-[1.02]"
+            className="rounded p-2 sm:p-3 text-left transition-all hover:scale-[1.02]"
             style={{ 
               background: "var(--card)", 
               border: "1px solid var(--border)", 
@@ -432,48 +435,51 @@ export function Reports() {
               transition: "all 0.2s"
             }}
           >
-            <div className="flex items-center gap-2 mb-2">
-              <div className="rounded p-1.5" style={{ background: `${r.color}15` }}>
-                <r.icon size={14} style={{ color: r.color }} />
+            <div className="flex items-center gap-2 mb-1 sm:mb-2">
+              <div className="rounded p-1 sm:p-1.5" style={{ background: `${r.color}15` }}>
+                <r.icon size={isMobile ? 12 : 14} style={{ color: r.color }} />
               </div>
-              <span style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>{r.label}</span>
+              <span style={{ fontSize: isMobile ? 10 : 12, fontWeight: 600, color: "var(--foreground)" }}>{r.label}</span>
             </div>
-            <div style={{ fontSize: 10, color: "var(--muted-foreground)" }}>{r.desc}</div>
-            <div className="mt-2 flex items-center gap-1" style={{ fontSize: 9, color: r.color }}>
-              <Download size={10} /> Generate & Export
+            <div style={{ fontSize: isMobile ? 8 : 10, color: "var(--muted-foreground)" }}>{r.desc}</div>
+            <div className="mt-1 sm:mt-2 flex items-center gap-1" style={{ fontSize: isMobile ? 8 : 9, color: r.color }}>
+              <Download size={isMobile ? 8 : 10} /> Generate
             </div>
           </button>
         ))}
       </div>
 
-      {/* Filters */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="flex items-center gap-1.5">
-          <Filter size={14} style={{ color: "var(--muted-foreground)" }} />
-          <span style={{ fontSize: 10, color: "var(--muted-foreground)", fontWeight: 500 }}>
+      {/* Filters - Responsive */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <Filter size={isMobile ? 12 : 14} style={{ color: "var(--muted-foreground)" }} />
+          <span style={{ fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)", fontWeight: 500 }}>
             Category:
           </span>
         </div>
-        {categories.map(cat => (
-          <button
-            key={cat}
-            onClick={() => setSelectedCategory(cat)}
-            style={{
-              padding: '3px 12px',
-              borderRadius: 12,
-              background: selectedCategory === cat ? '#0ea5e9' : 'var(--secondary)',
-              color: selectedCategory === cat ? 'white' : 'var(--muted-foreground)',
-              border: '1px solid var(--border)',
-              fontSize: 9,
-              cursor: 'pointer',
-              transition: 'all 0.2s'
-            }}
-          >
-            {cat}
-          </button>
-        ))}
+        <div className="flex items-center gap-1 flex-wrap">
+          {categories.map(cat => (
+            <button
+              key={cat}
+              onClick={() => setSelectedCategory(cat)}
+              style={{
+                padding: isMobile ? '2px 8px' : '3px 12px',
+                borderRadius: 12,
+                background: selectedCategory === cat ? '#0ea5e9' : 'var(--secondary)',
+                color: selectedCategory === cat ? 'white' : 'var(--muted-foreground)',
+                border: '1px solid var(--border)',
+                fontSize: isMobile ? 8 : 9,
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {isMobile && cat !== 'All' ? cat.charAt(0) : cat}
+            </button>
+          ))}
+        </div>
         
-        <div style={{ flex: 1, minWidth: 150, position: 'relative' }}>
+        <div style={{ flex: 1, minWidth: isMobile ? '100%' : 150, position: 'relative' }}>
           <input
             type="text"
             placeholder="Search reports..."
@@ -481,18 +487,18 @@ export function Reports() {
             onChange={(e) => setSearchQuery(e.target.value)}
             style={{
               width: '100%',
-              padding: '4px 10px',
+              padding: isMobile ? '4px 8px' : '4px 10px',
               borderRadius: 4,
               background: 'var(--secondary)',
               border: '1px solid var(--border)',
               color: 'var(--foreground)',
-              fontSize: 10,
+              fontSize: isMobile ? 9 : 10,
               outline: 'none'
             }}
           />
         </div>
         
-        <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>
+        <span style={{ fontSize: isMobile ? 9 : 10, color: 'var(--muted-foreground)' }}>
           {filteredReports.length} reports
         </span>
       </div>
@@ -500,121 +506,129 @@ export function Reports() {
       {/* Report List */}
       {viewMode === 'table' ? (
         <div className="rounded overflow-hidden" style={{ border: "1px solid var(--border)" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ background: "var(--muted)" }}>
-                {["Report ID", "Title", "Category", "Type", "Generated", "Size", "Actions"].map((h) => (
-                  <th key={h} style={{ 
-                    padding: "8px 10px", 
-                    textAlign: "left", 
-                    fontSize: 9, 
-                    fontWeight: 600, 
-                    color: "var(--muted-foreground)", 
-                    letterSpacing: "0.08em", 
-                    textTransform: "uppercase", 
-                    borderBottom: "1px solid var(--border)" 
-                  }}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filteredReports.map((r, i) => {
-                const Icon = categoryIcons[r.category] || FileText;
-                const tc = typeColors[r.type] || typeColors.Monthly;
-                return (
-                  <tr key={r.id} style={{ 
-                    background: i % 2 === 0 ? "var(--card)" : "var(--muted)",
-                    transition: 'background 0.2s'
-                  }}>
-                    <td style={{ 
-                      padding: "8px 10px", 
-                      fontSize: 10, 
-                      fontFamily: "var(--font-mono)", 
-                      color: "#0ea5e9", 
-                      borderBottom: "1px solid var(--border)" 
-                    }}>
-                      {r.id}
-                    </td>
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
-                      <div className="flex items-center gap-2">
-                        <Icon size={12} style={{ color: "var(--muted-foreground)" }} />
-                        <span style={{ fontSize: 11, fontWeight: 500, color: "var(--foreground)" }}>{r.title}</span>
-                      </div>
-                      <div style={{ fontSize: 9, color: "var(--muted-foreground)", marginTop: 2 }}>
-                        {r.summary}
-                      </div>
-                    </td>
-                    <td style={{ 
-                      padding: "8px 10px", 
-                      fontSize: 10, 
-                      color: "var(--muted-foreground)", 
-                      borderBottom: "1px solid var(--border)" 
-                    }}>
-                      {r.category}
-                    </td>
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
-                      <span style={{ 
-                        fontSize: 9, 
-                        fontWeight: 600, 
-                        color: tc.color, 
-                        background: tc.bg, 
-                        borderRadius: 3, 
-                        padding: "1px 8px" 
-                      }}>
-                        {r.type.toUpperCase()}
-                      </span>
-                    </td>
-                    <td style={{ 
-                      padding: "8px 10px", 
-                      fontSize: 10, 
-                      fontFamily: "var(--font-mono)", 
-                      color: "var(--muted-foreground)", 
-                      borderBottom: "1px solid var(--border)" 
-                    }}>
-                      {r.date}
-                    </td>
-                    <td style={{ 
-                      padding: "8px 10px", 
-                      fontSize: 10, 
-                      fontFamily: "var(--font-mono)", 
-                      color: "var(--muted-foreground)", 
-                      borderBottom: "1px solid var(--border)" 
-                    }}>
-                      {r.size}
-                    </td>
-                    <td style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
-                      <button
-                        onClick={() => handleDownload(r)}
-                        className="flex items-center gap-1 px-2 py-1 rounded transition-colors hover:bg-cyan-500/20"
-                        style={{ 
-                          fontSize: 9, 
-                          color: "#0ea5e9", 
-                          background: "rgba(14,165,233,0.08)", 
-                          border: "1px solid rgba(14,165,233,0.15)", 
-                          cursor: "pointer" 
-                        }}
-                      >
-                        <Download size={10} /> Download
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: isMobile ? 500 : 'auto' }}>
+              <thead>
+                <tr style={{ background: "var(--muted)" }}>
+                  {isMobile ? (
+                    <>
+                      <th style={{ padding: "6px 8px", textAlign: "left", fontSize: 8, fontWeight: 600, color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>Report</th>
+                      <th style={{ padding: "6px 8px", textAlign: "left", fontSize: 8, fontWeight: 600, color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>Category</th>
+                      <th style={{ padding: "6px 8px", textAlign: "center", fontSize: 8, fontWeight: 600, color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>Actions</th>
+                    </>
+                  ) : (
+                    <>
+                      <th style={{ padding: "8px 10px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.08em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>Report ID</th>
+                      <th style={{ padding: "8px 10px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.08em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>Title</th>
+                      <th style={{ padding: "8px 10px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.08em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>Category</th>
+                      <th style={{ padding: "8px 10px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.08em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>Type</th>
+                      <th style={{ padding: "8px 10px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.08em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>Generated</th>
+                      <th style={{ padding: "8px 10px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.08em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>Size</th>
+                      <th style={{ padding: "8px 10px", textAlign: "center", fontSize: 9, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.08em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>Actions</th>
+                    </>
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {filteredReports.map((r, i) => {
+                  const Icon = categoryIcons[r.category] || FileText;
+                  const tc = typeColors[r.type] || typeColors.Monthly;
+                  
+                  if (isMobile) {
+                    return (
+                      <tr key={r.id} style={{ background: i % 2 === 0 ? "var(--card)" : "var(--muted)" }}>
+                        <td style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
+                          <div className="flex items-center gap-1.5">
+                            <Icon size={10} style={{ color: "var(--muted-foreground)" }} />
+                            <span style={{ fontSize: 9, fontWeight: 500, color: "var(--foreground)" }}>{r.title}</span>
+                          </div>
+                          <div style={{ fontSize: 7, color: "var(--muted-foreground)", marginTop: 1 }}>{r.id}</div>
+                          <div style={{ fontSize: 7, color: "var(--muted-foreground)" }}>{r.date}</div>
+                        </td>
+                        <td style={{ padding: "6px 8px", fontSize: 8, color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>
+                          {r.category}
+                        </td>
+                        <td style={{ padding: "6px 8px", textAlign: "center", borderBottom: "1px solid var(--border)" }}>
+                          <button
+                            onClick={() => handleDownload(r)}
+                            style={{ 
+                              fontSize: 8, 
+                              color: "#0ea5e9", 
+                              background: "rgba(14,165,233,0.08)", 
+                              border: "1px solid rgba(14,165,233,0.15)", 
+                              cursor: "pointer",
+                              padding: "2px 6px",
+                              borderRadius: 3
+                            }}
+                          >
+                            <Download size={8} />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  }
+                  
+                  return (
+                    <tr key={r.id} style={{ background: i % 2 === 0 ? "var(--card)" : "var(--muted)" }}>
+                      <td style={{ padding: "8px 10px", fontSize: 10, fontFamily: "var(--font-mono)", color: "#0ea5e9", borderBottom: "1px solid var(--border)" }}>
+                        {r.id}
+                      </td>
+                      <td style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
+                        <div className="flex items-center gap-2">
+                          <Icon size={12} style={{ color: "var(--muted-foreground)" }} />
+                          <span style={{ fontSize: 11, fontWeight: 500, color: "var(--foreground)" }}>{r.title}</span>
+                        </div>
+                        <div style={{ fontSize: 9, color: "var(--muted-foreground)", marginTop: 2 }}>
+                          {r.summary}
+                        </div>
+                      </td>
+                      <td style={{ padding: "8px 10px", fontSize: 10, color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>
+                        {r.category}
+                      </td>
+                      <td style={{ padding: "8px 10px", borderBottom: "1px solid var(--border)" }}>
+                        <span style={{ fontSize: 9, fontWeight: 600, color: tc.color, background: tc.bg, borderRadius: 3, padding: "1px 8px" }}>
+                          {r.type.toUpperCase()}
+                        </span>
+                      </td>
+                      <td style={{ padding: "8px 10px", fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>
+                        {r.date}
+                      </td>
+                      <td style={{ padding: "8px 10px", fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>
+                        {r.size}
+                      </td>
+                      <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: "1px solid var(--border)" }}>
+                        <button
+                          onClick={() => handleDownload(r)}
+                          className="flex items-center gap-1 px-2 py-1 rounded transition-colors hover:bg-cyan-500/20"
+                          style={{ 
+                            fontSize: 9, 
+                            color: "#0ea5e9", 
+                            background: "rgba(14,165,233,0.08)", 
+                            border: "1px solid rgba(14,165,233,0.15)", 
+                            cursor: "pointer",
+                            display: 'inline-flex'
+                          }}
+                        >
+                          <Download size={10} /> Download
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : (
-        // Card View
-        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))" }}>
+        // Card View - Responsive
+        <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(280px, 1fr))" }}>
           {filteredReports.map((r) => {
             const Icon = categoryIcons[r.category] || FileText;
             const tc = typeColors[r.type] || typeColors.Monthly;
             return (
               <div
                 key={r.id}
-                className="rounded p-4 transition-all hover:scale-[1.02]"
+                className="rounded p-3 sm:p-4 transition-all hover:scale-[1.02]"
                 style={{ 
                   background: "var(--card)", 
                   border: "1px solid var(--border)",
@@ -625,35 +639,35 @@ export function Reports() {
               >
                 <div className="flex items-start justify-between">
                   <div className="flex items-center gap-2">
-                    <div className="rounded p-2" style={{ background: `${tc.color}15` }}>
-                      <Icon size={16} style={{ color: tc.color }} />
+                    <div className="rounded p-1.5 sm:p-2" style={{ background: `${tc.color}15` }}>
+                      <Icon size={isMobile ? 14 : 16} style={{ color: tc.color }} />
                     </div>
                     <div>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>
+                      <div style={{ fontSize: isMobile ? 11 : 12, fontWeight: 600, color: "var(--foreground)" }}>
                         {r.title}
                       </div>
-                      <div style={{ fontSize: 9, color: "var(--muted-foreground)" }}>
+                      <div style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)" }}>
                         {r.id} • {r.date}
                       </div>
                     </div>
                   </div>
                   <span style={{ 
-                    fontSize: 8, 
+                    fontSize: isMobile ? 7 : 8, 
                     fontWeight: 600, 
                     color: tc.color, 
                     background: tc.bg, 
                     borderRadius: 3, 
-                    padding: "1px 8px" 
+                    padding: "1px 6px" 
                   }}>
                     {r.type.toUpperCase()}
                   </span>
                 </div>
                 
                 <div style={{ 
-                  fontSize: 10, 
+                  fontSize: isMobile ? 9 : 10, 
                   color: "var(--muted-foreground)", 
                   marginTop: 8,
-                  padding: 8,
+                  padding: 6,
                   background: "var(--muted)",
                   borderRadius: 4
                 }}>
@@ -661,13 +675,13 @@ export function Reports() {
                 </div>
                 
                 <div className="flex items-center justify-between mt-3">
-                  <span style={{ fontSize: 9, color: "var(--muted-foreground)" }}>
+                  <span style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)" }}>
                     {r.category} • {r.size}
                   </span>
                   <button
                     className="flex items-center gap-1 px-2 py-1 rounded transition-colors hover:bg-cyan-500/20"
                     style={{ 
-                      fontSize: 9, 
+                      fontSize: isMobile ? 8 : 9, 
                       color: "#0ea5e9", 
                       background: "rgba(14,165,233,0.08)", 
                       border: "1px solid rgba(14,165,233,0.15)", 
@@ -678,7 +692,7 @@ export function Reports() {
                       handleDownload(r);
                     }}
                   >
-                    <Download size={10} /> Download
+                    <Download size={isMobile ? 8 : 10} /> Download
                   </button>
                 </div>
               </div>
@@ -690,9 +704,9 @@ export function Reports() {
       {/* Empty State */}
       {filteredReports.length === 0 && (
         <div className="flex flex-col items-center justify-center p-8" style={{ color: "var(--muted-foreground)" }}>
-          <FileText size={32} style={{ opacity: 0.3, marginBottom: 12 }} />
-          <p style={{ fontSize: 14, fontWeight: 500 }}>No reports found</p>
-          <p style={{ fontSize: 11, marginTop: 4 }}>Try adjusting your filters or generating a new report</p>
+          <FileText size={isMobile ? 24 : 32} style={{ opacity: 0.3, marginBottom: 12 }} />
+          <p style={{ fontSize: isMobile ? 12 : 14, fontWeight: 500 }}>No reports found</p>
+          <p style={{ fontSize: isMobile ? 10 : 11, marginTop: 4 }}>Try adjusting your filters or generating a new report</p>
         </div>
       )}
 

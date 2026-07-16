@@ -2,7 +2,7 @@
 import { createBrowserRouter, Outlet, Navigate, useLocation, useNavigate, RouterProvider } from "react-router";
 import { useState } from "react";
 import { DataProvider } from "./contexts/DataContext";
-import { ScrollContainer } from "./components/ScrollContainer"; // ← ADD THIS IMPORT
+import { ScrollContainer } from "./components/ScrollContainer";
 
 // Components
 import { Sidebar } from "./components/Sidebar";
@@ -18,7 +18,7 @@ import { Analytics } from "./components/Analytics";
 import { Reports } from "./components/Reports";
 import { AlertsCenter } from "./components/AlertsCenter";
 import { Settings } from "./components/Settings";
-import LandingPage from "./components/LandingPage";
+import Login from "./components/Login"; // ← Changed from LandingPage
 import TagRules from './components/TagRules';
 
 // Configuration Pages
@@ -92,7 +92,7 @@ function DashboardLayout() {
 
   const activeAlerts = alerts.filter((a) => a.status === "Active").length;
   const currentPage = pathToPage[location.pathname] || "dashboard";
-  const title = pageTitles[location.pathname] || "AquaOps";
+  const title = pageTitles[location.pathname] || "AquaSystemTech";
 
   const handleNavigate = (page) => {
     const path = pageToPath[page];
@@ -121,7 +121,6 @@ function DashboardLayout() {
           title={title}
         />
         
-        {/* ✅ REPLACE main with ScrollContainer */}
         <ScrollContainer>
           <DataProvider>
             <Outlet />
@@ -136,13 +135,13 @@ function DashboardLayout() {
 function ProtectedRoute({ children }) {
   const { user } = useAuth();
   if (!user) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/login" replace />; // ← Changed from "/" to "/login"
   }
   return children;
 }
 
-// ==================== LANDING PAGE WRAPPER ====================
-function LandingPageWrapper() {
+// ==================== LOGIN PAGE WRAPPER ====================
+function LoginPageWrapper() {
   const navigate = useNavigate();
   const [darkMode, setDarkMode] = useState(() => {
     const saved = localStorage.getItem("aquaDarkMode");
@@ -155,16 +154,16 @@ function LandingPageWrapper() {
     localStorage.setItem("aquaDarkMode", newMode);
   };
 
-  const handleGetStarted = () => {
+  const handleLoginSuccess = (user) => {
+    // Navigate to dashboard after successful login
     navigate("/app");
   };
 
   return (
     <div className={darkMode ? "dark" : ""}>
-      <LandingPage
-        onGetStarted={handleGetStarted}
-        darkMode={darkMode}
-        onToggleDark={handleToggleDark}
+      <Login 
+        onLoginSuccess={handleLoginSuccess}
+        isModal={false}
       />
     </div>
   );
@@ -173,8 +172,12 @@ function LandingPageWrapper() {
 // ==================== ROUTER ====================
 const router = createBrowserRouter([
   {
+    path: "/login",
+    element: <LoginPageWrapper />,
+  },
+  {
     path: "/",
-    element: <LandingPageWrapper />,
+    element: <Navigate to="/login" replace />, // ← Redirect root to login
   },
   {
     path: "/app",

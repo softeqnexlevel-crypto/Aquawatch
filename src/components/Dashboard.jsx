@@ -1,20 +1,25 @@
-// components/Dashboard.jsx - COMPLETE FIXED VERSION WITH PRODUCTION SUMMARY API
+// components/Dashboard.jsx - WITH LIVETRENDCHART & NO TOPNAV
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Droplets, Activity, FlaskConical, AlertTriangle,
   CheckCircle, Gauge, Zap, Filter, TrendingUp, TrendingDown,
-  Minus, RefreshCw, Power, Clock, AlertCircle
+  Minus, RefreshCw, Power, Clock, AlertCircle, Settings,
+  User, ChevronDown, Wrench, Sun, ShieldCheck, Radio
 } from "lucide-react";
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
+  ResponsiveContainer, Legend
+} from 'recharts';
 import { io } from 'socket.io-client';
 import { API_BASE_URL } from '../config';
+import { useAuth } from '../contexts/AuthContext';
 
-import { AdvancedGauge } from './dashboardComponents/AdvancedGauge';
+// Import custom chart components
 import { LiveTrendChart } from './dashboardComponents/LiveTrendChart';
 import { SystemHealthRadar } from './dashboardComponents/SystemHealthRadar';
 import { FlowBalanceChart } from './dashboardComponents/FlowBalanceChart';
 import { DistributionHistogram } from './dashboardComponents/DistributionHistogram';
-
 
 /* ============================================================
   Shared color palette
@@ -31,6 +36,10 @@ export const COLORS = {
   pink: '#ec4899',
   orange: '#f97316',
   yellow: '#eab308',
+  dark: '#0f172a',
+  card: '#1e293b',
+  border: '#334155',
+  muted: '#64748b',
 };
 
 /* ============================================================
@@ -46,17 +55,6 @@ const isActive = (value) => {
     return ['1', 'true', 'on', 'active', 'yes', 'running', 'enabled', 'online'].includes(normalized);
   }
   return !!value;
-};
-
-const toNumber = (value) => {
-  if (value === undefined || value === null) return 0;
-  if (typeof value === 'number') return value;
-  if (typeof value === 'string') {
-    const parsed = parseFloat(value);
-    return isNaN(parsed) ? 0 : parsed;
-  }
-  if (typeof value === 'boolean') return value ? 1 : 0;
-  return 0;
 };
 
 const safeFormat = (value, decimals = 1, fallback = '0.0') => {
@@ -92,7 +90,7 @@ export const SENSOR_MAP = {
   'RO5-PureWaterEc': { label: 'Product Water EC', unit: 'µS/cm', icon: FlaskConical, color: COLORS.purple, shortName: 'PureWaterEC' },
   'RO5-FeedTankLevel': { label: 'Feed Tank Level', unit: '%', icon: Droplets, color: '#14b8a6', shortName: 'FeedTankLevel' },
   'RO5-SystemOperation': { label: 'System Operation', unit: '', icon: Power, color: COLORS.success, shortName: 'SystemOperation' },
-  'RO5-SystemMode': { label: 'System Mode', unit: '', icon: Power, color: COLORS.primary, shortName: 'SystemMode' },
+  'RO5-SystemMode': { label: 'System Mode', unit: '', icon: Power, color: COLORS.success, shortName: 'SystemMode' },
   'RO5-AntiscalantDosingActive': { label: 'Dosing Active', unit: '', icon: FlaskConical, color: COLORS.purple, shortName: 'DosingActive' },
 };
 
@@ -123,51 +121,53 @@ function toShortName(parameter) {
 function getSensorInfo(parameter) {
   const shortName = toShortName(parameter);
   return SENSOR_MAP[shortName] || {
-    label: shortName,
-    unit: '',
-    icon: Activity,
-    color: '#4d7a9e',
-    shortName: shortName,
+    label: shortName, unit: '', icon: Activity, color: '#4d7a9e', shortName,
   };
 }
 
 const MAX_HISTORY_POINTS = 500;
 
 /* ============================================================
-  KPICard Component - Updated with dynamic colors
+  Derived metrics
   ============================================================ */
 
-function KPICard({ label, value, unit, icon: Icon, trend, trendValue, color, sub }) {
-  const displayValue = typeof value === 'string' && isNaN(parseFloat(value)) 
-    ? value 
-    : value;
-  
-  const trendColor = trend === "up" ? COLORS.success : trend === "down" ? COLORS.danger : "#4d7a9e";
-  const TrendIcon = trend === "up" ? TrendingUp : trend === "down" ? TrendingDown : Minus;
-  
-  return (
-    <div className="rounded p-3 flex flex-col gap-1" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-      <div className="flex items-center justify-between">
-        <span style={{ fontSize: 10, color: "var(--muted-foreground)", fontWeight: 500, letterSpacing: "0.06em", textTransform: "uppercase" }}>{label}</span>
-        {Icon && <Icon size={13} style={{ color: color || "var(--muted-foreground)" }} />}
-      </div>
-      <div className="flex items-end gap-1">
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: 22, fontWeight: 700, color: color || "var(--foreground)", lineHeight: 1 }}>
-          {displayValue}
-        </span>
-        {unit && typeof displayValue === 'number' && <span style={{ fontSize: 10, color: "var(--muted-foreground)", marginBottom: 2 }}>{unit}</span>}
-      </div>
-      {(trendValue || sub) && (
-        <div className="flex items-center gap-1">
-          {trend && <TrendIcon size={10} style={{ color: trendColor }} />}
-          <span style={{ fontSize: 10, color: trendValue ? trendColor : "var(--muted-foreground)" }}>
-            {trendValue || sub}
-          </span>
-        </div>
-      )}
-    </div>
-  );
+function getTrend(history, key, windowMs = 5 * 60 * 1000) {
+  const arr = history[key];
+  if (!arr || arr.length < 2) return null;
+  const latest = arr[arr.length - 1];
+  const latestTime = new Date(latest.time).getTime();
+  const cutoff = latestTime - windowMs;
+  let ref = arr[0];
+  for (let i = 0; i < arr.length; i++) {
+    if (new Date(arr[i].time).getTime() >= cutoff) { ref = arr[i]; break; }
+  }
+  if (ref === latest || ref.value === 0 || ref.value === null || ref.value === undefined) return null;
+  const pct = ((latest.value - ref.value) / Math.abs(ref.value)) * 100;
+  if (!isFinite(pct)) return null;
+  return { pct, direction: pct > 0.5 ? 'up' : pct < -0.5 ? 'down' : 'flat' };
 }
+
+function computeHealthScore(alarms) {
+  let score = 100;
+  alarms.filter(a => a.status === 'Active').forEach(a => {
+    if (a.severity === 'Critical') score -= 15;
+    else if (a.severity === 'High') score -= 10;
+    else if (a.severity === 'Medium') score -= 5;
+  });
+  return Math.max(0, Math.min(100, score));
+}
+
+const RANGE_OPTIONS = [
+  { key: '1H', ms: 60 * 60 * 1000 },
+  { key: '6H', ms: 6 * 60 * 60 * 1000 },
+  { key: '24H', ms: 24 * 60 * 60 * 1000 },
+  { key: '7D', ms: 7 * 24 * 60 * 60 * 1000 },
+  { key: '30D', ms: 30 * 24 * 60 * 60 * 1000 },
+];
+
+/* ============================================================
+  UI Components
+  ============================================================ */
 
 function SectionTitle({ children }) {
   return (
@@ -177,141 +177,129 @@ function SectionTitle({ children }) {
   );
 }
 
-/* ============================================================
-  System Status Indicators
-  ============================================================ */
-
-function SystemStatus({ isOn, label, icon: Icon }) {
-  return (
-    <div className="flex items-center gap-2 rounded p-2" style={{ 
-      background: isOn ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
-      border: `1px solid ${isOn ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)'}`,
-    }}>
-      <Icon size={16} style={{ color: isOn ? COLORS.success : COLORS.danger }} />
-      <span style={{ fontSize: 11, fontWeight: 600, color: isOn ? COLORS.success : COLORS.danger }}>
-        {label}: {isOn ? 'ON' : 'OFF'}
-      </span>
-    </div>
-  );
-}
-
-/* ============================================================
-  Dosing Runtime Card
-  ============================================================ */
-
-function DosingRuntimeCard({ isActive, rate, runtimeHours, totalDosed }) {
-  const formatDosingValue = (value) => {
-    const num = safeNumber(value);
-    return num.toFixed(2);
-  };
-
-  return (
-    <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-      <div className="flex items-center justify-between mb-2">
-        <span style={{ fontSize: 10, color: "var(--muted-foreground)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>
-          <FlaskConical size={12} style={{ display: 'inline', marginRight: 4 }} />
-          Antiscalant Dosing
-        </span>
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          gap: 4,
-          padding: '2px 8px',
-          borderRadius: 4,
-          background: isActive ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
-          border: `1px solid ${isActive ? 'rgba(34,197,94,0.2)' : 'rgba(239,68,68,0.2)'}`
-        }}>
-          <div style={{ 
-            width: 6, 
-            height: 6, 
-            borderRadius: '50%', 
-            background: isActive ? COLORS.success : COLORS.danger 
-          }} />
-          <span style={{ fontSize: 9, fontWeight: 600, color: isActive ? COLORS.success : COLORS.danger }}>
-            {isActive ? 'RUNNING' : 'STOPPED'}
-          </span>
-        </div>
-      </div>
-      
-      <div className="grid gap-2" style={{ gridTemplateColumns: '1fr 1fr 1fr' }}>
-        <div>
-          <div style={{ fontSize: 8, color: 'var(--muted-foreground)', textTransform: 'uppercase' }}>Rate</div>
-          <div style={{ fontSize: 16, fontFamily: 'var(--font-mono)', fontWeight: 700, color: COLORS.purple }}>
-            {formatDosingValue(rate)} <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>mg/L</span>
-          </div>
-        </div>
-        <div>
-          <div style={{ fontSize: 8, color: 'var(--muted-foreground)', textTransform: 'uppercase' }}>Runtime</div>
-          <div style={{ fontSize: 16, fontFamily: 'var(--font-mono)', fontWeight: 700, color: COLORS.primary }}>
-            {formatDosingValue(runtimeHours)} <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>hrs</span>
-          </div>
-        </div>
-        <div>
-          <div style={{ fontSize: 8, color: 'var(--muted-foreground)', textTransform: 'uppercase' }}>Total Dosed</div>
-          <div style={{ fontSize: 16, fontFamily: 'var(--font-mono)', fontWeight: 700, color: COLORS.purple }}>
-            {formatDosingValue(totalDosed)} <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>mL</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ============================================================
-  Alarms Card
-  ============================================================ */
-
-function AlarmsCard({ alarms }) {
-  const activeAlarms = alarms.filter(a => a.status === 'Active');
-  const powerAlarms = activeAlarms.filter(a => a.isPowerProblem);
+function CircularGauge({ value, size = 88, strokeWidth = 7, color, label, statusLabel }) {
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const clamped = Math.max(0, Math.min(100, value));
+  const offset = circumference * (1 - clamped / 100);
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
+  const actualSize = isMobile ? 64 : size;
   
   return (
-    <div className="rounded p-3 flex flex-col gap-2" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-      <SectionTitle>Live Alerts & Events</SectionTitle>
-      
-      {powerAlarms.length > 0 && (
-        <div className="flex items-center gap-2 rounded p-2" style={{ 
-          background: 'rgba(239,68,68,0.1)', 
-          border: '1px solid rgba(239,68,68,0.2)',
-          animation: 'pulse 2s infinite'
-        }}>
-          <AlertTriangle size={16} style={{ color: COLORS.danger }} />
-          <span style={{ fontSize: 11, fontWeight: 600, color: COLORS.danger }}>
-            ⚡ Power Problem Alarm
-          </span>
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: isMobile ? 4 : 6 }}>
+      <div style={{ position: "relative", width: actualSize, height: actualSize }}>
+        <svg width={actualSize} height={actualSize} viewBox={`0 0 ${actualSize} ${actualSize}`}>
+          <circle cx={actualSize / 2} cy={actualSize / 2} r={(actualSize - strokeWidth) / 2} stroke="var(--border)" strokeWidth={strokeWidth * (isMobile ? 0.7 : 1)} fill="none" />
+          <circle
+            cx={actualSize / 2} cy={actualSize / 2} r={(actualSize - strokeWidth) / 2}
+            stroke={color} strokeWidth={strokeWidth * (isMobile ? 0.7 : 1)} fill="none"
+            strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round"
+            transform={`rotate(-90 ${actualSize / 2} ${actualSize / 2})`}
+            style={{ transition: "stroke-dashoffset 0.6s ease" }}
+          />
+        </svg>
+        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <span style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: actualSize * 0.22, color }}>{Math.round(clamped)}%</span>
         </div>
-      )}
-      
-      <div className="flex flex-col gap-1.5 flex-1 overflow-auto" >
-        {activeAlarms.length > 0 ? activeAlarms.slice(0, 5).map((alert) => {
-          const color = alert.severity === "Critical" ? COLORS.danger : 
-                      alert.severity === "High" ? COLORS.orange : 
-                      alert.severity === "Medium" ? COLORS.yellow : 
-                      alert.severity === "Info" ? COLORS.success : COLORS.primary;
-          return (
-            <div key={alert.id} className="flex items-start gap-2 rounded p-2" style={{ background: "var(--muted)", border: `1px solid ${color}22` }}>
-              <div style={{ width: 6, height: 6, borderRadius: "50%", background: color, marginTop: 3, flexShrink: 0 }} />
-              <div className="flex-1 min-w-0">
-                <div style={{ fontSize: 10, fontWeight: 500, color: "var(--foreground)" }}>{alert.type}</div>
-                <div style={{ fontSize: 9, color: "var(--muted-foreground)" }}>{alert.equipment} · {alert.time}</div>
-                {alert.value && (
-                  <div style={{ fontSize: 8, color: 'var(--muted-foreground)', fontFamily: 'var(--font-mono)' }}>
-                    Value: {alert.value}
-                  </div>
-                )}
-              </div>
-              <span style={{ fontSize: 8, fontWeight: 600, color, letterSpacing: "0.06em", background: `${color}18`, borderRadius: 3, padding: "1px 5px", flexShrink: 0 }}>
-                {alert.severity.toUpperCase()}
-              </span>
-            </div>
-          );
-        }) : (
-          <div className="flex items-center justify-center h-full" style={{ color: 'var(--muted-foreground)', fontSize: 10 }}>
-            <CheckCircle size={12} style={{ marginRight: 6, color: COLORS.success }} />
-            All systems operating normally
+      </div>
+      <div style={{ fontSize: isMobile ? 8 : 10, color: "var(--muted-foreground)", textAlign: "center" }}>{label}</div>
+      {statusLabel && <div style={{ fontSize: isMobile ? 8 : 10, fontWeight: 700, color }}>{statusLabel}</div>}
+    </div>
+  );
+}
+
+function TopStatusCard({ icon: Icon, iconBg, iconColor, title, value, valueColor, sub, subColor, gauge, action }) {
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
+  
+  return (
+    <div className="rounded-lg p-3 sm:p-4 flex items-center justify-between gap-2 sm:gap-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+      <div style={{ display: "flex", gap: isMobile ? 8 : 12, alignItems: "flex-start" }}>
+        {Icon && (
+          <div style={{ width: isMobile ? 30 : 38, height: isMobile ? 30 : 38, borderRadius: 8, background: iconBg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <Icon size={isMobile ? 14 : 17} color={iconColor} />
+          </div>
+        )}
+        <div>
+          <div style={{ fontSize: isMobile ? 9 : 11, color: "var(--muted-foreground)", marginBottom: 2 }}>{title}</div>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: isMobile ? 18 : 22, fontWeight: 700, color: valueColor || "var(--foreground)", lineHeight: 1.1 }}>{value}</div>
+          {sub && <div style={{ fontSize: isMobile ? 9 : 10.5, color: subColor || "var(--muted-foreground)", marginTop: 2 }}>{sub}</div>}
+          {action}
+        </div>
+      </div>
+      {gauge}
+    </div>
+  );
+}
+
+function KPICardV2({ label, value, unit, icon: Icon, color, trend, statusText, statusOk }) {
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
+  const TrendIcon = !trend ? Minus : trend.direction === "up" ? TrendingUp : trend.direction === "down" ? TrendingDown : Minus;
+  const trendColor = !trend ? "var(--muted-foreground)" : trend.direction === "up" ? COLORS.success : trend.direction === "down" ? COLORS.danger : "var(--muted-foreground)";
+  
+  return (
+    <div className="rounded-lg p-2 sm:p-3 flex flex-col gap-1 sm:gap-2" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+      <div className="flex items-center justify-between">
+        <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 4 : 6 }}>
+          {Icon && <Icon size={isMobile ? 10 : 13} style={{ color }} />}
+          <span style={{ fontSize: isMobile ? 8 : 10.5, color: "var(--muted-foreground)", fontWeight: 600 }}>{label}</span>
+        </div>
+        {unit && <span style={{ fontSize: isMobile ? 7 : 9, color: "var(--muted-foreground)", background: "var(--secondary)", padding: "1px 5px", borderRadius: 4 }}>{unit}</span>}
+      </div>
+      <div style={{ fontFamily: "var(--font-mono)", fontSize: isMobile ? 18 : 24, fontWeight: 700, color, lineHeight: 1 }}>{value}</div>
+      <div className="flex items-center justify-between">
+        <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+          <TrendIcon size={isMobile ? 9 : 11} style={{ color: trendColor }} />
+          <span style={{ fontSize: isMobile ? 8 : 10, color: trendColor, fontFamily: "var(--font-mono)" }}>{trend ? `${trend.pct > 0 ? '+' : ''}${trend.pct.toFixed(1)}%` : '—'}</span>
+        </div>
+        {statusText && (
+          <div style={{ display: "flex", alignItems: "center", gap: 2, fontSize: isMobile ? 8 : 10, color: statusOk ? COLORS.success : COLORS.warning }}>
+            {statusOk ? <CheckCircle size={isMobile ? 8 : 10} /> : <AlertCircle size={isMobile ? 8 : 10} />}
+            {statusText}
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function EquipmentStatusItem({ icon: Icon, label, state }) {
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
+  const color = state === 'on' ? COLORS.success : state === 'off' ? COLORS.danger : 'var(--muted-foreground)';
+  const bg = state === 'on' ? 'rgba(34,197,94,0.1)' : state === 'off' ? 'rgba(239,68,68,0.1)' : 'var(--secondary)';
+  const text = state === 'on' ? 'Running' : state === 'off' ? 'Stopped' : 'No data';
+  
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 6 : 8, padding: isMobile ? "6px 8px" : "8px 10px", borderRadius: 8, background: bg, border: `1px solid ${color}30` }}>
+      <div style={{ width: isMobile ? 22 : 26, height: isMobile ? 22 : 26, borderRadius: 6, background: `${color}22`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+        <Icon size={isMobile ? 11 : 13} color={color} />
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: isMobile ? 9 : 10.5, color: "var(--foreground)", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</div>
+        <div style={{ fontSize: isMobile ? 8 : 9.5, color, fontWeight: 600 }}>{text}</div>
+      </div>
+    </div>
+  );
+}
+
+function RecentAlarmItem({ alarm }) {
+  const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
+  const color = alarm.severity === "Critical" ? COLORS.danger :
+    alarm.severity === "High" ? COLORS.orange :
+      alarm.severity === "Medium" ? COLORS.yellow :
+        alarm.severity === "Info" ? COLORS.success : COLORS.primary;
+  
+  return (
+    <div style={{ display: "flex", alignItems: "flex-start", gap: isMobile ? 6 : 8, padding: isMobile ? "6px 8px" : "8px 10px", borderRadius: 8, background: "var(--secondary)", border: `1px solid ${color}25` }}>
+      <AlertTriangle size={isMobile ? 11 : 13} style={{ color, marginTop: 1, flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: isMobile ? 9 : 11, fontWeight: 600, color: "var(--foreground)" }}>{alarm.type}</div>
+        <div style={{ fontSize: isMobile ? 8 : 9.5, color: "var(--muted-foreground)" }}>
+          {alarm.time} {alarm.value ? `· ${alarm.equipment.split(' - ')[1] || alarm.equipment} has exceeded limit (${alarm.value})` : `· ${alarm.equipment}`}
+        </div>
+      </div>
+      <span style={{ fontSize: isMobile ? 7 : 8.5, fontWeight: 700, color: 'white', background: color, borderRadius: 4, padding: "2px 6px", flexShrink: 0 }}>
+        {alarm.severity}
+      </span>
     </div>
   );
 }
@@ -323,43 +311,36 @@ function AlarmsCard({ alarms }) {
 const api = {
   getCurrentReadings: async () => {
     const token = localStorage.getItem('accessToken');
-    const response = await fetch(`${API_BASE_URL}/api/current`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
+    const response = await fetch(`${API_BASE_URL}/api/current`, { headers: { 'Authorization': `Bearer ${token}` } });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return response.json();
   },
   getMqttStatus: async () => {
     const token = localStorage.getItem('accessToken');
-    const response = await fetch(`${API_BASE_URL}/api/mqtt-status`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
+    const response = await fetch(`${API_BASE_URL}/api/mqtt-status`, { headers: { 'Authorization': `Bearer ${token}` } });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return response.json();
   },
   getAlarms: async () => {
     const token = localStorage.getItem('accessToken');
-    const response = await fetch(`${API_BASE_URL}/api/alarms`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
+    const response = await fetch(`${API_BASE_URL}/api/alarms`, { headers: { 'Authorization': `Bearer ${token}` } });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return response.json();
   },
   getProductionSummary: async () => {
     const token = localStorage.getItem('accessToken');
-    const response = await fetch(`${API_BASE_URL}/api/production-summary`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
+    const response = await fetch(`${API_BASE_URL}/api/production-summary`, { headers: { 'Authorization': `Bearer ${token}` } });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     return response.json();
   },
 };
 
 /* ============================================================
-  Dashboard - COMPLETE FIXED VERSION
+  Dashboard Component
   ============================================================ */
 
 export function Dashboard() {
+  const { user } = useAuth();
   const [sensorData, setSensorData] = useState({});
   const [history, setHistory] = useState({});
   const [connected, setConnected] = useState(false);
@@ -368,13 +349,22 @@ export function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [lastUpdate, setLastUpdate] = useState(null);
-  const [selectedSensors, setSelectedSensors] = useState(['RO5-Permeateflow']);
   const [dataInitialized, setDataInitialized] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
+  const [trendRange, setTrendRange] = useState('1H');
+  const [selectedSensors, setSelectedSensors] = useState(['RO5-Permeateflow']);
+  const [isMobile, setIsMobile] = useState(false);
 
-  // ==================== PRODUCTION SUMMARY FROM BACKEND ====================
   const [productionSummary, setProductionSummary] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
+
+  // Mobile detection
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 640);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   const fetchProductionSummary = async () => {
     try {
@@ -389,171 +379,98 @@ export function Dashboard() {
 
   useEffect(() => {
     fetchProductionSummary();
-    const interval = setInterval(fetchProductionSummary, 60000); // Update every minute
+    const interval = setInterval(fetchProductionSummary, 60000);
     return () => clearInterval(interval);
   }, []);
 
-  // Raw value — use for status/boolean-style parameters via isActive().
   const getValue = (key) => {
     const val = sensorData[key]?.value;
     return val !== undefined && val !== null ? val : 0;
   };
-
-  // Numeric-coerced value — ALWAYS use for anything rendered with
-  // .toFixed()/safeFormat(). Safe even if a bit/boolean value ever ends up
-  // here, since safeNumber() falls back to 0 rather than throwing.
   const getNumber = (key) => safeNumber(getValue(key));
 
-  // ==================== DAILY PRODUCTION FROM API ====================
-  // ✅ Use production summary from backend instead of calculating in browser
   const dailyProduction = productionSummary?.permeate?.daily ?? 0;
-  const weeklyProduction = productionSummary?.permeate?.weekly ?? 0;
-  const monthlyProduction = productionSummary?.permeate?.monthly ?? 0;
-  const yearlyProduction = productionSummary?.permeate?.yearly ?? 0;
 
-  // ==================== GENERATE ALERTS ====================
   const generateAlerts = () => {
     const newAlerts = [];
     let id = 1;
     const now = new Date();
-
     const addAlert = (type, severity, equipment, value, threshold, isPowerProblem = false) => {
       newAlerts.push({
         id: `ALT-${String(id++).padStart(3, '0')}`,
-        type: type,
-        severity: severity,
-        status: 'Active',
-        equipment: equipment,
+        type, severity, status: 'Active', equipment,
         value: typeof value === 'number' ? value.toFixed(1) : String(value),
-        threshold: threshold,
-        time: now.toLocaleTimeString(),
-        date: now.toLocaleDateString(),
-        isPowerProblem: isPowerProblem
+        threshold, time: now.toLocaleTimeString(), date: now.toLocaleDateString(), isPowerProblem,
       });
     };
 
-    const systemOp = getValue('RO5-SystemOperation');
-    const isSystemOn = isActive(systemOp);
-    if (!isSystemOn) {
-      addAlert('Power Problem - System Offline', 'Critical', 'RO5 - SystemOperation', 'OFF', 'ON required', true);
-    }
+    const isSystemOnLocal = isActive(getValue('RO5-SystemOperation'));
+    if (!isSystemOnLocal) addAlert('Power Problem - System Offline', 'Critical', 'RO5 - SystemOperation', 'OFF', 'ON required', true);
 
     const roPressure = getNumber('RO5-ROPressure');
-    if (roPressure > 16 && roPressure > 0) {
-      addAlert('High RO Pressure', 'Critical', 'RO5 - ROPressure', roPressure, '> 16 bar');
-    }
+    if (roPressure > 16 && roPressure > 0) addAlert('High RO Pressure', 'Critical', 'RO5 - ROPressure', roPressure, '> 16 bar');
 
     const stage1Delta = getNumber('RO5-Stage1Delta');
-    if (stage1Delta > 0.60 && stage1Delta > 0) {
-      addAlert('High Differential Pressure - Stage 1', 'Critical', 'RO5 - Stage1Delta', stage1Delta, '> 0.60 bar');
-    } else if (stage1Delta > 0.50 && stage1Delta > 0) {
-      addAlert('High Differential Pressure - Stage 1', 'High', 'RO5 - Stage1Delta', stage1Delta, '> 0.50 bar');
-    }
+    if (stage1Delta > 0.60 && stage1Delta > 0) addAlert('High Differential Pressure - Stage 1', 'Critical', 'RO5 - Stage1Delta', stage1Delta, '> 0.60 bar');
+    else if (stage1Delta > 0.50 && stage1Delta > 0) addAlert('High Differential Pressure - Stage 1', 'High', 'RO5 - Stage1Delta', stage1Delta, '> 0.50 bar');
 
     const stage2Delta = getNumber('RO5-Stage2Delta');
-    if (stage2Delta > 0.55 && stage2Delta > 0) {
-      addAlert('High Differential Pressure - Stage 2', 'High', 'RO5 - Stage2Delta', stage2Delta, '> 0.55 bar');
-    }
+    if (stage2Delta > 0.55 && stage2Delta > 0) addAlert('High Differential Pressure - Stage 2', 'High', 'RO5 - Stage2Delta', stage2Delta, '> 0.55 bar');
 
     const filterDeltaP = getNumber('RO5-MediaFilterDeltaP');
-    if (filterDeltaP > 0.40 && filterDeltaP > 0) {
-      addAlert('High Filter Delta P', 'Critical', 'RO5 - MediaFilterDeltaP', filterDeltaP, '> 0.40 bar');
-    } else if (filterDeltaP > 0.30 && filterDeltaP > 0) {
-      addAlert('High Filter Delta P', 'Medium', 'RO5 - MediaFilterDeltaP', filterDeltaP, '> 0.30 bar');
-    }
+    if (filterDeltaP > 0.40 && filterDeltaP > 0) addAlert('High Filter Delta P', 'Critical', 'RO5 - MediaFilterDeltaP', filterDeltaP, '> 0.40 bar');
+    else if (filterDeltaP > 0.30 && filterDeltaP > 0) addAlert('High Filter Delta P', 'Medium', 'RO5 - MediaFilterDeltaP', filterDeltaP, '> 0.30 bar');
 
     const systemRecovery = getNumber('RO5-SystemRecovery');
-    if (systemRecovery < 68 && systemRecovery > 0) {
-      addAlert('Low System Recovery', 'Critical', 'RO5 - SystemRecovery', systemRecovery, '< 68%');
-    } else if (systemRecovery < 72 && systemRecovery > 0) {
-      addAlert('Low System Recovery', 'Medium', 'RO5 - SystemRecovery', systemRecovery, '< 72%');
-    }
+    if (systemRecovery < 68 && systemRecovery > 0) addAlert('Low System Recovery', 'Critical', 'RO5 - SystemRecovery', systemRecovery, '< 68%');
+    else if (systemRecovery < 72 && systemRecovery > 0) addAlert('Low System Recovery', 'Medium', 'RO5 - SystemRecovery', systemRecovery, '< 72%');
 
     const feedTankLevel = getNumber('RO5-FeedTankLevel');
-    if (feedTankLevel < 20 && feedTankLevel > 0) {
-      addAlert('Low Feed Tank Level', 'Critical', 'RO5 - FeedTankLevel', feedTankLevel, '< 20%');
-    } else if (feedTankLevel < 30 && feedTankLevel > 0) {
-      addAlert('Low Feed Tank Level', 'Medium', 'RO5 - FeedTankLevel', feedTankLevel, '< 30%');
-    }
+    if (feedTankLevel < 20 && feedTankLevel > 0) addAlert('Low Feed Tank Level', 'Critical', 'RO5 - FeedTankLevel', feedTankLevel, '< 20%');
+    else if (feedTankLevel < 30 && feedTankLevel > 0) addAlert('Low Feed Tank Level', 'Medium', 'RO5 - FeedTankLevel', feedTankLevel, '< 30%');
 
     const feedFlow = getNumber('RO5-FEEDFlow');
-    if (feedFlow < 50 && feedFlow > 0) {
-      addAlert('Low Feed Flow', 'High', 'RO5 - FEEDFlow', feedFlow, '< 50 m³/h');
-    }
+    if (feedFlow < 50 && feedFlow > 0) addAlert('Low Feed Flow', 'High', 'RO5 - FEEDFlow', feedFlow, '< 50 m³/h');
 
     const pureWaterEC = getNumber('RO5-PureWaterEc');
-    if (pureWaterEC > 50 && pureWaterEC > 0) {
-      addAlert('High Product Water EC', 'Medium', 'RO5 - PureWaterEc', pureWaterEC, '> 50 µS/cm');
-    }
+    if (pureWaterEC > 50 && pureWaterEC > 0) addAlert('High Product Water EC', 'Medium', 'RO5 - PureWaterEc', pureWaterEC, '> 50 µS/cm');
 
     if (newAlerts.length === 0) {
       newAlerts.push({
-        id: `ALT-${String(id++).padStart(3, '0')}`,
-        type: 'All Systems Operating Normally',
-        severity: 'Info',
-        status: 'Acknowledged',
-        equipment: 'RO5 - System Health',
-        value: 'All systems go',
-        threshold: 'N/A',
-        time: now.toLocaleTimeString(),
-        date: now.toLocaleDateString(),
-        isPowerProblem: false
+        id: `ALT-${String(id++).padStart(3, '0')}`, type: 'All Systems Operating Normally', severity: 'Info',
+        status: 'Acknowledged', equipment: 'RO5 - System Health', value: 'All systems go', threshold: 'N/A',
+        time: now.toLocaleTimeString(), date: now.toLocaleDateString(), isPowerProblem: false,
       });
     }
-
     return newAlerts;
   };
 
-  const updateAlerts = () => {
-    const newAlerts = generateAlerts();
-    setAlarms(newAlerts);
-  };
+  const updateAlerts = () => setAlarms(generateAlerts());
 
-  // ==================== FETCH REAL DATA ====================
   const fetchRealData = async () => {
     try {
       setLoading(true);
       setError(null);
-      
       const readings = await api.getCurrentReadings();
-      
-      if (!readings || Object.keys(readings).length === 0) {
-        throw new Error('No data received from backend');
-      }
+      if (!readings || Object.keys(readings).length === 0) throw new Error('No data received from backend');
 
       const formatted = {};
       Object.entries(readings).forEach(([key, value]) => {
         const shortName = toShortName(key);
         const info = getSensorInfo(key);
-        formatted[shortName] = {
-          value: value,
-          timestamp: new Date().toISOString(),
-          simulated: false,
-          unit: info.unit,
-          label: info.label,
-        };
+        formatted[shortName] = { value, timestamp: new Date().toISOString(), simulated: false, unit: info.unit, label: info.label };
       });
-      
       setSensorData(formatted);
       setLastUpdate(new Date().toISOString());
 
       setHistory(prev => {
         const newHistory = { ...prev };
         Object.keys(formatted).forEach(key => {
-          if (!newHistory[key]) {
-            newHistory[key] = [];
-          }
+          if (!newHistory[key]) newHistory[key] = [];
           const rawVal = formatted[key].value;
-          const numValue = typeof rawVal === 'string' && isNaN(parseFloat(rawVal))
-            ? (isActive(rawVal) ? 1 : 0)
-            : safeNumber(rawVal);
-          newHistory[key].push({
-            time: new Date().toISOString(),
-            value: numValue
-          });
-          if (newHistory[key].length > MAX_HISTORY_POINTS) {
-            newHistory[key] = newHistory[key].slice(-MAX_HISTORY_POINTS);
-          }
+          const numValue = typeof rawVal === 'string' && isNaN(parseFloat(rawVal)) ? (isActive(rawVal) ? 1 : 0) : safeNumber(rawVal);
+          newHistory[key].push({ time: new Date().toISOString(), value: numValue });
+          if (newHistory[key].length > MAX_HISTORY_POINTS) newHistory[key] = newHistory[key].slice(-MAX_HISTORY_POINTS);
         });
         return newHistory;
       });
@@ -569,7 +486,6 @@ export function Dashboard() {
       updateAlerts();
       setDataInitialized(true);
       setRetryCount(0);
-      
     } catch (err) {
       console.error('Failed to fetch real data:', err);
       setError(err.message || 'Failed to connect to backend');
@@ -580,48 +496,35 @@ export function Dashboard() {
     }
   };
 
-  // ==================== INITIALIZE ====================
+  // WebSocket connection
   useEffect(() => {
     const socket = io(API_BASE_URL, {
-      transports: ['websocket', 'polling'],
-      reconnection: true,
-      reconnectionAttempts: 5,
+      transports: ['websocket', 'polling'], 
+      reconnection: true, 
+      reconnectionAttempts: 5, 
       reconnectionDelay: 1000,
     });
 
-    socket.on('connect', () => {
-      console.log('✅ Dashboard connected to backend');
-      setConnected(true);
-      fetchRealData();
+    socket.on('connect', () => { 
+      setConnected(true); 
+      fetchRealData(); 
     });
-
-    socket.on('disconnect', () => {
-      console.log('❌ Dashboard disconnected');
-      setConnected(false);
-    });
-
-    socket.on('connect_error', (err) => {
-      console.error('WebSocket connection error:', err);
-      setError('WebSocket connection failed - check if backend is running');
-      fetchRealData();
+    socket.on('disconnect', () => setConnected(false));
+    socket.on('connect_error', (err) => { 
+      console.error('WebSocket connection error:', err); 
+      setError('WebSocket connection failed - check if backend is running'); 
+      fetchRealData(); 
     });
 
     socket.on('plc-data', (data) => {
       const shortName = toShortName(data.parameter);
       const info = getSensorInfo(data.parameter);
       const timestamp = data.timestamp || new Date().toISOString();
-
       const value = data.dataType === 'bit' ? data.value : safeNumber(data.value);
 
-      setSensorData(prev => ({
-        ...prev,
-        [shortName]: {
-          value,
-          timestamp,
-          simulated: data.simulated || false,
-          unit: data.unit || info.unit,
-          label: info.label,
-        }
+      setSensorData(prev => ({ 
+        ...prev, 
+        [shortName]: { value, timestamp, simulated: data.simulated || false, unit: data.unit || info.unit, label: info.label } 
       }));
 
       setHistory(prev => {
@@ -638,50 +541,35 @@ export function Dashboard() {
     socket.on('plc-alarm', (alarmData) => {
       const newAlarms = alarmData.alarms.map(alarm => ({
         id: `${alarm.parameter}-${Date.now()}-${Math.random()}`,
-        type: alarm.message || 'Alarm',
-        equipment: `RO5 - ${alarm.parameter}`,
-        severity: alarm.severity === 'high' ? 'Critical' :
-                alarm.severity === 'warning' ? 'High' : 'Medium',
-        time: new Date().toLocaleTimeString(),
-        status: 'Active',
-        value: alarmData.value,
-        isPowerProblem: alarm.parameter?.toLowerCase().includes('power') || false
+        type: alarm.message || 'Alarm', equipment: `RO5 - ${alarm.parameter}`,
+        severity: alarm.severity === 'high' ? 'Critical' : alarm.severity === 'warning' ? 'High' : 'Medium',
+        time: new Date().toLocaleTimeString(), status: 'Active', value: alarmData.value,
+        isPowerProblem: alarm.parameter?.toLowerCase().includes('power') || false,
       }));
       setAlarms(prev => [...newAlarms, ...prev].slice(0, 20));
     });
 
-    socket.on('mqtt-status', (status) => {
-      setConnected(status.connected || false);
-      setSimulationMode(status.simulationMode || false);
+    socket.on('mqtt-status', (status) => { 
+      setConnected(status.connected || false); 
+      setSimulationMode(status.simulationMode || false); 
     });
 
-    return () => {
-      socket.disconnect();
-    };
+    return () => socket.disconnect();
   }, []);
 
-  // ==================== PERIODIC ALERT UPDATE ====================
   useEffect(() => {
-    const interval = setInterval(() => {
-      if (Object.keys(sensorData).length > 0) {
-        updateAlerts();
-      }
+    const interval = setInterval(() => { 
+      if (Object.keys(sensorData).length > 0) updateAlerts(); 
     }, 10000);
     return () => clearInterval(interval);
   }, [sensorData]);
 
-  // ==================== REFRESH ====================
-  const handleRefresh = () => {
-    fetchRealData();
-    fetchProductionSummary();
+  const handleRefresh = () => { 
+    fetchRealData(); 
+    fetchProductionSummary(); 
   };
 
-  // ==================== TOGGLE SENSOR ====================
-  const toggleSensor = (key) => {
-    setSelectedSensors([key]);
-  };
-
-  // ==================== GET VALUES ====================
+  // ==================== VALUES ====================
   const feedFlow = getNumber('RO5-FEEDFlow');
   const permeateFlow = getNumber('RO5-Permeateflow');
   const concentrateFlow = getNumber('RO5-ConcetrateFlow');
@@ -691,82 +579,49 @@ export function Dashboard() {
   const stage1Delta = getNumber('RO5-Stage1Delta');
   const stage2Delta = getNumber('RO5-Stage2Delta');
   const filterDeltaP = getNumber('RO5-MediaFilterDeltaP');
-  const interstagePress = getNumber('RO5-InterstagePress');
-  const concentratePress = getNumber('RO5-ConcetratePress');
   const feedTankLevel = getNumber('RO5-FeedTankLevel');
-  
   const systemOperation = getValue('RO5-SystemOperation');
   const systemMode = getValue('RO5-SystemMode');
-  // const dosingActive = getValue('RO5-AntiscalantDosingActive');
-  
+  const dosingActive = getValue('RO5-AntiscalantDosingActive');
+
   const isSystemOn = isActive(systemOperation) || feedFlow > 5 || permeateFlow > 5;
   const isAutoMode = isActive(systemMode);
-  // const isDosingActive = isActive(dosingActive);
-  
-  // // ✅ Get real antiscalant values from sensor data
-  // const dosingRate = isDosingActive ? (getNumber('AntiscalantDosingRate') || 2.7) : 0;
-  // const dosingRuntime = isDosingActive ? (getNumber('AntiscalantRuntime') || 0) : 0;
-  // const totalDosed = isDosingActive ? (getNumber('AntiscalantTotalDosed') || 0) : 0;
+  const isDosingOn = isActive(dosingActive);
 
-  // ✅ Use production summary from API instead of browser calculation
   const dailyProdDisplay = summaryLoading ? '...' : Math.round(dailyProduction).toLocaleString();
-
-  const activeSensors = Object.keys(sensorData).filter(
-    key => sensorData[key]?.value !== undefined && sensorData[key]?.value !== null
-  ).length;
+  const activeSensors = Object.keys(sensorData).filter(key => sensorData[key]?.value !== undefined && sensorData[key]?.value !== null).length;
   const totalSensors = 15;
 
-  const chartData = { ...sensorData, history };
+  const activeAlarmsList = alarms.filter(a => a.status === 'Active');
+  const criticalAlarmsCount = activeAlarmsList.filter(a => a.severity === 'Critical').length;
+  const roHealthScore = computeHealthScore(alarms);
 
-  // ==================== LOADING STATE ====================
+  // ==================== LOADING / ERROR STATES ====================
   if (loading && !dataInitialized) {
     return (
       <div className="flex items-center justify-center h-full p-8">
         <div style={{ color: "var(--muted-foreground)", textAlign: "center" }}>
-          <RefreshCw size={24} className="animate-spin" style={{ margin: "0 auto 12px", color: "#0ea5e9" }} />
+          <RefreshCw size={24} className="animate-spin" style={{ margin: "0 auto 12px", color: COLORS.primary }} />
           <p>Connecting to backend...</p>
-          <p style={{ fontSize: 12, marginTop: 8, opacity: 0.7 }}>
-            {retryCount > 0 ? `Retry ${retryCount}...` : 'Fetching real-time data...'}
-          </p>
+          <p style={{ fontSize: 12, marginTop: 8, opacity: 0.7 }}>{retryCount > 0 ? `Retry ${retryCount}...` : 'Fetching real-time data...'}</p>
         </div>
       </div>
     );
   }
 
-  // ==================== ERROR STATE ====================
   if (error && !dataInitialized) {
     return (
       <div className="flex items-center justify-center h-full p-8">
         <div style={{ color: COLORS.danger, textAlign: "center", maxWidth: 500 }}>
           <AlertTriangle size={48} style={{ margin: "0 auto 16px" }} />
           <p style={{ fontWeight: 600, fontSize: 18, marginBottom: 8 }}>No Data Available</p>
-          <p style={{ fontSize: 14, opacity: 0.8, marginBottom: 16 }}>
-            {error}
-          </p>
-          <p style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 16 }}>
-            Make sure the backend server is running at {API_BASE_URL}
-          </p>
+          <p style={{ fontSize: 14, opacity: 0.8, marginBottom: 16 }}>{error}</p>
+          <p style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 16 }}>Make sure the backend server is running at {API_BASE_URL}</p>
           <div className="flex gap-3 justify-center">
-            <button
-              onClick={handleRefresh}
-              style={{
-                padding: "10px 24px", borderRadius: 6, background: "#0ea5e9",
-                border: "none", color: "white",
-                cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8,
-                fontWeight: 600
-              }}
-            >
-              <RefreshCw size={16} />
-              Retry Connection
+            <button onClick={handleRefresh} style={{ padding: "10px 24px", borderRadius: 6, background: COLORS.primary, border: "none", color: "white", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 600 }}>
+              <RefreshCw size={16} /> Retry Connection
             </button>
-            <button
-              onClick={() => window.location.reload()}
-              style={{
-                padding: "10px 24px", borderRadius: 6, background: "var(--card)",
-                border: "1px solid var(--border)", color: "var(--foreground)",
-                cursor: "pointer"
-              }}
-            >
+            <button onClick={() => window.location.reload()} style={{ padding: "10px 24px", borderRadius: 6, background: "var(--card)", border: "1px solid var(--border)", color: "var(--foreground)", cursor: "pointer" }}>
               Reload Page
             </button>
           </div>
@@ -775,244 +630,230 @@ export function Dashboard() {
     );
   }
 
-  const isDataStale = lastUpdate && (Date.now() - new Date(lastUpdate).getTime() > 60000);
-
   return (
-    <div className="flex flex-col gap-4 p-4 overflow-auto h-full">
+    <div className="flex flex-col h-full overflow-auto" style={{ background: 'var(--background)' }}>
+      
+      {/* Dashboard Content */}
+      <div className="flex-1 overflow-auto p-3 sm:p-4">
 
-      {/* Status Bar */}
-      <div className="flex items-center justify-between px-3 py-2 rounded" style={{
-        background: connected ? (simulationMode ? '#1e293b' : '#064e3b20') : '#450a0a20',
-        border: `1px solid ${connected ? (simulationMode ? '#334155' : '#064e3b40') : '#450a0a40'}`,
-      }}>
-        <div className="flex items-center gap-3">
-          <div style={{
-            width: 8, height: 8, borderRadius: '50%',
-            background: connected ? (simulationMode ? COLORS.warning : COLORS.success) : COLORS.danger,
-            boxShadow: connected ? `0 0 8px ${simulationMode ? '#f59e0b80' : '#22c55e80'}` : 'none'
-          }} />
-          <span style={{ fontSize: 10, fontWeight: 600, color: connected ? (simulationMode ? COLORS.warning : COLORS.success) : COLORS.danger }}>
-            {connected ? (simulationMode ? '🎮 SIMULATION MODE' : '📡 LIVE DATA') : '🔴 DISCONNECTED'}
-          </span>
-          {isDataStale && (
-            <span style={{ fontSize: 9, color: COLORS.warning }}>
-              ⚠️ Data stale ({Math.round((Date.now() - new Date(lastUpdate).getTime()) / 1000)}s)
-            </span>
-          )}
-          {!connected && dataInitialized && (
-            <span style={{ fontSize: 9, color: COLORS.danger }}>
-              Showing cached data - reconnecting...
-            </span>
-          )}
-        </div>
-        <div className="flex items-center gap-4">
-          <button
-            onClick={handleRefresh}
-            disabled={loading}
-            style={{
-              padding: '4px 12px', borderRadius: 4, background: 'var(--secondary)',
-              border: '1px solid var(--border)', color: 'var(--foreground)',
-              cursor: loading ? 'not-allowed' : 'pointer', fontSize: 10, 
-              display: 'flex', alignItems: 'center', gap: 4,
-              opacity: loading ? 0.5 : 1
-            }}
-          >
-            <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
-            {loading ? 'Loading...' : 'Refresh'}
-          </button>
-          <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>
-            <span style={{ fontFamily: 'var(--font-mono)', color: COLORS.primary }}>{activeSensors}</span>/{totalSensors} sensors
-          </span>
-          {lastUpdate && (
-            <span style={{ fontSize: 10, color: 'var(--muted-foreground)', fontFamily: 'var(--font-mono)' }}>
-              Updated: {new Date(lastUpdate).toLocaleTimeString()}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* System Status Row */}
-      <div className="grid gap-3" style={{ gridTemplateColumns: "1fr 1fr 1fr 1fr" }}>
-        <SystemStatus isOn={isSystemOn} label="System Operation" icon={Power} />
-        <SystemStatus isOn={isAutoMode} label="System Mode" icon={Power} />
-        
-        <div className="flex items-center gap-2 rounded p-2" style={{ 
-          background: feedTankLevel > 30 ? 'rgba(34,197,94,0.1)' : feedTankLevel > 0 ? 'rgba(245,158,11,0.1)' : 'rgba(239,68,68,0.1)',
-          border: `1px solid ${feedTankLevel > 30 ? 'rgba(34,197,94,0.2)' : feedTankLevel > 0 ? 'rgba(245,158,11,0.2)' : 'rgba(239,68,68,0.2)'}`,
+        {/* Status Bar */}
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-3 sm:mb-4 p-2 sm:p-3 rounded" style={{ 
+          background: connected ? (simulationMode ? '#1e293b' : 'rgba(34,197,94,0.05)') : 'rgba(239,68,68,0.05)',
+          border: `1px solid ${connected ? (simulationMode ? '#334155' : 'rgba(34,197,94,0.15)') : 'rgba(239,68,68,0.15)'}` 
         }}>
-          <Droplets size={16} style={{ color: feedTankLevel > 30 ? COLORS.success : feedTankLevel > 0 ? COLORS.warning : COLORS.danger }} />
-          <span style={{ fontSize: 11, fontWeight: 600, color: feedTankLevel > 30 ? COLORS.success : feedTankLevel > 0 ? COLORS.warning : COLORS.danger }}>
-            Feed Tank: {feedTankLevel > 0 ? `${safeFormat(feedTankLevel, 0)}%` : '⚠️ NO DATA'}
-            {feedTankLevel > 0 && feedTankLevel < 30 && ' ⚠️ LOW'}
-          </span>
-        </div>
-        
-        {/* <SystemStatus isOn={isDosingActive} label="Dosing Active" icon={FlaskConical} /> */}
-      </div>
-
-      {/* ============================================================
-          KPI Grid
-          ============================================================ */}
-      <div>
-        <SectionTitle>Real-Time Key Performance Indicators</SectionTitle>
-        
-        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(6, 1fr)" }}>
-          <KPICard label="Feed Flow" value={safeFormat(feedFlow, 1)} unit="m³/h" icon={Droplets}
-            trend={feedFlow > 50 ? "up" : feedFlow < 40 ? "down" : "flat"}
-            trendValue={feedFlow > 50 ? "Normal" : feedFlow > 0 ? "Check flow" : "No flow"} 
-            color={feedFlow > 40 ? COLORS.success : feedFlow > 0 ? COLORS.warning : COLORS.danger} />
-            
-          <KPICard label="Permeate Flow" value={safeFormat(permeateFlow, 1)} unit="m³/h" icon={Droplets}
-            trend={permeateFlow > 30 ? "up" : permeateFlow > 0 ? "down" : "flat"}
-            trendValue={permeateFlow > 30 ? "Normal" : permeateFlow > 0 ? "Low" : "No flow"} 
-            color={permeateFlow > 30 ? COLORS.success : permeateFlow > 0 ? COLORS.warning : COLORS.danger} />
-            
-          <KPICard label="Concentrate Flow" value={safeFormat(concentrateFlow, 1)} unit="m³/h" icon={Activity}
-            trend={concentrateFlow > 15 ? "up" : "down"}
-            trendValue={concentrateFlow > 15 ? "Normal" : "Low"} 
-            color={concentrateFlow > 15 ? COLORS.success : COLORS.warning} />
-            
-          <KPICard label="RO Pressure" value={safeFormat(roPressure, 1)} unit="bar" icon={Gauge}
-            trend={roPressure >= 8 && roPressure <= 16 ? "flat" : roPressure > 16 ? "up" : "down"}
-            trendValue={
-              roPressure >= 8 && roPressure <= 16 ? "✅ Normal" : 
-              roPressure > 16 ? "⚠️ High" : 
-              roPressure > 0 && roPressure < 8 ? "⚠️ Low" : 
-              "---"
-            } 
-            color={
-              roPressure >= 8 && roPressure <= 16 ? COLORS.success :
-              roPressure > 16 ? COLORS.danger :
-              roPressure > 0 && roPressure < 8 ? COLORS.warning :
-              COLORS.primary
-            } />
-            
-          <KPICard label="Stage 1 Delta P" value={safeFormat(stage1Delta, 2)} unit="bar" icon={Zap}
-            trend={stage1Delta > 0.55 ? "up" : "flat"}
-            trendValue={stage1Delta > 0.55 ? "Check membranes" : stage1Delta > 0 ? "Normal" : "---"} 
-            color={stage1Delta > 0.55 ? COLORS.danger : stage1Delta > 0 ? COLORS.success : COLORS.primary} />
-            
-          <KPICard label="Stage 2 Delta P" value={safeFormat(stage2Delta, 2)} unit="bar" icon={Zap}
-            trend={stage2Delta > 0.50 ? "up" : "flat"}
-            trendValue={stage2Delta > 0.50 ? "Check stage 2" : stage2Delta > 0 ? "Normal" : "---"} 
-            color={stage2Delta > 0.50 ? COLORS.warning : stage2Delta > 0 ? COLORS.success : COLORS.primary} />
-        </div>
-        
-        <div className="grid gap-3 mt-3" style={{ gridTemplateColumns: "repeat(5, 1fr)" }}>
-          <KPICard label="Filter Delta P" value={safeFormat(filterDeltaP, 2)} unit="bar" icon={Filter}
-            trend={filterDeltaP > 0.4 ? "up" : "flat"}
-            trendValue={filterDeltaP > 0.4 ? "Check filters" : filterDeltaP > 0 ? "Normal" : "---"} 
-            color={filterDeltaP > 0.4 ? COLORS.danger : filterDeltaP > 0 ? COLORS.success : COLORS.primary} />
-            
-          <KPICard label="System Recovery" value={safeFormat(systemRecovery, 1)} unit="%" icon={Activity}
-            trend={systemRecovery > 75 ? "up" : systemRecovery > 0 ? "down" : "flat"}
-            trendValue={systemRecovery > 75 ? "Good" : systemRecovery > 0 ? "Check system" : "---"} 
-            color={systemRecovery > 75 ? COLORS.success : systemRecovery > 0 ? COLORS.warning : COLORS.primary} />
-            
-          <KPICard label="Product Water EC" value={safeFormat(pureWaterEC, 0)} unit="µS/cm" icon={FlaskConical}
-            trend={pureWaterEC > 150 ? "up" : "flat"}
-            trendValue={pureWaterEC > 150 ? "High conductivity" : pureWaterEC > 0 ? "Within limits" : "---"} 
-            color={pureWaterEC > 150 ? COLORS.danger : pureWaterEC > 0 ? COLORS.success : COLORS.primary} />
-            
-          {/* ✅ DAILY PRODUCTION - NOW FROM BACKEND API */}
-          <KPICard label="Daily Production" value={dailyProdDisplay} unit="m³" icon={Droplets}
-            trend={permeateFlow > 45 ? "up" : permeateFlow < 35 ? "down" : "flat"}
-            trendValue={summaryLoading ? 'Loading...' : `${safeFormat(permeateFlow, 1)} m³/h now`} 
-            color={dailyProduction > 0 ? COLORS.success : COLORS.primary} />
-            
-          <KPICard label="Active Alarms" value={alarms.filter(a => a.status === 'Active').length} icon={AlertTriangle}
-            trend={alarms.length > 0 ? "up" : "down"}
-            trendValue={alarms.length > 0 ? `${alarms.filter(a => a.severity === 'Critical').length} critical` : "All systems normal"}
-            color={alarms.length > 0 ? COLORS.danger : COLORS.success} />
-        </div>
-      </div>
-
-      {/* Dosing Runtime Card
-      <DosingRuntimeCard 
-        isActive={isDosingActive}
-        rate={dosingRate}
-        runtimeHours={dosingRuntime}
-        totalDosed={totalDosed}
-      /> */}
-
-      {/* Pressure Monitoring Row */}
-      <div>
-        <SectionTitle>Pressure Monitoring</SectionTitle>
-        <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-          <KPICard label="Interstage Pressure" value={safeFormat(interstagePress, 1)} unit="bar" icon={Gauge} 
-            color={interstagePress >= 8 && interstagePress <= 14 ? COLORS.success : interstagePress > 14 ? COLORS.danger : COLORS.warning} 
-            sub="Between stages" />
-          <KPICard label="Concentrate Pressure" value={safeFormat(concentratePress, 1)} unit="bar" icon={Gauge} 
-            color={concentratePress >= 7 && concentratePress <= 13 ? COLORS.success : concentratePress > 13 ? COLORS.danger : COLORS.warning} 
-            sub="Reject stream" />
-          <KPICard label="Stage 2 Delta P" value={safeFormat(stage2Delta, 2)} unit="bar" icon={Zap} color="#14b8a6"
-            sub={stage2Delta > 0.50 ? "Check stage 2" : "Normal"} />
-          <KPICard label="Concentrate Flow" value={safeFormat(concentrateFlow, 1)} unit="m³/h" icon={Activity} color={COLORS.warning}
-            sub={`${safeFormat((concentrateFlow / (feedFlow || 1)) * 100, 1)}% of feed`} />
-        </div>
-      </div>
-
-      {/* Live trend + system health */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: "2fr 1fr" }}>
-        <LiveTrendChart data={chartData} sensorKey={selectedSensors[0] || 'RO5-Permeateflow'} height={220} />
-        <SystemHealthRadar data={sensorData} />
-      </div>
-
-      {/* Sensor Selector */}
-      <div>
-        <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-          <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 8, display: "block" }}>
-            Select Sensor for Comparison
-          </span>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {Object.keys(SENSOR_MAP).map(key => {
-              const sensor = SENSOR_MAP[key];
-              const isSelected = selectedSensors.includes(key);
-              return (
-                <button
-                  key={key}
-                  onClick={() => toggleSensor(key)}
-                  style={{
-                    padding: '4px 12px',
-                    borderRadius: 12,
-                    background: isSelected ? sensor.color : 'var(--secondary)',
-                    color: isSelected ? 'white' : 'var(--muted-foreground)',
-                    border: isSelected ? `2px solid ${sensor.color}` : '1px solid var(--border)',
-                    fontSize: 10,
-                    cursor: 'pointer',
-                    transition: 'all 0.2s',
-                    fontWeight: isSelected ? 600 : 400,
-                    opacity: isSelected ? 1 : 0.7,
-                    transform: isSelected ? 'scale(1.02)' : 'scale(1)',
-                  }}
-                >
-                  {sensor.label}
-                </button>
-              );
-            })}
+          <div className="flex items-center gap-3 flex-wrap">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ 
+                width: 8, height: 8, borderRadius: '50%',
+                background: connected ? (simulationMode ? COLORS.warning : COLORS.success) : COLORS.danger,
+                boxShadow: connected ? `0 0 8px ${simulationMode ? '#f59e0b80' : '#22c55e80'}` : 'none'
+              }} />
+              <span style={{ fontSize: 10, fontWeight: 600, color: connected ? (simulationMode ? COLORS.warning : COLORS.success) : COLORS.danger }}>
+                {connected ? (simulationMode ? 'SIMULATION MODE' : 'LIVE DATA') : 'DISCONNECTED'}
+              </span>
+              {connected && !simulationMode && (
+                <span style={{ fontSize: 9, color: 'var(--muted-foreground)' }}>· All systems online</span>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-4 flex-wrap">
+            <button
+              onClick={handleRefresh}
+              disabled={loading}
+              style={{
+                padding: '4px 12px', borderRadius: 4, background: 'var(--secondary)',
+                border: '1px solid var(--border)', color: 'var(--foreground)',
+                cursor: loading ? 'not-allowed' : 'pointer', fontSize: 10, 
+                display: 'flex', alignItems: 'center', gap: 4,
+                opacity: loading ? 0.5 : 1
+              }}
+            >
+              <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+              {loading ? 'Loading...' : 'Refresh'}
+            </button>
+            <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>
+              <span style={{ fontFamily: 'var(--font-mono)', color: COLORS.primary }}>{activeSensors}</span>/{totalSensors} sensors
+            </span>
+            {lastUpdate && (
+              <span style={{ fontSize: 10, color: 'var(--muted-foreground)', fontFamily: 'var(--font-mono)' }}>
+                Updated: {new Date(lastUpdate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              </span>
+            )}
           </div>
         </div>
+
+        {/* ── Top status cards ── */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-3 sm:mb-4">
+          <TopStatusCard
+            icon={Settings} iconBg="rgba(34,197,94,0.12)" iconColor={COLORS.success}
+            title="System Operation" value={isSystemOn ? "ON" : "OFF"} valueColor={isSystemOn ? COLORS.success : COLORS.danger}
+            sub={isSystemOn ? "All systems normal" : "System offline"} subColor="var(--muted-foreground)"
+          />
+          <TopStatusCard
+            icon={Settings} iconBg="rgba(14,165,233,0.12)" iconColor={COLORS.primary}
+            title="System Mode" value={isAutoMode ? "AUTO" : "ON"} valueColor={isAutoMode ? COLORS.warning : COLORS.success}
+            sub={isAutoMode ? "Automatic control" : "Standby Mode"} subColor="var(--muted-foreground)"
+          />
+          <TopStatusCard
+            icon={Droplets} iconBg="rgba(14,165,233,0.12)" iconColor={COLORS.primary}
+            title="Feed Tank Level" value="" gauge={<CircularGauge value={feedTankLevel} size={isMobile ? 56 : 64} strokeWidth={5} color={feedTankLevel > 30 ? COLORS.success : feedTankLevel > 0 ? COLORS.warning : COLORS.danger} label="" />}
+          />
+          <TopStatusCard
+            icon={AlertTriangle} iconBg="rgba(239,68,68,0.12)" iconColor={COLORS.danger}
+            title="Active Alarms" value={activeAlarmsList.length} valueColor={activeAlarmsList.length > 0 ? COLORS.danger : COLORS.success}
+            sub={criticalAlarmsCount > 0 ? `${criticalAlarmsCount} Critical` : 'All clear'} subColor={criticalAlarmsCount > 0 ? COLORS.danger : COLORS.success}
+          />
+        </div>
+
+        {/* ── KPI grid ── */}
+        <div className="mb-3 sm:mb-4">
+          <SectionTitle>Key Performance Indicators</SectionTitle>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1.5 sm:gap-3">
+            <KPICardV2 label="Feed Flow" unit="m³/h" icon={Droplets} value={safeFormat(feedFlow, 1)}
+              color={feedFlow > 40 ? COLORS.success : feedFlow > 0 ? COLORS.warning : COLORS.danger}
+              trend={getTrend(history, 'FEEDFlow')} statusText={feedFlow > 40 ? "Normal" : feedFlow > 0 ? "Check" : "No flow"} statusOk={feedFlow > 40} />
+            <KPICardV2 label="Permeate Flow" unit="m³/h" icon={Droplets} value={safeFormat(permeateFlow, 1)}
+              color={permeateFlow > 30 ? COLORS.success : permeateFlow > 0 ? COLORS.warning : COLORS.danger}
+              trend={getTrend(history, 'Permeateflow')} statusText={permeateFlow > 30 ? "Normal" : permeateFlow > 0 ? "Low" : "No flow"} statusOk={permeateFlow > 30} />
+            <KPICardV2 label="System Recovery" unit="%" icon={Activity} value={safeFormat(systemRecovery, 1)}
+              color={systemRecovery > 75 ? COLORS.success : systemRecovery > 0 ? COLORS.warning : COLORS.primary}
+              trend={getTrend(history, 'SystemRecovery')} statusText={systemRecovery > 75 ? "Good" : systemRecovery > 0 ? "Check" : "—"} statusOk={systemRecovery > 75} />
+            <KPICardV2 label="RO Pressure" unit="bar" icon={Gauge} value={safeFormat(roPressure, 1)}
+              color={roPressure >= 8 && roPressure <= 16 ? COLORS.success : roPressure > 16 ? COLORS.danger : roPressure > 0 ? COLORS.warning : COLORS.primary}
+              trend={getTrend(history, 'ROPressure')} statusText={roPressure >= 8 && roPressure <= 16 ? "Normal" : roPressure > 0 ? "Check" : "—"} statusOk={roPressure >= 8 && roPressure <= 16} />
+            <KPICardV2 label="Concentrate Flow" unit="m³/h" icon={Activity} value={safeFormat(concentrateFlow, 1)}
+              color={concentrateFlow > 15 ? COLORS.success : COLORS.warning}
+              trend={getTrend(history, 'ConcentrateFlow')} statusText={concentrateFlow > 15 ? "Normal" : "Low"} statusOk={concentrateFlow > 15} />
+            <KPICardV2 label="Filter Delta P" unit="bar" icon={Filter} value={safeFormat(filterDeltaP, 2)}
+              color={filterDeltaP > 0.4 ? COLORS.danger : filterDeltaP > 0 ? COLORS.success : COLORS.primary}
+              trend={getTrend(history, 'MediaFilterDeltaP')} statusText={filterDeltaP > 0.4 ? "Check" : filterDeltaP > 0 ? "Normal" : "—"} statusOk={filterDeltaP <= 0.4 && filterDeltaP > 0} />
+            <KPICardV2 label="Stage 1 Delta P" unit="bar" icon={Zap} value={safeFormat(stage1Delta, 2)}
+              color={stage1Delta > 0.55 ? COLORS.danger : stage1Delta > 0 ? COLORS.success : COLORS.primary}
+              trend={getTrend(history, 'Stage1Delta')} statusText={stage1Delta > 0.55 ? "Check" : stage1Delta > 0 ? "Normal" : "—"} statusOk={stage1Delta <= 0.55 && stage1Delta > 0} />
+            <KPICardV2 label="Stage 2 Delta P" unit="bar" icon={Zap} value={safeFormat(stage2Delta, 2)}
+              color={stage2Delta > 0.50 ? COLORS.warning : stage2Delta > 0 ? COLORS.success : COLORS.primary}
+              trend={getTrend(history, 'Stage2Delta')} statusText={stage2Delta > 0.50 ? "Check" : stage2Delta > 0 ? "Normal" : "—"} statusOk={stage2Delta <= 0.50 && stage2Delta > 0} />
+            <KPICardV2 label="Product Water EC" unit="µS/cm" icon={FlaskConical} value={safeFormat(pureWaterEC, 0)}
+              color={pureWaterEC > 150 ? COLORS.danger : pureWaterEC > 0 ? COLORS.success : COLORS.primary}
+              trend={getTrend(history, 'PureWaterEC')} statusText={pureWaterEC > 150 ? "High" : pureWaterEC > 0 ? "Within limits" : "—"} statusOk={pureWaterEC <= 150 && pureWaterEC > 0} />
+            <KPICardV2 label="Daily Production" unit="m³" icon={TrendingUp} value={dailyProdDisplay}
+              color={dailyProduction > 0 ? COLORS.success : COLORS.primary}
+              trend={getTrend(history, 'Permeateflow', 60 * 60 * 1000)} statusText={summaryLoading ? "Loading" : `${safeFormat(permeateFlow, 1)} m³/h now`} statusOk={true} />
+          </div>
+        </div>
+
+        {/* ── Performance Trends using LiveTrendChart ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4 mb-3 sm:mb-4">
+          <div className="lg:col-span-2 rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+            <LiveTrendChart 
+              data={{ ...sensorData, history }} 
+              sensorKey={selectedSensors[0] || 'RO5-Permeateflow'} 
+              height={isMobile ? 180 : 220} 
+            />
+          </div>
+
+          {/* System Status panel */}
+          <div className="flex flex-col gap-3">
+            <div className="rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+              <SectionTitle>System Status</SectionTitle>
+              <div className="flex justify-around">
+                <CircularGauge value={feedTankLevel} color={feedTankLevel > 30 ? COLORS.success : COLORS.warning} label="Feed Tank" statusLabel={feedTankLevel > 30 ? "Normal" : "Low"} />
+                <CircularGauge value={systemRecovery} color={systemRecovery > 75 ? COLORS.success : COLORS.warning} label="Recovery" statusLabel={systemRecovery > 75 ? "Good" : "Check"} />
+                <CircularGauge value={roHealthScore} color={roHealthScore > 80 ? COLORS.success : roHealthScore > 50 ? COLORS.warning : COLORS.danger} label="RO Health" statusLabel={roHealthScore > 80 ? "Excellent" : roHealthScore > 50 ? "Fair" : "Poor"} />
+              </div>
+
+              <div style={{ marginTop: 12 }}>
+                <SectionTitle>Equipment Status</SectionTitle>
+                <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
+                  <EquipmentStatusItem icon={Wrench} label="High Pressure Pump" state={isSystemOn ? 'on' : 'off'} />
+                  <EquipmentStatusItem icon={Wrench} label="Booster Pump" state={isSystemOn ? 'on' : 'off'} />
+                  <EquipmentStatusItem icon={FlaskConical} label="Dosing Pump" state={isDosingOn ? 'on' : 'off'} />
+                  <EquipmentStatusItem icon={Sun} label="UV System" state="unknown" />
+                </div>
+              </div>
+            </div>
+
+            <div id="alarms-panel" className="rounded-lg p-3 sm:p-4 flex flex-col gap-2" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+              <div className="flex items-center justify-between">
+                <SectionTitle>Recent Alarms</SectionTitle>
+                <span style={{ fontSize: 10.5, color: COLORS.primary, fontWeight: 600, cursor: 'pointer' }}>View All →</span>
+              </div>
+              <div className="flex flex-col gap-1.5 sm:gap-2 max-h-[150px] overflow-auto">
+                {activeAlarmsList.length > 0 ? activeAlarmsList.slice(0, isMobile ? 2 : 4).map(a => <RecentAlarmItem key={a.id} alarm={a} />) : (
+                  <div className="flex items-center gap-2" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>
+                    <CheckCircle size={13} style={{ color: COLORS.success }} /> All systems operating normally
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Advanced Charts Row ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 mb-3 sm:mb-4">
+          <LiveTrendChart data={{ ...sensorData, history }} sensorKey={selectedSensors[0] || 'RO5-Permeateflow'} height={isMobile ? 180 : 220} />
+          <SystemHealthRadar data={sensorData} />
+        </div>
+
+        {/* ── Sensor Selector ── */}
+        <div className="mb-3 sm:mb-4">
+          <div className="rounded-lg p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+            <span style={{ fontSize: isMobile ? 9 : 11, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 6, display: "block" }}>
+              Select Sensor for Comparison
+            </span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? 4 : 8 }}>
+              {Object.keys(SENSOR_MAP).slice(0, isMobile ? 8 : 15).map(key => {
+                const sensor = SENSOR_MAP[key];
+                const isSelected = selectedSensors.includes(key);
+                return (
+                  <button
+                    key={key}
+                    onClick={() => setSelectedSensors([key])}
+                    style={{
+                      padding: isMobile ? '2px 8px' : '4px 12px',
+                      borderRadius: isMobile ? 8 : 12,
+                      background: isSelected ? sensor.color : 'var(--secondary)',
+                      color: isSelected ? 'white' : 'var(--muted-foreground)',
+                      border: isSelected ? `2px solid ${sensor.color}` : '1px solid var(--border)',
+                      fontSize: isMobile ? 8 : 10,
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                      fontWeight: isSelected ? 600 : 400,
+                      opacity: isSelected ? 1 : 0.7,
+                    }}
+                  >
+                    {isMobile ? sensor.shortName || sensor.label : sensor.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Flow balance, distribution charts ── */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-3 sm:mb-4">
+          <FlowBalanceChart data={sensorData} />
+          <DistributionHistogram data={{ ...sensorData, history }} sensorKey="RO5-ROPressure" />
+          <DistributionHistogram data={{ ...sensorData, history }} sensorKey="RO5-FEEDFlow" />
+        </div>
+
+        {/* ── Footer ── */}
+        <div style={{ 
+          textAlign: "center", 
+          padding: "12px 0", 
+          borderTop: "1px solid var(--border)", 
+          display: "flex", 
+          justifyContent: "space-between", 
+          fontSize: 10, 
+          color: "var(--muted-foreground)",
+          flexWrap: "wrap",
+          gap: 8
+        }}>
+         
+        </div>
       </div>
 
-      {/* Flow balance, distribution, live alerts */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
-        <FlowBalanceChart data={sensorData} />
-        <DistributionHistogram data={chartData} sensorKey="RO5-ROPressure" />
-        <AlarmsCard alarms={alarms} />
-      </div>
-
-      {/* Second distribution view */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
-        <DistributionHistogram data={chartData} sensorKey="RO5-FEEDFlow" />
-        <DistributionHistogram data={chartData} sensorKey="RO5-Permeateflow" />
-      </div>
-
-      <style>{`
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.6; }
-        }
-      `}</style>
+      <style>{`@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }`}</style>
     </div>
   );
 }

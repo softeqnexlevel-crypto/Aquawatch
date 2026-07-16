@@ -1,9 +1,10 @@
-// components/FiltrationMonitoring.jsx
-import React, { useState, useMemo } from 'react';
+// components/FiltrationMonitoring.jsx - FULLY MOBILE RESPONSIVE
+
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
 } from "recharts";
-import { AlertTriangle, CheckCircle, AlertCircle, Filter, Clock } from "lucide-react";
+import { AlertTriangle, CheckCircle, AlertCircle, Filter, Clock, ChevronLeft } from "lucide-react";
 import { useData } from "../contexts/DataContext";
 import { format, subHours } from 'date-fns';
 
@@ -34,7 +35,7 @@ const CustomTooltip = ({ active, payload, label }) => {
 };
 
 // ===================== PRESSURE GAUGE COMPONENT =====================
-function PressureGauge({ value, warning, critical, label, filterNum, lastUpdate }) {
+function PressureGauge({ value, warning, critical, label, filterNum, lastUpdate, isMobile }) {
   // Guard against undefined/null values
   const safeValue = typeof value === 'number' && !isNaN(value) ? value : 0;
   const pct = Math.min((safeValue / critical) * 100, 100);
@@ -46,32 +47,32 @@ function PressureGauge({ value, warning, critical, label, filterNum, lastUpdate 
   const healthScore = Math.round(100 - pct);
 
   return (
-    <div className="rounded p-4 flex flex-col gap-4" style={{ background: "var(--card)", border: `1px solid ${color}30` }}>
+    <div className="rounded p-3 sm:p-4 flex flex-col gap-3 sm:gap-4" style={{ background: "var(--card)", border: `1px solid ${color}30` }}>
       <div className="flex items-center justify-between">
         <div>
-          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
-            <Filter size={12} style={{ display: 'inline', marginRight: 4 }} />
+          <div style={{ fontSize: isMobile ? 9 : 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+            <Filter size={isMobile ? 10 : 12} style={{ display: 'inline', marginRight: 4 }} />
             Filter {filterNum}
           </div>
-          <div style={{ fontSize: 13, fontWeight: 600, color: "var(--foreground)" }}>{label}</div>
+          <div style={{ fontSize: isMobile ? 12 : 13, fontWeight: 600, color: "var(--foreground)" }}>{label}</div>
         </div>
-        <div className="flex items-center gap-1.5 rounded px-2 py-1" style={{ background: `${color}15`, border: `1px solid ${color}40` }}>
-          <StatusIcon size={12} style={{ color }} />
-          <span style={{ fontSize: 10, fontWeight: 700, color, letterSpacing: "0.06em" }}>{status}</span>
+        <div className="flex items-center gap-1 rounded px-1.5 sm:px-2 py-0.5 sm:py-1" style={{ background: `${color}15`, border: `1px solid ${color}40` }}>
+          <StatusIcon size={isMobile ? 10 : 12} style={{ color }} />
+          <span style={{ fontSize: isMobile ? 8 : 10, fontWeight: 700, color, letterSpacing: "0.06em" }}>{status}</span>
         </div>
       </div>
 
       {/* Pressure value */}
       <div className="flex items-end gap-2">
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: 42, fontWeight: 700, color, lineHeight: 1 }}>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: isMobile ? 32 : 42, fontWeight: 700, color, lineHeight: 1 }}>
           {safeValue.toFixed(3)}
         </span>
-        <span style={{ fontSize: 13, color: "var(--muted-foreground)", marginBottom: 4 }}>bar</span>
+        <span style={{ fontSize: isMobile ? 11 : 13, color: "var(--muted-foreground)", marginBottom: isMobile ? 2 : 4 }}>bar</span>
       </div>
 
       {/* Bar gauge */}
       <div>
-        <div style={{ height: 10, background: "var(--secondary)", borderRadius: 5, overflow: "hidden", position: "relative" }}>
+        <div style={{ height: isMobile ? 8 : 10, background: "var(--secondary)", borderRadius: 5, overflow: "hidden", position: "relative" }}>
           <div style={{
             width: `${(warning / critical) * 100}%`, height: "100%",
             background: "linear-gradient(to right, #22c55e, #eab308)",
@@ -90,32 +91,32 @@ function PressureGauge({ value, warning, critical, label, filterNum, lastUpdate 
           }} />
         </div>
         <div className="flex justify-between mt-1">
-          <span style={{ fontSize: 8, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>0.00</span>
-          <span style={{ fontSize: 8, color: "#eab308", fontFamily: "var(--font-mono)" }}>⚠ {warning.toFixed(2)}</span>
-          <span style={{ fontSize: 8, color: "#ef4444", fontFamily: "var(--font-mono)" }}>🔴 {critical.toFixed(2)}</span>
+          <span style={{ fontSize: isMobile ? 7 : 8, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>0.00</span>
+          <span style={{ fontSize: isMobile ? 7 : 8, color: "#eab308", fontFamily: "var(--font-mono)" }}>⚠ {warning.toFixed(2)}</span>
+          <span style={{ fontSize: isMobile ? 7 : 8, color: "#ef4444", fontFamily: "var(--font-mono)" }}>🔴 {critical.toFixed(2)}</span>
         </div>
       </div>
 
       {/* Thresholds and info */}
-      <div className="grid gap-1.5" style={{ gridTemplateColumns: "1fr 1fr" }}>
+      <div className="grid gap-1.5" style={{ gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr" }}>
         {[
-          { label: "Warning Threshold", value: `${warning.toFixed(2)} bar`, color: "#eab308" },
-          { label: "Critical Threshold", value: `${critical.toFixed(2)} bar`, color: "#ef4444" },
+          { label: "Warning", value: `${warning.toFixed(2)} bar`, color: "#eab308" },
+          { label: "Critical", value: `${critical.toFixed(2)} bar`, color: "#ef4444" },
           { label: "Health Score", value: `${healthScore}%`, color: healthScore > 70 ? "#22c55e" : healthScore > 50 ? "#eab308" : "#ef4444" },
           { label: "Last Update", value: lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--', color: "var(--muted-foreground)" },
         ].map((m, idx) => (
-          <div key={idx} className="rounded p-2" style={{ background: "var(--muted)" }}>
-            <div style={{ fontSize: 8, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{m.label}</div>
-            <div style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: m.color, fontWeight: 600, marginTop: 2 }}>{m.value}</div>
+          <div key={idx} className="rounded p-1.5 sm:p-2" style={{ background: "var(--muted)" }}>
+            <div style={{ fontSize: isMobile ? 7 : 8, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{m.label}</div>
+            <div style={{ fontSize: isMobile ? 9 : 10, fontFamily: "var(--font-mono)", color: m.color, fontWeight: 600, marginTop: 1 }}>{m.value}</div>
           </div>
         ))}
       </div>
 
       {/* Health score bar */}
       <div className="flex items-center justify-between">
-        <span style={{ fontSize: 10, color: "var(--muted-foreground)" }}>Filter Health Score</span>
+        <span style={{ fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)" }}>Filter Health Score</span>
         <div className="flex items-center gap-2">
-          <div style={{ width: 80, height: 4, background: "var(--secondary)", borderRadius: 2 }}>
+          <div style={{ width: isMobile ? 60 : 80, height: 4, background: "var(--secondary)", borderRadius: 2 }}>
             <div style={{ 
               width: `${Math.max(0, healthScore)}%`, 
               height: "100%", 
@@ -123,7 +124,7 @@ function PressureGauge({ value, warning, critical, label, filterNum, lastUpdate 
               borderRadius: 2 
             }} />
           </div>
-          <span style={{ fontSize: 10, fontFamily: "var(--font-mono)", color, fontWeight: 600 }}>
+          <span style={{ fontSize: isMobile ? 9 : 10, fontFamily: "var(--font-mono)", color, fontWeight: 600 }}>
             {healthScore}%
           </span>
         </div>
@@ -136,6 +137,15 @@ function PressureGauge({ value, warning, critical, label, filterNum, lastUpdate 
 export function FiltrationMonitoring() {
   const { sensorData, getValue, getHistory, lastUpdate } = useData();
   const [timeRange, setTimeRange] = useState('24h');
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Mobile detection
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   // Use the correct RO5- prefixed keys
   const stage1Delta = getValue('RO5-Stage1Delta') || 0;
@@ -212,8 +222,6 @@ export function FiltrationMonitoring() {
   const filterEvents = useMemo(() => {
     const events = [];
     
-    // Stage 1 / Stage 2 now flag against the real 1.5 bar guideline
-    // (warning at 1.2 bar), not the old placeholder 0.50 bar.
     if (stage1History && stage1History.length > 10) {
       const recent = stage1History.slice(-10);
       const avg = recent.reduce((sum, d) => sum + d.value, 0) / recent.length;
@@ -246,7 +254,6 @@ export function FiltrationMonitoring() {
       }
     }
     
-    // Media filter keeps its own separate threshold
     if (filterHistory && filterHistory.length > 10) {
       const recent = filterHistory.slice(-10);
       const avg = recent.reduce((sum, d) => sum + d.value, 0) / recent.length;
@@ -266,7 +273,7 @@ export function FiltrationMonitoring() {
     return events.slice(0, 5);
   }, [stage1History, stage2History, filterHistory]);
 
-  // Latest values for gauges - use the current sensor values
+  // Latest values for gauges
   const latestF1 = chartData.length > 0 ? chartData[chartData.length - 1]?.filter1 || stage1Delta : stage1Delta;
   const latestF2 = chartData.length > 0 ? chartData[chartData.length - 1]?.filter2 || stage2Delta : stage2Delta;
   const latestFilterDP = chartData.length > 0 ? chartData[chartData.length - 1]?.filterDP || filterDeltaP : filterDeltaP;
@@ -279,15 +286,16 @@ export function FiltrationMonitoring() {
   };
 
   return (
-    <div className="flex flex-col gap-4 p-4 overflow-auto h-full" >
+    <div className="flex flex-col gap-3 sm:gap-4 p-2 sm:p-4 overflow-auto h-full">
+      
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
         <div>
-          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
-            <Filter size={14} style={{ display: 'inline', marginRight: 6 }} />
+          <div style={{ fontSize: isMobile ? 10 : 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+            <Filter size={isMobile ? 12 : 14} style={{ display: 'inline', marginRight: 4 }} />
             Filter Differential Pressure Monitoring
           </div>
-          <p style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 4 }}>
+          <p style={{ fontSize: isMobile ? 10 : 12, color: "var(--muted-foreground)", marginTop: 2 }}>
             Real-time monitoring • Last updated: {lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--'}
           </p>
         </div>
@@ -295,12 +303,12 @@ export function FiltrationMonitoring() {
           <button
             onClick={() => setTimeRange('1h')}
             style={{
-              padding: '4px 12px',
+              padding: isMobile ? '3px 10px' : '4px 12px',
               borderRadius: 4,
               background: timeRange === '1h' ? '#0ea5e9' : 'var(--secondary)',
               color: timeRange === '1h' ? 'white' : 'var(--muted-foreground)',
               border: '1px solid var(--border)',
-              fontSize: 10,
+              fontSize: isMobile ? 9 : 10,
               cursor: 'pointer'
             }}
           >
@@ -309,12 +317,12 @@ export function FiltrationMonitoring() {
           <button
             onClick={() => setTimeRange('24h')}
             style={{
-              padding: '4px 12px',
+              padding: isMobile ? '3px 10px' : '4px 12px',
               borderRadius: 4,
               background: timeRange === '24h' ? '#0ea5e9' : 'var(--secondary)',
               color: timeRange === '24h' ? 'white' : 'var(--muted-foreground)',
               border: '1px solid var(--border)',
-              fontSize: 10,
+              fontSize: isMobile ? 9 : 10,
               cursor: 'pointer'
             }}
           >
@@ -323,8 +331,8 @@ export function FiltrationMonitoring() {
         </div>
       </div>
 
-      {/* Gauges - Real Data */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+      {/* Gauges - Responsive grid */}
+      <div className="grid gap-3 sm:gap-4" style={{ gridTemplateColumns: isMobile ? "1fr" : "repeat(3, 1fr)" }}>
         <PressureGauge 
           value={latestF1} 
           warning={STAGE_DP_WARNING} 
@@ -332,6 +340,7 @@ export function FiltrationMonitoring() {
           label="Stage 1 Delta P" 
           filterNum={1} 
           lastUpdate={lastUpdate}
+          isMobile={isMobile}
         />
         <PressureGauge 
           value={latestF2} 
@@ -340,6 +349,7 @@ export function FiltrationMonitoring() {
           label="Stage 2 Delta P" 
           filterNum={2}
           lastUpdate={lastUpdate}
+          isMobile={isMobile}
         />
         <PressureGauge 
           value={latestFilterDP} 
@@ -348,60 +358,57 @@ export function FiltrationMonitoring() {
           label="Media Filter Delta P" 
           filterNum={3}
           lastUpdate={lastUpdate}
+          isMobile={isMobile}
         />
       </div>
 
       {/* Pressure trend chart */}
-      <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-        <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+      <div className="rounded p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 gap-2">
+          <span style={{ fontSize: isMobile ? 10 : 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
             Differential Pressure Trend — {timeRange === '24h' ? '24 Hours' : '1 Hour'}
           </span>
-          <div className="flex items-center gap-4 flex-wrap">
-            <div className="flex items-center gap-1.5">
-              <div style={{ width: 16, height: 2, background: "#0ea5e9", borderRadius: 1 }} />
-              <span style={{ fontSize: 9, color: "var(--muted-foreground)" }}>Stage 1</span>
+          <div className="flex flex-wrap items-center gap-2 sm:gap-4">
+            <div className="flex items-center gap-1">
+              <div style={{ width: 12, height: 2, background: "#0ea5e9", borderRadius: 1 }} />
+              <span style={{ fontSize: isMobile ? 7 : 9, color: "var(--muted-foreground)" }}>Stage 1</span>
             </div>
-            <div className="flex items-center gap-1.5">
-              <div style={{ width: 16, height: 2, background: "#14b8a6", borderRadius: 1 }} />
-              <span style={{ fontSize: 9, color: "var(--muted-foreground)" }}>Stage 2</span>
+            <div className="flex items-center gap-1">
+              <div style={{ width: 12, height: 2, background: "#14b8a6", borderRadius: 1 }} />
+              <span style={{ fontSize: isMobile ? 7 : 9, color: "var(--muted-foreground)" }}>Stage 2</span>
             </div>
-            <div className="flex items-center gap-1.5">
-              <div style={{ width: 16, height: 2, background: "#a78bfa", borderRadius: 1 }} />
-              <span style={{ fontSize: 9, color: "var(--muted-foreground)" }}>Media Filter</span>
+            <div className="flex items-center gap-1">
+              <div style={{ width: 12, height: 2, background: "#a78bfa", borderRadius: 1 }} />
+              <span style={{ fontSize: isMobile ? 7 : 9, color: "var(--muted-foreground)" }}>Media</span>
             </div>
-            <div className="flex items-center gap-1.5">
-              <div style={{ width: 16, height: 1, borderTop: "1px dashed #eab308" }} />
-              <span style={{ fontSize: 9, color: "#eab308" }}>Stage 1/2 Warning (1.2 bar)</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div style={{ width: 16, height: 1, borderTop: "1px dashed #ef4444" }} />
-              <span style={{ fontSize: 9, color: "#ef4444" }}>Stage 1/2 Critical (1.5 bar)</span>
-            </div>
+            {!isMobile && (
+              <>
+                <div className="flex items-center gap-1">
+                  <div style={{ width: 12, height: 1, borderTop: "1px dashed #eab308" }} />
+                  <span style={{ fontSize: 9, color: "#eab308" }}>Warning (1.2 bar)</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div style={{ width: 12, height: 1, borderTop: "1px dashed #ef4444" }} />
+                  <span style={{ fontSize: 9, color: "#ef4444" }}>Critical (1.5 bar)</span>
+                </div>
+              </>
+            )}
           </div>
         </div>
-
-        {/* Note: the Media Filter's own guideline (0.30 / 0.50 bar) is much
-            lower than the Stage 1/2 guideline (1.2 / 1.5 bar) plotted below.
-            The reference lines here reflect the Stage 1/2 threshold only —
-            they will look conservative relative to the Media Filter trace.
-            If you want Media Filter's own threshold annotated too, it needs
-            a second y-axis or its own chart, since one shared linear scale
-            can't cleanly show two very different threshold pairs. */}
         
         {chartData.length > 0 ? (
-          <ResponsiveContainer width="100%" height={200}>
+          <ResponsiveContainer width="100%" height={isMobile ? 160 : 200}>
             <LineChart data={chartData} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" />
               <XAxis 
                 dataKey="time" 
-                tick={{ fontSize: 9, fill: "#4d7a9e" }} 
+                tick={{ fontSize: isMobile ? 7 : 9, fill: "#4d7a9e" }} 
                 axisLine={false} 
                 tickLine={false} 
                 interval={chartData.length > 20 ? Math.floor(chartData.length / 10) : 0}
               />
               <YAxis 
-                tick={{ fontSize: 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} 
+                tick={{ fontSize: isMobile ? 7 : 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} 
                 axisLine={false} 
                 tickLine={false} 
                 tickFormatter={v => v.toFixed(2)} 
@@ -446,10 +453,24 @@ export function FiltrationMonitoring() {
             <p style={{ fontSize: 10, marginTop: 4 }}>Data will appear once available</p>
           </div>
         )}
+        
+        {/* Mobile legend for thresholds */}
+        {isMobile && (
+          <div className="flex flex-wrap items-center gap-3 mt-2 pt-2 border-t border-[var(--border)]">
+            <div className="flex items-center gap-1">
+              <div style={{ width: 12, height: 1, borderTop: "1px dashed #eab308" }} />
+              <span style={{ fontSize: 8, color: "#eab308" }}>Warning (1.2 bar)</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div style={{ width: 12, height: 1, borderTop: "1px dashed #ef4444" }} />
+              <span style={{ fontSize: 8, color: "#ef4444" }}>Critical (1.5 bar)</span>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Status Summary */}
-      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+      {/* Status Summary - Responsive */}
+      <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(3, 1fr)" }}>
         {[
           { 
             label: "Stage 1 Delta", 
@@ -472,22 +493,22 @@ export function FiltrationMonitoring() {
         ].map(item => {
           const StatusIcon = item.status.icon;
           return (
-            <div key={item.label} className="rounded p-3" style={{ background: "var(--card)", border: `1px solid ${item.status.color}30` }}>
-              <div style={{ fontSize: 10, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+            <div key={item.label} className="rounded p-2 sm:p-3" style={{ background: "var(--card)", border: `1px solid ${item.status.color}30` }}>
+              <div style={{ fontSize: isMobile ? 8 : 10, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
                 {item.label}
               </div>
-              <div style={{ fontSize: 20, fontFamily: "var(--font-mono)", fontWeight: 700, color: "var(--foreground)", marginTop: 4 }}>
-                {item.value} <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>{item.unit}</span>
+              <div style={{ fontSize: isMobile ? 16 : 20, fontFamily: "var(--font-mono)", fontWeight: 700, color: "var(--foreground)", marginTop: 2 }}>
+                {item.value} <span style={{ fontSize: isMobile ? 10 : 12, color: "var(--muted-foreground)" }}>{item.unit}</span>
               </div>
               <div style={{ 
                 display: 'flex', 
                 alignItems: 'center', 
                 gap: 4,
-                marginTop: 4,
-                fontSize: 10, 
+                marginTop: 2,
+                fontSize: isMobile ? 9 : 10, 
                 color: item.status.color
               }}>
-                <StatusIcon size={12} />
+                <StatusIcon size={isMobile ? 10 : 12} />
                 {item.status.status}
               </div>
             </div>
@@ -495,53 +516,88 @@ export function FiltrationMonitoring() {
         })}
       </div>
 
-      {/* Filter events table */}
-      <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>
-          <Clock size={12} style={{ display: 'inline', marginRight: 4 }} />
+      {/* Filter events table - Responsive */}
+      <div className="rounded p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+        <div style={{ fontSize: isMobile ? 10 : 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>
+          <Clock size={isMobile ? 10 : 12} style={{ display: 'inline', marginRight: 4 }} />
           Recent Filter Events
         </div>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr>
-              {["Timestamp", "Filter", "Event", "dP Before", "dP After", "Duration", "Operator"].map((h, idx) => (
-                <th key={idx} style={{ 
-                  padding: "6px 10px", 
-                  textAlign: "left", 
-                  fontSize: 9, 
-                  fontWeight: 600, 
-                  color: "var(--muted-foreground)", 
-                  letterSpacing: "0.08em", 
-                  textTransform: "uppercase", 
-                  borderBottom: "1px solid var(--border)" 
-                }}>
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
+        
+        {isMobile ? (
+          // Mobile card view for events
+          <div className="flex flex-col gap-2">
             {filterEvents.length > 0 ? (
               filterEvents.map((r, idx) => (
-                <tr key={idx} style={{ background: idx % 2 === 0 ? "var(--card)" : "var(--muted)" }}>
-                  <td style={{ padding: "7px 10px", fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>{r.time}</td>
-                  <td style={{ padding: "7px 10px", fontSize: 10, color: "var(--foreground)", fontWeight: 500, borderBottom: "1px solid var(--border)" }}>{r.filter}</td>
-                  <td style={{ padding: "7px 10px", fontSize: 10, color: r.event.includes('Warning') ? '#eab308' : '#0ea5e9', borderBottom: "1px solid var(--border)" }}>{r.event}</td>
-                  <td style={{ padding: "7px 10px", fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>{r.before} bar</td>
-                  <td style={{ padding: "7px 10px", fontSize: 10, fontFamily: "var(--font-mono)", color: "#22c55e", borderBottom: "1px solid var(--border)" }}>{r.after} bar</td>
-                  <td style={{ padding: "7px 10px", fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>{r.dur}</td>
-                  <td style={{ padding: "7px 10px", fontSize: 10, color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>{r.op}</td>
-                </tr>
+                <div key={idx} className="rounded p-3" style={{ background: "var(--muted)", border: "1px solid var(--border)" }}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span style={{ fontSize: 11, fontWeight: 600, color: "var(--foreground)" }}>{r.filter}</span>
+                    <span style={{ fontSize: 10, color: r.event.includes('Warning') ? '#eab308' : '#0ea5e9' }}>{r.event}</span>
+                  </div>
+                  <div style={{ fontSize: 9, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>
+                    {r.time}
+                  </div>
+                  <div className="flex items-center gap-3 mt-1">
+                    <span style={{ fontSize: 9, color: "var(--muted-foreground)" }}>Before: <span style={{ color: "var(--foreground)" }}>{r.before} bar</span></span>
+                    <span style={{ fontSize: 9, color: "var(--muted-foreground)" }}>After: <span style={{ color: "#22c55e" }}>{r.after} bar</span></span>
+                  </div>
+                  <div className="flex items-center gap-3 mt-1">
+                    <span style={{ fontSize: 9, color: "var(--muted-foreground)" }}>Duration: <span style={{ color: "var(--foreground)" }}>{r.dur}</span></span>
+                    <span style={{ fontSize: 9, color: "var(--muted-foreground)" }}>Operator: <span style={{ color: "var(--foreground)" }}>{r.op}</span></span>
+                  </div>
+                </div>
               ))
             ) : (
-              <tr>
-                <td colSpan={7} style={{ padding: "20px", textAlign: "center", color: "var(--muted-foreground)", fontSize: 10 }}>
-                  No recent events. All filters operating normally.
-                </td>
-              </tr>
+              <div style={{ padding: "20px", textAlign: "center", color: "var(--muted-foreground)", fontSize: 10 }}>
+                No recent events. All filters operating normally.
+              </div>
             )}
-          </tbody>
-        </table>
+          </div>
+        ) : (
+          // Desktop table view
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
+              <thead>
+                <tr>
+                  {["Timestamp", "Filter", "Event", "dP Before", "dP After", "Duration", "Operator"].map((h, idx) => (
+                    <th key={idx} style={{ 
+                      padding: "6px 10px", 
+                      textAlign: "left", 
+                      fontSize: 9, 
+                      fontWeight: 600, 
+                      color: "var(--muted-foreground)", 
+                      letterSpacing: "0.08em", 
+                      textTransform: "uppercase", 
+                      borderBottom: "1px solid var(--border)" 
+                    }}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filterEvents.length > 0 ? (
+                  filterEvents.map((r, idx) => (
+                    <tr key={idx} style={{ background: idx % 2 === 0 ? "var(--card)" : "var(--muted)" }}>
+                      <td style={{ padding: "7px 10px", fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>{r.time}</td>
+                      <td style={{ padding: "7px 10px", fontSize: 10, color: "var(--foreground)", fontWeight: 500, borderBottom: "1px solid var(--border)" }}>{r.filter}</td>
+                      <td style={{ padding: "7px 10px", fontSize: 10, color: r.event.includes('Warning') ? '#eab308' : '#0ea5e9', borderBottom: "1px solid var(--border)" }}>{r.event}</td>
+                      <td style={{ padding: "7px 10px", fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>{r.before} bar</td>
+                      <td style={{ padding: "7px 10px", fontSize: 10, fontFamily: "var(--font-mono)", color: "#22c55e", borderBottom: "1px solid var(--border)" }}>{r.after} bar</td>
+                      <td style={{ padding: "7px 10px", fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>{r.dur}</td>
+                      <td style={{ padding: "7px 10px", fontSize: 10, color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>{r.op}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={7} style={{ padding: "20px", textAlign: "center", color: "var(--muted-foreground)", fontSize: 10 }}>
+                      No recent events. All filters operating normally.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

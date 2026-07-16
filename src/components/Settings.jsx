@@ -1,5 +1,7 @@
+// pages/Settings.jsx - FULLY MOBILE RESPONSIVE
+
 import { useState, useRef, useEffect } from "react";
-import { Link } from "react-router-dom";  // ✅ ADD THIS IMPORT
+import { Link } from "react-router-dom";
 import { RefreshCw, CheckCircle, Download, Upload, Settings as SettingsIcon, Users, ExternalLink } from "lucide-react";
 import { useData } from "../contexts/DataContext";
 import { useAuth } from "../contexts/AuthContext";
@@ -13,7 +15,7 @@ function Toast({ toast }) {
     <div style={{
       position: "fixed", bottom: 20, right: 20, zIndex: 999,
       background: "var(--card)", border: "1px solid var(--border)",
-      borderRadius: 8, padding: "10px 14px", minWidth: 220,
+      borderRadius: 8, padding: "10px 14px", minWidth: 200, maxWidth: 320,
       boxShadow: "0 2px 12px rgba(0,0,0,0.12)",
       display: "flex", alignItems: "center", gap: 8,
       opacity: toast.visible ? 1 : 0, transition: "opacity 0.3s",
@@ -69,11 +71,11 @@ const DEFAULTS = {
 };
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
-function Section({ title, children, action }) {
+function Section({ title, children, action, isMobile }) {
   return (
-    <div className="rounded p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-      <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+    <div className="rounded p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2" style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: isMobile ? 10 : 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
           {title}
         </div>
         {action}
@@ -83,34 +85,36 @@ function Section({ title, children, action }) {
   );
 }
 
-function SettingRow({ label, desc, children }) {
+function SettingRow({ label, desc, children, isMobile }) {
   return (
-    <div className="flex items-center justify-between py-2.5" style={{ borderBottom: "1px solid var(--border)" }}>
+    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between py-2.5 gap-2" style={{ borderBottom: "1px solid var(--border)" }}>
       <div>
-        <div style={{ fontSize: 12, fontWeight: 500, color: "var(--foreground)" }}>{label}</div>
-        {desc && <div style={{ fontSize: 10, color: "var(--muted-foreground)", marginTop: 1 }}>{desc}</div>}
+        <div style={{ fontSize: isMobile ? 11 : 12, fontWeight: 500, color: "var(--foreground)" }}>{label}</div>
+        {desc && <div style={{ fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)", marginTop: 1 }}>{desc}</div>}
       </div>
-      {children}
+      <div style={{ width: isMobile ? '100%' : 'auto' }}>
+        {children}
+      </div>
     </div>
   );
 }
 
-function StatusBadge({ label, value, warning, critical, unit }) {
+function StatusBadge({ label, value, warning, critical, unit, isMobile }) {
   const isCritical = value >= critical;
   const isWarning = value >= warning && value < critical;
   const color = isCritical ? '#ef4444' : isWarning ? '#eab308' : '#22c55e';
 
   return (
-    <div className="flex items-center gap-2">
-      <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>{label}:</span>
-      <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color }}>
+    <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+      <span style={{ fontSize: isMobile ? 9 : 10, color: 'var(--muted-foreground)' }}>{label}:</span>
+      <span style={{ fontSize: isMobile ? 10 : 11, fontFamily: 'var(--font-mono)', color }}>
         {value.toFixed(1)} {unit}
       </span>
       <span style={{
-        fontSize: 8,
+        fontSize: isMobile ? 7 : 8,
         color,
         background: `${color}15`,
-        padding: '1px 6px',
+        padding: '1px 5px',
         borderRadius: 3
       }}>
         {isCritical ? '⚠️ CRITICAL' : isWarning ? '⚠️ WARNING' : '✅ NORMAL'}
@@ -119,7 +123,7 @@ function StatusBadge({ label, value, warning, critical, unit }) {
   );
 }
 
-const inputStyle = { background: "var(--secondary)", border: "1px solid var(--border)", borderRadius: 4, padding: "4px 8px", fontSize: 11, color: "var(--foreground)", outline: "none" };
+const inputStyle = { background: "var(--secondary)", border: "1px solid var(--border)", borderRadius: 4, padding: "4px 8px", fontSize: 11, color: "var(--foreground)", outline: "none", width: '100%' };
 const monoInput  = { ...inputStyle, fontFamily: "var(--font-mono)" };
 
 // ── Settings ───────────────────────────────────────────────────────────────────
@@ -127,6 +131,15 @@ export function Settings() {
   const { getValue, lastUpdate } = useData();
   const { user: me } = useAuth();
   const isAdmin = me?.role === "admin";
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Mobile detection
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   const [form, setForm] = useState({ ...DEFAULTS });
   const [loading, setLoading] = useState(true);
@@ -278,15 +291,16 @@ export function Settings() {
   }
 
   return (
-    <div className="flex flex-col gap-4 p-4 overflow-auto h-full" >
+    <div className="flex flex-col gap-3 sm:gap-4 p-2 sm:p-4 overflow-auto h-full">
       <style>{`@keyframes spin { from { transform:rotate(0deg) } to { transform:rotate(360deg) } }`}</style>
 
-      <div className="flex items-center justify-between">
-        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
-          <SettingsIcon size={14} style={{ display: 'inline', marginRight: 6 }} />
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+        <div style={{ fontSize: isMobile ? 10 : 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+          <SettingsIcon size={isMobile ? 12 : 14} style={{ display: 'inline', marginRight: 6 }} />
           System Settings
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-1.5 sm:gap-2 w-full sm:w-auto">
           <input
             type="file"
             accept=".json"
@@ -294,26 +308,26 @@ export function Settings() {
             style={{ display: 'none' }}
             id="importSettings"
           />
-          <label htmlFor="importSettings" style={{ cursor: 'pointer' }}>
+          <label htmlFor="importSettings" style={{ cursor: 'pointer', flex: isMobile ? 1 : 'none' }}>
             <button
-              className="flex items-center gap-1 px-3 py-1.5 rounded"
-              style={{ background: "var(--secondary)", border: "1px solid var(--border)", fontSize: 10, color: "var(--muted-foreground)", cursor: "pointer" }}
+              className="flex items-center justify-center gap-1 px-2 sm:px-3 py-1.5 rounded w-full"
+              style={{ background: "var(--secondary)", border: "1px solid var(--border)", fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)", cursor: "pointer" }}
             >
-              <Upload size={12} /> Import
+              <Upload size={isMobile ? 10 : 12} /> {isMobile ? '' : 'Import'}
             </button>
           </label>
           <button
             onClick={handleExportSettings}
-            className="flex items-center gap-1 px-3 py-1.5 rounded"
-            style={{ background: "var(--secondary)", border: "1px solid var(--border)", fontSize: 10, color: "var(--muted-foreground)", cursor: "pointer" }}
+            className="flex items-center justify-center gap-1 px-2 sm:px-3 py-1.5 rounded flex-1 sm:flex-none"
+            style={{ background: "var(--secondary)", border: "1px solid var(--border)", fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)", cursor: "pointer" }}
           >
-            <Download size={12} /> Export
+            <Download size={isMobile ? 10 : 12} /> {isMobile ? '' : 'Export'}
           </button>
         </div>
       </div>
 
       {!isAdmin && (
-        <div className="rounded p-2.5" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", color: "#ef4444", fontSize: 11 }}>
+        <div className="rounded p-2 sm:p-2.5" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", color: "#ef4444", fontSize: isMobile ? 10 : 11 }}>
           You're viewing in read-only mode. Only Admins can change these settings.
         </div>
       )}
@@ -326,67 +340,69 @@ export function Settings() {
       ) : (
         <>
           {/* System Status Section */}
-          <Section title="System Status (Live)">
-            <SettingRow label="System Operation">
-              <StatusBadge label="Status" value={systemOperation} warning={0.5} critical={0.8} unit="" />
+          <Section title="System Status (Live)" isMobile={isMobile}>
+            <SettingRow label="System Operation" isMobile={isMobile}>
+              <StatusBadge label="Status" value={systemOperation} warning={0.5} critical={0.8} unit="" isMobile={isMobile} />
             </SettingRow>
-            <SettingRow label="Current Recovery">
+            <SettingRow label="Current Recovery" isMobile={isMobile}>
               <StatusBadge
                 label="Recovery"
                 value={currentRecovery}
                 warning={parseFloat(form.lowRecoveryWarn)}
                 critical={parseFloat(form.lowRecoveryWarn) - 5}
                 unit="%"
+                isMobile={isMobile}
               />
             </SettingRow>
-            <SettingRow label="Current Dosing Rate">
-              <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: '#a78bfa' }}>
+            <SettingRow label="Current Dosing Rate" isMobile={isMobile}>
+              <span style={{ fontSize: isMobile ? 10 : 11, fontFamily: 'var(--font-mono)', color: '#a78bfa' }}>
                 {currentDosing.toFixed(2)} mg/L
               </span>
             </SettingRow>
-            <SettingRow label="Filter Delta P">
-              <StatusBadge label="ΔP" value={filterDelta} warning={parseFloat(form.filterDpWarn)} critical={parseFloat(form.filterDpCrit)} unit="bar" />
+            <SettingRow label="Filter Delta P" isMobile={isMobile}>
+              <StatusBadge label="ΔP" value={filterDelta} warning={parseFloat(form.filterDpWarn)} critical={parseFloat(form.filterDpCrit)} unit="bar" isMobile={isMobile} />
             </SettingRow>
-            <SettingRow label="Last Sensor Update">
-              <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--muted-foreground)' }}>
+            <SettingRow label="Last Sensor Update" isMobile={isMobile}>
+              <span style={{ fontSize: isMobile ? 10 : 11, fontFamily: 'var(--font-mono)', color: 'var(--muted-foreground)' }}>
                 {lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--'}
               </span>
             </SettingRow>
             {settingsMeta?.updatedAt && (
-              <SettingRow label="Settings Last Saved">
-                <span style={{ fontSize: 11, fontFamily: 'var(--font-mono)', color: 'var(--muted-foreground)' }}>
+              <SettingRow label="Settings Last Saved" isMobile={isMobile}>
+                <span style={{ fontSize: isMobile ? 10 : 11, fontFamily: 'var(--font-mono)', color: 'var(--muted-foreground)' }}>
                   {format(new Date(settingsMeta.updatedAt), 'yyyy-MM-dd HH:mm:ss')}
                 </span>
               </SettingRow>
             )}
           </Section>
 
-          <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
+          {/* Grid - Single column on mobile, 2 columns on desktop */}
+          <div className="grid gap-3 sm:gap-4" style={{ gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr" }}>
 
             {/* Plant Configuration */}
-            <Section title="Plant Configuration">
-              <SettingRow label="Plant Name" desc="Display name for the facility">
-                <input value={form.plantName} onChange={set("plantName")} disabled={!isAdmin} style={{ ...inputStyle, width: 220 }} />
+            <Section title="Plant Configuration" isMobile={isMobile}>
+              <SettingRow label="Plant Name" desc="Display name for the facility" isMobile={isMobile}>
+                <input value={form.plantName} onChange={set("plantName")} disabled={!isAdmin} style={{ ...inputStyle }} />
               </SettingRow>
-              <SettingRow label="Operator ID" desc="Licensed operator number">
-                <input value={form.operatorId} onChange={set("operatorId")} disabled={!isAdmin} style={{ ...monoInput, width: 180 }} />
+              <SettingRow label="Operator ID" desc="Licensed operator number" isMobile={isMobile}>
+                <input value={form.operatorId} onChange={set("operatorId")} disabled={!isAdmin} style={{ ...monoInput }} />
               </SettingRow>
-              <SettingRow label="Production Target" desc="Daily target in m³">
+              <SettingRow label="Production Target" desc="Daily target in m³" isMobile={isMobile}>
                 <div className="flex items-center gap-1">
-                  <input value={form.productionTarget} onChange={set("productionTarget")} disabled={!isAdmin} style={{ ...monoInput, width: 80 }} />
-                  <span style={{ fontSize: 10, color: "var(--muted-foreground)" }}>m³/day</span>
+                  <input value={form.productionTarget} onChange={set("productionTarget")} disabled={!isAdmin} style={{ ...monoInput, width: isMobile ? '60%' : 80 }} />
+                  <span style={{ fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)" }}>m³/day</span>
                 </div>
               </SettingRow>
-              <SettingRow label="Recovery Target" desc="System recovery percentage">
+              <SettingRow label="Recovery Target" desc="System recovery percentage" isMobile={isMobile}>
                 <div className="flex items-center gap-1">
-                  <input value={form.recoveryTarget} onChange={set("recoveryTarget")} disabled={!isAdmin} style={{ ...monoInput, width: 60 }} />
-                  <span style={{ fontSize: 10, color: "var(--muted-foreground)" }}>%</span>
+                  <input value={form.recoveryTarget} onChange={set("recoveryTarget")} disabled={!isAdmin} style={{ ...monoInput, width: isMobile ? '50%' : 60 }} />
+                  <span style={{ fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)" }}>%</span>
                 </div>
               </SettingRow>
             </Section>
 
             {/* Alert Thresholds */}
-            <Section title="Alert Thresholds">
+            <Section title="Alert Thresholds" isMobile={isMobile}>
               {[
                 { label: "Filter ΔP Warning", key: "filterDpWarn", unit: "bar" },
                 { label: "Filter ΔP Critical", key: "filterDpCrit", unit: "bar" },
@@ -395,64 +411,65 @@ export function Settings() {
                 { label: "Min Dosing Rate", key: "minDosing", unit: "mg/L" },
                 { label: "Max Dosing Rate", key: "maxDosing", unit: "mg/L" },
               ].map(t => (
-                <SettingRow key={t.key} label={t.label}>
+                <SettingRow key={t.key} label={t.label} isMobile={isMobile}>
                   <div className="flex items-center gap-1">
-                    <input value={form[t.key]} onChange={set(t.key)} disabled={!isAdmin} style={{ ...monoInput, width: 70 }} />
-                    <span style={{ fontSize: 10, color: "var(--muted-foreground)" }}>{t.unit}</span>
+                    <input value={form[t.key]} onChange={set(t.key)} disabled={!isAdmin} style={{ ...monoInput, width: isMobile ? '50%' : 70 }} />
+                    <span style={{ fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)" }}>{t.unit}</span>
                   </div>
                 </SettingRow>
               ))}
             </Section>
 
-            {/* ✅ FIXED: User Management - Uses React Router Link */}
+            {/* User Management */}
             <Section
               title="User Management"
+              isMobile={isMobile}
               action={
                 <Link 
                   to="/app/user" 
-                  style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, color: "#0ea5e9", textDecoration: "none" }}
+                  style={{ display: "flex", alignItems: "center", gap: 4, fontSize: isMobile ? 9 : 10, color: "#0ea5e9", textDecoration: "none" }}
                 >
-                  Open <ExternalLink size={11} />
+                  Open <ExternalLink size={isMobile ? 10 : 11} />
                 </Link>
               }
             >
-              <div className="flex flex-col items-center justify-center gap-2" style={{ padding: "24px 0", color: "var(--muted-foreground)" }}>
-                <Users size={22} style={{ opacity: 0.4 }} />
-                <p style={{ fontSize: 11, textAlign: "center" }}>
+              <div className="flex flex-col items-center justify-center gap-2" style={{ padding: isMobile ? "16px 0" : "24px 0", color: "var(--muted-foreground)" }}>
+                <Users size={isMobile ? 18 : 22} style={{ opacity: 0.4 }} />
+                <p style={{ fontSize: isMobile ? 10 : 11, textAlign: "center" }}>
                   User accounts, roles, and access are managed on the dedicated User Management page.
                 </p>
               </div>
             </Section>
 
             {/* System Information */}
-            <Section title="System Information">
-              <SettingRow label="Environment">
-                <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "#0ea5e9" }}>
+            <Section title="System Information" isMobile={isMobile}>
+              <SettingRow label="Environment" isMobile={isMobile}>
+                <span style={{ fontSize: isMobile ? 10 : 11, fontFamily: "var(--font-mono)", color: "#0ea5e9" }}>
                   {systemInfo?.environment ?? '—'}
                 </span>
               </SettingRow>
-              <SettingRow label="Server Uptime">
-                <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "#0ea5e9" }}>
+              <SettingRow label="Server Uptime" isMobile={isMobile}>
+                <span style={{ fontSize: isMobile ? 10 : 11, fontFamily: "var(--font-mono)", color: "#0ea5e9" }}>
                   {systemInfo?.uptime != null ? formatUptime(systemInfo.uptime) : '—'}
                 </span>
               </SettingRow>
-              <SettingRow label="MQTT Connection">
-                <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: mqttStatus?.connected ? "#22c55e" : "#ef4444" }}>
+              <SettingRow label="MQTT Connection" isMobile={isMobile}>
+                <span style={{ fontSize: isMobile ? 10 : 11, fontFamily: "var(--font-mono)", color: mqttStatus?.connected ? "#22c55e" : "#ef4444" }}>
                   {mqttStatus ? (mqttStatus.connected ? 'Connected' : 'Disconnected') : '—'}
                 </span>
               </SettingRow>
-              <SettingRow label="Broker">
-                <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)" }}>
+              <SettingRow label="Broker" isMobile={isMobile}>
+                <span style={{ fontSize: isMobile ? 10 : 11, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)" }}>
                   {mqttStatus?.broker ?? '—'}
                 </span>
               </SettingRow>
-              <SettingRow label="Data Points Received">
-                <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)" }}>
+              <SettingRow label="Data Points Received" isMobile={isMobile}>
+                <span style={{ fontSize: isMobile ? 10 : 11, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)" }}>
                   {mqttStatus?.dataPoints?.toLocaleString() ?? '—'}
                 </span>
               </SettingRow>
-              <SettingRow label="Server Timestamp">
-                <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)" }}>
+              <SettingRow label="Server Timestamp" isMobile={isMobile}>
+                <span style={{ fontSize: isMobile ? 10 : 11, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)" }}>
                   {systemInfo?.timestamp ? format(new Date(systemInfo.timestamp), 'yyyy-MM-dd HH:mm:ss') : '—'}
                 </span>
               </SettingRow>
@@ -461,19 +478,19 @@ export function Settings() {
 
           {/* Actions */}
           {isAdmin && (
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-col sm:flex-row justify-end gap-2">
               <button
                 onClick={handleReset}
-                className="px-4 py-2 rounded"
-                style={{ background: "var(--secondary)", border: "1px solid var(--border)", fontSize: 11, color: "var(--muted-foreground)", cursor: "pointer" }}
+                className="px-3 sm:px-4 py-2 rounded w-full sm:w-auto"
+                style={{ background: "var(--secondary)", border: "1px solid var(--border)", fontSize: isMobile ? 10 : 11, color: "var(--muted-foreground)", cursor: "pointer" }}
               >
                 Discard Changes
               </button>
               <button
                 onClick={handleSave}
                 disabled={saving}
-                className="px-4 py-2 rounded"
-                style={{ background: saving ? "var(--muted)" : "#0ea5e9", color: saving ? "var(--muted-foreground)" : "#020810", fontSize: 11, fontWeight: 600, border: "none", cursor: saving ? "not-allowed" : "pointer" }}
+                className="px-3 sm:px-4 py-2 rounded w-full sm:w-auto"
+                style={{ background: saving ? "var(--muted)" : "#0ea5e9", color: saving ? "var(--muted-foreground)" : "#020810", fontSize: isMobile ? 10 : 11, fontWeight: 600, border: "none", cursor: saving ? "not-allowed" : "pointer" }}
               >
                 {saving ? 'Saving…' : 'Save Changes'}
               </button>

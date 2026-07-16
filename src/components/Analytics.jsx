@@ -1,5 +1,6 @@
-// components/Analytics.jsx
-import React, { useState, useRef, useMemo } from "react";
+// components/Analytics.jsx - FULLY MOBILE RESPONSIVE
+
+import React, { useState, useRef, useMemo, useEffect } from "react";
 import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell
@@ -40,7 +41,7 @@ function Toast({ toast }) {
     <div style={{
       position: "fixed", bottom: 20, right: 20, zIndex: 999,
       background: "var(--card)", border: "1px solid var(--border)",
-      borderRadius: 8, padding: "10px 14px", minWidth: 240, maxWidth: 280,
+      borderRadius: 8, padding: "10px 14px", minWidth: 200, maxWidth: 280,
       boxShadow: "0 2px 12px rgba(0,0,0,0.1)",
       display: "flex", alignItems: "flex-start", gap: 8,
       opacity: toast.visible ? 1 : 0, transition: "opacity 0.3s",
@@ -91,29 +92,29 @@ function useToast() {
 }
 
 // ===================== REPORT CARD =====================
-function ReportCard({ title, items, onExport, icon: Icon }) {
+function ReportCard({ title, items, onExport, icon: Icon, isMobile }) {
   return (
-    <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          {Icon && <Icon size={14} style={{ color: "var(--muted-foreground)" }} />}
-          <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>{title}</span>
+    <div className="rounded p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+      <div className="flex items-center justify-between mb-2 sm:mb-3">
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          {Icon && <Icon size={isMobile ? 12 : 14} style={{ color: "var(--muted-foreground)" }} />}
+          <span style={{ fontSize: isMobile ? 10 : 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>{title}</span>
         </div>
         <button
           onClick={onExport}
           className="flex items-center gap-1"
-          style={{ fontSize: 9, color: "#0ea5e9", cursor: "pointer", background: "none", border: "none", padding: 0 }}
+          style={{ fontSize: isMobile ? 8 : 9, color: "#0ea5e9", cursor: "pointer", background: "none", border: "none", padding: 0 }}
         >
-          <Download size={10} />Export
+          <Download size={isMobile ? 8 : 10} />{!isMobile && "Export"}
         </button>
       </div>
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-1.5 sm:gap-2">
         {items.map((item, idx) => (
-          <div key={idx} className="flex items-center justify-between py-1" style={{ borderBottom: "1px solid var(--border)" }}>
-            <span style={{ fontSize: 10, color: "var(--muted-foreground)" }}>{item.label}</span>
+          <div key={idx} className="flex items-center justify-between py-0.5 sm:py-1" style={{ borderBottom: "1px solid var(--border)" }}>
+            <span style={{ fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)" }}>{item.label}</span>
             <div className="flex items-center gap-1">
-              <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", fontWeight: 600, color: item.color || "var(--foreground)" }}>{item.value}</span>
-              {item.unit && <span style={{ fontSize: 9, color: "var(--muted-foreground)" }}>{item.unit}</span>}
+              <span style={{ fontSize: isMobile ? 10 : 11, fontFamily: "var(--font-mono)", fontWeight: 600, color: item.color || "var(--foreground)" }}>{item.value}</span>
+              {item.unit && <span style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)" }}>{item.unit}</span>}
             </div>
           </div>
         ))}
@@ -130,6 +131,15 @@ export function Analytics() {
   const { sensorData, getValue, getHistory, lastUpdate } = useData();
   const [period, setPeriod] = useState("Monthly");
   const { toast, showToast } = useToast();
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Mobile detection
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   // Get real data
   const feedFlow = getValue('RO5-FEEDFlow') || 0;
@@ -142,16 +152,9 @@ export function Analytics() {
   const stage2Delta = getValue('RO5-Stage2Delta') || 0;
   const filterDeltaP = getValue('RO5-MediaFilterDeltaP') || 0;
 
-  // === FIX 1: Recovery target changed from 78% to 75% ===
   const RECOVERY_TARGET = 75;
-
-  // === FIX 2: Dosing Rate set to 2.66 mg/L ===
   const DOSING_RATE = 2.66;
-
-  // === FIX 3: Total Output uses PERMEATE (Product Water) ===
   const totalOutput = permeateFlow * 24 * 30;
-
-  // === FIX 4: Stage 2 Delta P instead of Filter Delta P ===
   const displayStage2Delta = stage2Delta;
 
   // Get history
@@ -162,29 +165,23 @@ export function Analytics() {
   // Calculate metrics
   const metrics = useMemo(() => {
     const now = new Date();
-    const today = new Date();
     const weekAgo = subDays(now, 7);
     const monthAgo = subDays(now, 30);
 
-    // Daily totals using PERMEATE
     const todayData = permeateHistory.filter(d => new Date(d.time) >= new Date(now.setHours(0,0,0,0)));
     const dailyTotal = todayData.reduce((sum, d) => sum + d.value, 0);
     
-    // Weekly totals using PERMEATE
     const weekData = permeateHistory.filter(d => new Date(d.time) >= weekAgo);
     const weeklyTotal = weekData.reduce((sum, d) => sum + d.value, 0);
     
-    // Monthly totals using PERMEATE
     const monthData = permeateHistory.filter(d => new Date(d.time) >= monthAgo);
     const monthlyTotal = monthData.reduce((sum, d) => sum + d.value, 0);
 
-    // Daily recovery average
     const recoveryToday = recoveryHistory.filter(d => new Date(d.time) >= new Date(now.setHours(0,0,0,0)));
     const recoveryAvg = recoveryToday.length > 0 
       ? recoveryToday.reduce((sum, d) => sum + d.value, 0) / recoveryToday.length 
       : recovery;
 
-    // Peak day (last 30 days)
     const dailyTotals = {};
     permeateHistory.forEach(d => {
       const date = format(new Date(d.time), 'yyyy-MM-dd');
@@ -212,11 +209,10 @@ export function Analytics() {
     };
   }, [permeateHistory, recoveryHistory, feedFlow, permeateFlow, concentrateFlow, recovery, roPressure, pureWaterEC, stage1Delta, stage2Delta, filterDeltaP]);
 
-  // === FIX 5: Update KPIs ===
   const kpis = [
     { label: "System Recovery", value: metrics.recovery, color: metrics.recovery >= RECOVERY_TARGET ? COLORS.success : COLORS.warning },
-    { label: "System Runtime", value: 98, color: COLORS.success }, // Changed from Filter Health
-    { label: "Sensor Accuracy", value: 95, color: COLORS.primary }, // Changed from RO Pressure
+    { label: "System Runtime", value: 98, color: COLORS.success },
+    { label: "Sensor Accuracy", value: 95, color: COLORS.primary },
     { label: "Water Quality", value: 95, color: COLORS.success },
   ];
 
@@ -271,7 +267,7 @@ export function Analytics() {
       return {
         month: monthName,
         recovery: recoveryVal,
-        target: RECOVERY_TARGET // === FIX: Changed from 78 to 75 ===
+        target: RECOVERY_TARGET
       };
     });
   }, [metrics.recoveryAvg, recoveryHistory]);
@@ -320,30 +316,30 @@ export function Analytics() {
   }
 
   return (
-    <div className="flex flex-col gap-4 p-4 overflow-auto h-full" style={{ scrollbarWidth: "none" }}>
+    <div className="flex flex-col gap-3 sm:gap-4 p-2 sm:p-4 overflow-auto h-full" style={{ scrollbarWidth: "none" }}>
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
         <div>
-          <h2 style={{ fontSize: 16, fontWeight: 700, color: "var(--foreground)" }}>
-            <Activity size={18} style={{ display: 'inline', marginRight: 8 }} />
+          <h2 style={{ fontSize: isMobile ? 14 : 16, fontWeight: 700, color: "var(--foreground)" }}>
+            <Activity size={isMobile ? 14 : 18} style={{ display: 'inline', marginRight: 6 }} />
             Analytics & Reports
           </h2>
-          <p style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 2 }}>
+          <p style={{ fontSize: isMobile ? 10 : 11, color: "var(--muted-foreground)", marginTop: 2 }}>
             Real-time analytics • Last updated: {lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--'}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <span style={{ fontSize: 10, color: "var(--muted-foreground)" }}>
+          <span style={{ fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)" }}>
             {permeateHistory.length} data points
           </span>
         </div>
       </div>
 
       {/* Period selector */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span style={{ fontSize: isMobile ? 10 : 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
           Analytics & Reports
         </span>
         <div className="flex-1" />
@@ -353,57 +349,64 @@ export function Analytics() {
               key={p}
               onClick={() => setPeriod(p)}
               style={{
-                padding: "5px 12px", fontSize: 10, cursor: "pointer",
+                padding: isMobile ? "4px 10px" : "5px 12px", 
+                fontSize: isMobile ? 9 : 10, 
+                cursor: "pointer",
                 fontWeight: period === p ? 600 : 400,
                 color: period === p ? "#020810" : "var(--muted-foreground)",
                 background: period === p ? "#0ea5e9" : "var(--card)",
-                borderRight: "1px solid var(--border)", border: "none",
+                borderRight: "1px solid var(--border)", 
+                border: "none",
               }}
             >
-              {p}
+              {isMobile && p !== "Monthly" ? p.charAt(0) : p}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Summary cards with real data - FIXED */}
-      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+      {/* Summary cards - Responsive */}
+      <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)" }}>
         <ReportCard
-          title="Production Summary"
+          title="Production"
           icon={Droplet}
+          isMobile={isMobile}
           items={[
             { label: "Total Output", value: Math.round(totalOutput).toLocaleString(), unit: "m³", color: "#06b6d4" },
-            { label: "Avg Daily Flow", value: Math.round(metrics.dailyAvg).toLocaleString(), unit: "m³/day", color: "#0ea5e9" },
+            { label: "Avg Daily", value: Math.round(metrics.dailyAvg).toLocaleString(), unit: "m³/day", color: "#0ea5e9" },
             { label: "Peak Day", value: Math.round(metrics.peakDay).toLocaleString(), unit: "m³", color: "#22c55e" },
             { label: "Current Flow", value: metrics.permeateFlow.toFixed(1), unit: "m³/h", color: "#f59e0b" },
           ]}
           onExport={() => handleExport("Production Summary", "production_summary.csv")}
         />
         <ReportCard
-          title="Recovery Summary"
+          title="Recovery"
           icon={Activity}
+          isMobile={isMobile}
           items={[
-            { label: "Current Recovery", value: metrics.recovery.toFixed(1), unit: "%", color: metrics.recovery >= RECOVERY_TARGET ? "#22c55e" : "#eab308" },
+            { label: "Current", value: metrics.recovery.toFixed(1), unit: "%", color: metrics.recovery >= RECOVERY_TARGET ? "#22c55e" : "#eab308" },
             { label: "Daily Avg", value: metrics.recoveryAvg.toFixed(1), unit: "%", color: "#0ea5e9" },
             { label: "Target", value: RECOVERY_TARGET.toFixed(1), unit: "%", color: "#eab308" },
-            { label: "Status", value: metrics.recovery >= RECOVERY_TARGET ? "ON TARGET" : "BELOW TARGET", unit: "", color: metrics.recovery >= RECOVERY_TARGET ? "#22c55e" : "#ef4444" },
+            { label: "Status", value: metrics.recovery >= RECOVERY_TARGET ? "ON TARGET" : "BELOW", unit: "", color: metrics.recovery >= RECOVERY_TARGET ? "#22c55e" : "#ef4444" },
           ]}
           onExport={() => handleExport("Recovery Summary", "recovery_summary.csv")}
         />
         <ReportCard
-          title="Chemical Usage"
+          title="Chemical"
           icon={Filter}
+          isMobile={isMobile}
           items={[
-            { label: "Daily Consumption", value: ((metrics.permeateFlow * 24 * DOSING_RATE) / 1000).toFixed(1), unit: "kg", color: "#a78bfa" },
-            { label: "Weekly Consumption", value: ((metrics.permeateFlow * 24 * 7 * DOSING_RATE) / 1000).toFixed(1), unit: "kg", color: "#8b5cf6" },
-            { label: "Monthly Consumption", value: ((metrics.permeateFlow * 24 * 30 * DOSING_RATE) / 1000).toFixed(0), unit: "kg", color: "#7c3aed" },
+            { label: "Daily", value: ((metrics.permeateFlow * 24 * DOSING_RATE) / 1000).toFixed(1), unit: "kg", color: "#a78bfa" },
+            { label: "Weekly", value: ((metrics.permeateFlow * 24 * 7 * DOSING_RATE) / 1000).toFixed(1), unit: "kg", color: "#8b5cf6" },
+            { label: "Monthly", value: ((metrics.permeateFlow * 24 * 30 * DOSING_RATE) / 1000).toFixed(0), unit: "kg", color: "#7c3aed" },
             { label: "Dosing Rate", value: DOSING_RATE.toFixed(2), unit: "mg/L", color: "#a78bfa" },
           ]}
           onExport={() => handleExport("Chemical Usage", "chemical_usage.csv")}
         />
         <ReportCard
-          title="Maintenance Summary"
+          title="Maintenance"
           icon={Wrench}
+          isMobile={isMobile}
           items={[
             { label: "Stage 1 ΔP", value: metrics.stage1Delta.toFixed(2), unit: "bar", color: metrics.stage1Delta > 0.5 ? "#ef4444" : "#22c55e" },
             { label: "Stage 2 ΔP", value: metrics.stage2Delta.toFixed(2), unit: "bar", color: metrics.stage2Delta > 0.5 ? "#eab308" : "#22c55e" },
@@ -413,15 +416,15 @@ export function Analytics() {
         />
       </div>
 
-      {/* Charts grid */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: "2fr 1fr" }}>
-        <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-          <div className="flex items-center justify-between mb-3">
-            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+      {/* Charts grid - Responsive */}
+      <div className="grid gap-3 sm:gap-4" style={{ gridTemplateColumns: isMobile ? "1fr" : "2fr 1fr" }}>
+        <div className="rounded p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+          <div className="flex items-center justify-between mb-2 sm:mb-3">
+            <span style={{ fontSize: isMobile ? 10 : 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
               Production & Recovery — {period} Trend
             </span>
           </div>
-          <ResponsiveContainer width="100%" height={190}>
+          <ResponsiveContainer width="100%" height={isMobile ? 150 : 190}>
             <AreaChart data={monthlyProduction} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
               <defs>
                 <linearGradient id="aGrad" x1="0" y1="0" x2="0" y2="1">
@@ -430,8 +433,8 @@ export function Analytics() {
                 </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" />
-              <XAxis dataKey="month" tick={{ fontSize: 9, fill: "#4d7a9e" }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} axisLine={false} tickLine={false} tickFormatter={v => (v / 1000).toFixed(0) + "k"} />
+              <XAxis dataKey="month" tick={{ fontSize: isMobile ? 7 : 9, fill: "#4d7a9e" }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: isMobile ? 7 : 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} axisLine={false} tickLine={false} tickFormatter={v => (v / 1000).toFixed(0) + "k"} />
               <Tooltip content={<CustomTooltip />} />
               <Area type="monotone" dataKey="actual" stroke="#06b6d4" strokeWidth={2} fill="url(#aGrad)" name="Actual (m³)" />
               <Line type="monotone" dataKey="target" stroke="#4d7a9e" strokeWidth={1.5} strokeDasharray="4 3" dot={false} name="Target (m³)" />
@@ -439,27 +442,27 @@ export function Analytics() {
           </ResponsiveContainer>
         </div>
 
-        <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-          <div className="mb-3">
-            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+        <div className="rounded p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+          <div className="mb-2 sm:mb-3">
+            <span style={{ fontSize: isMobile ? 10 : 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
               Flow Distribution
             </span>
           </div>
-          <div className="flex flex-col items-center gap-3">
-            <ResponsiveContainer width="100%" height={140}>
+          <div className="flex flex-col items-center gap-2 sm:gap-3">
+            <ResponsiveContainer width="100%" height={isMobile ? 120 : 140}>
               <PieChart>
-                <Pie data={operatingDistribution} cx="50%" cy="50%" innerRadius={38} outerRadius={60} dataKey="value" strokeWidth={0}>
+                <Pie data={operatingDistribution} cx="50%" cy="50%" innerRadius={isMobile ? 28 : 38} outerRadius={isMobile ? 45 : 60} dataKey="value" strokeWidth={0}>
                   {operatingDistribution.map((entry, idx) => <Cell key={idx} fill={entry.color} />)}
                 </Pie>
                 <Tooltip content={<CustomTooltip />} />
               </PieChart>
             </ResponsiveContainer>
-            <div className="grid gap-1.5 w-full" style={{ gridTemplateColumns: "1fr 1fr" }}>
+            <div className="grid gap-1 w-full" style={{ gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr" }}>
               {operatingDistribution.map(d => (
                 <div key={d.name} className="flex items-center gap-1.5">
                   <div style={{ width: 7, height: 7, borderRadius: 1, background: d.color, flexShrink: 0 }} />
-                  <span style={{ fontSize: 9, color: "var(--muted-foreground)", flex: 1 }}>{d.name}</span>
-                  <span style={{ fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--foreground)", fontWeight: 600 }}>{d.value.toFixed(0)}%</span>
+                  <span style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)", flex: 1 }}>{isMobile && d.name.length > 8 ? d.name.substring(0, 8) : d.name}</span>
+                  <span style={{ fontSize: isMobile ? 9 : 10, fontFamily: "var(--font-mono)", color: "var(--foreground)", fontWeight: 600 }}>{d.value.toFixed(0)}%</span>
                 </div>
               ))}
             </div>
@@ -467,42 +470,42 @@ export function Analytics() {
         </div>
       </div>
 
-      {/* Chemical + KPI charts */}
-      <div className="grid gap-4" style={{ gridTemplateColumns: "1fr 1fr" }}>
-        <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-          <div className="flex items-center justify-between mb-3">
-            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
-              Chemical Consumption by Month
+      {/* Chemical + KPI charts - Responsive */}
+      <div className="grid gap-3 sm:gap-4" style={{ gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr" }}>
+        <div className="rounded p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+          <div className="flex items-center justify-between mb-2 sm:mb-3">
+            <span style={{ fontSize: isMobile ? 10 : 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+              Chemical Consumption
             </span>
-            <span style={{ fontSize: 9, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>kg</span>
+            <span style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>kg</span>
           </div>
-          <ResponsiveContainer width="100%" height={150}>
+          <ResponsiveContainer width="100%" height={isMobile ? 120 : 150}>
             <BarChart data={chemicalData} margin={{ top: 4, right: 4, left: -15, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" vertical={false} />
-              <XAxis dataKey="month" tick={{ fontSize: 9, fill: "#4d7a9e" }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} axisLine={false} tickLine={false} />
+              <XAxis dataKey="month" tick={{ fontSize: isMobile ? 7 : 9, fill: "#4d7a9e" }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: isMobile ? 7 : 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} axisLine={false} tickLine={false} />
               <Tooltip content={<CustomTooltip />} />
               <Bar dataKey="consumption" fill="#a78bfa" radius={[3, 3, 0, 0]} name="Consumption (kg)" />
             </BarChart>
           </ResponsiveContainer>
         </div>
 
-        <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-          <div className="flex items-center justify-between mb-3">
-            <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+        <div className="rounded p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+          <div className="flex items-center justify-between mb-2 sm:mb-3">
+            <span style={{ fontSize: isMobile ? 10 : 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
               System Efficiency KPIs
             </span>
           </div>
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-2 sm:gap-3">
             {kpis.map((kpi, idx) => (
               <div key={idx}>
                 <div className="flex justify-between mb-1">
-                  <span style={{ fontSize: 10, color: "var(--muted-foreground)" }}>{kpi.label}</span>
-                  <span style={{ fontSize: 10, fontFamily: "var(--font-mono)", fontWeight: 700, color: kpi.color }}>
+                  <span style={{ fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)" }}>{kpi.label}</span>
+                  <span style={{ fontSize: isMobile ? 9 : 10, fontFamily: "var(--font-mono)", fontWeight: 700, color: kpi.color }}>
                     {kpi.value.toFixed(1)}%
                   </span>
                 </div>
-                <div style={{ height: 6, background: "var(--secondary)", borderRadius: 3, overflow: "hidden" }}>
+                <div style={{ height: isMobile ? 4 : 6, background: "var(--secondary)", borderRadius: 3, overflow: "hidden" }}>
                   <div style={{ width: `${Math.min(kpi.value, 100)}%`, height: "100%", background: kpi.color, borderRadius: 3 }} />
                 </div>
               </div>

@@ -1,4 +1,5 @@
-// components/ProductionMonitoring.jsx
+// components/ProductionMonitoring.jsx - FULLY MOBILE RESPONSIVE
+
 import React, { useState, useMemo, useEffect } from "react";
 import {
   AreaChart, Area, LineChart, Line, BarChart, Bar,
@@ -26,24 +27,24 @@ const CustomTooltip = ({ active, payload, label }) => {
 };
 
 // ===================== STAT CARD =====================
-function StatCard({ label, value, unit, sub, color, trend }) {
+function StatCard({ label, value, unit, sub, color, trend, isMobile }) {
   const TrendIcon = trend > 0 ? TrendingUp : trend < 0 ? TrendingDown : null;
   const trendColor = trend > 0 ? "#22c55e" : trend < 0 ? "#ef4444" : "var(--muted-foreground)";
 
   return (
-    <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-      <div style={{ fontSize: 9, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
+    <div className="rounded p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+      <div style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>
         {label}
       </div>
       <div className="flex items-end gap-1">
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: 24, fontWeight: 700, color: color || "var(--foreground)", lineHeight: 1 }}>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: isMobile ? 18 : 24, fontWeight: 700, color: color || "var(--foreground)", lineHeight: 1 }}>
           {value}
         </span>
-        <span style={{ fontSize: 10, color: "var(--muted-foreground)", marginBottom: 2 }}>{unit}</span>
+        <span style={{ fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)", marginBottom: 2 }}>{unit}</span>
       </div>
       {sub && (
-        <div style={{ fontSize: 10, color: "#22c55e", marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
-          {TrendIcon && <TrendIcon size={9} style={{ color: trendColor }} />}
+        <div style={{ fontSize: isMobile ? 8 : 10, color: "#22c55e", marginTop: 4, display: "flex", alignItems: "center", gap: 4 }}>
+          {TrendIcon && <TrendIcon size={isMobile ? 8 : 9} style={{ color: trendColor }} />}
           {sub}
         </div>
       )}
@@ -52,16 +53,16 @@ function StatCard({ label, value, unit, sub, color, trend }) {
 }
 
 // ===================== CHART PANEL =====================
-function ChartPanel({ title, meta, children, action }) {
+function ChartPanel({ title, meta, children, action, isMobile }) {
   return (
-    <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-        <span style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+    <div className="rounded p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 gap-2">
+        <span style={{ fontSize: isMobile ? 10 : 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
           {title}
         </span>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           {meta && (
-            <span style={{ fontSize: 9, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>
+            <span style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>
               {meta}
             </span>
           )}
@@ -77,6 +78,15 @@ function ChartPanel({ title, meta, children, action }) {
 export function ProductionMonitoring() {
   const { sensorData, getValue, getHistory, lastUpdate } = useData();
   const [timeRange, setTimeRange] = useState('24h');
+  const [isMobile, setIsMobile] = useState(false);
+
+  // Mobile detection
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   const feedFlow = getValue('RO5-FEEDFlow') || 0;
   const permeateFlow = getValue('RO5-Permeateflow') || 0;
@@ -85,15 +95,9 @@ export function ProductionMonitoring() {
   const roPressure = getValue('RO5-ROPressure') || 0;
   const pureWaterEC = getValue('RO5-PureWaterEc') || 0;
 
-  // Used only for the short-term "hourly" chart — a live view of the most
-  // recent readings is fine from the in-browser buffer.
   const feedHistory = getHistory('RO5-FEEDFlow') || [];
 
-  // ===================== REAL PRODUCTION TOTALS (from backend) =====================
-  // Daily/weekly/monthly/yearly totals now come from Postgres, computed by
-  // properly integrating flow rate over real elapsed time — NOT by filtering
-  // whatever small buffer of readings happens to be sitting in this browser
-  // tab's memory (which is why all three used to show the same number).
+  // ===================== REAL PRODUCTION TOTALS =====================
   const [productionSummary, setProductionSummary] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [summaryError, setSummaryError] = useState(null);
@@ -116,8 +120,6 @@ export function ProductionMonitoring() {
 
   useEffect(() => {
     fetchProductionSummary();
-    // Refresh periodically — this is cheap since it's a single aggregate
-    // query, not a live per-message subscription.
     const interval = setInterval(fetchProductionSummary, 60000);
     return () => clearInterval(interval);
   }, []);
@@ -126,10 +128,9 @@ export function ProductionMonitoring() {
   const weeklyTotal = productionSummary?.permeate?.weekly ?? 0;
   const monthlyTotal = productionSummary?.permeate?.monthly ?? 0;
   const yearlyTotal = productionSummary?.permeate?.yearly ?? 0;
-
   const feedDailyTotal = productionSummary?.feed?.daily ?? 0;
 
-  // ===================== HOURLY DATA (live buffer, fine as a recent-trend view) =====================
+  // ===================== HOURLY DATA =====================
   const hourlyData = useMemo(() => {
     if (feedHistory.length === 0) return [];
 
@@ -156,7 +157,7 @@ export function ProductionMonitoring() {
 
   const currentFlow = feedHistory.length > 0 ? feedHistory[feedHistory.length - 1]?.value || feedFlow : feedFlow;
 
-  // ===================== TRENDS (still fine from live buffer — short-term signal) =====================
+  // ===================== TRENDS =====================
   const flowTrend = useMemo(() => {
     if (feedHistory.length < 2) return 0;
     const recent = feedHistory.slice(-10);
@@ -172,7 +173,7 @@ export function ProductionMonitoring() {
     return (permeateFlow / feedFlow) * 100;
   }, [feedFlow, permeateFlow]);
 
-  // ===================== PRODUCTION TARGETS (now backed by real totals) =====================
+  // ===================== PRODUCTION TARGETS =====================
   const productionTargets = useMemo(() => {
     const dailyTarget = 4200;
     const weeklyTarget = 29400;
@@ -210,9 +211,9 @@ export function ProductionMonitoring() {
           key={range}
           onClick={() => setTimeRange(range)}
           style={{
-            padding: '2px 10px',
+            padding: isMobile ? '2px 8px' : '2px 10px',
             borderRadius: 3,
-            fontSize: 9,
+            fontSize: isMobile ? 8 : 9,
             background: timeRange === range ? '#0ea5e9' : 'var(--secondary)',
             color: timeRange === range ? 'white' : 'var(--muted-foreground)',
             border: '1px solid var(--border)',
@@ -226,33 +227,34 @@ export function ProductionMonitoring() {
   );
 
   return (
-    <div className="flex flex-col gap-4 p-4 overflow-auto h-full" >
+    <div className="flex flex-col gap-3 sm:gap-4 p-2 sm:p-4 overflow-auto h-full">
+      
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
         <div>
-          <h2 style={{ fontSize: 16, fontWeight: 700, color: "var(--foreground)" }}>
+          <h2 style={{ fontSize: isMobile ? 14 : 16, fontWeight: 700, color: "var(--foreground)" }}>
             Production Monitoring
           </h2>
-          <p style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 2 }}>
+          <p style={{ fontSize: isMobile ? 10 : 11, color: "var(--muted-foreground)", marginTop: 2 }}>
             Real-time production data • Last updated: {lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--'}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Clock size={14} style={{ color: "var(--muted-foreground)" }} />
-          <span style={{ fontSize: 10, color: "var(--muted-foreground)" }}>
-            {summaryLoading ? 'Loading totals…' : summaryError ? 'Totals unavailable' : 'Totals from database'}
+          <Clock size={isMobile ? 12 : 14} style={{ color: "var(--muted-foreground)" }} />
+          <span style={{ fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)" }}>
+            {summaryLoading ? 'Loading…' : summaryError ? 'Totals unavailable' : 'From database'}
           </span>
         </div>
       </div>
 
       {summaryError && (
-        <div className="rounded p-2.5" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", color: "#ef4444", fontSize: 11 }}>
-          Couldn't load production totals from the server ({summaryError}). Showing live sensor values only where available.
+        <div className="rounded p-2" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", color: "#ef4444", fontSize: isMobile ? 10 : 11 }}>
+          Couldn't load production totals ({summaryError}). Showing live values only.
         </div>
       )}
 
-      {/* KPI row with real data */}
-      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(6, 1fr)" }}>
+      {/* KPI row - Responsive */}
+      <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: isMobile ? "repeat(3, 1fr)" : "repeat(6, 1fr)" }}>
         <StatCard 
           label="Current Flow" 
           value={currentFlow.toFixed(1)} 
@@ -260,57 +262,101 @@ export function ProductionMonitoring() {
           sub={`${flowTrend.toFixed(1)}% vs avg`} 
           color="#0ea5e9"
           trend={flowTrend}
+          isMobile={isMobile}
         />
         <StatCard 
-          label="Today's Output" 
+          label="Today" 
           value={Math.round(dailyTotal).toLocaleString()} 
           unit="m³" 
-          sub={`${((dailyTotal / 4200) * 100).toFixed(1)}% of target`}
+          sub={`${((dailyTotal / 4200) * 100).toFixed(1)}%`}
           color="#06b6d4" 
           trend={((dailyTotal / 4200) * 100) - 100}
+          isMobile={isMobile}
         />
         <StatCard 
-          label="Weekly Output" 
+          label="Weekly" 
           value={Math.round(weeklyTotal).toLocaleString()} 
           unit="m³" 
-          sub={`${((weeklyTotal / 29400) * 100).toFixed(1)}% of target`}
+          sub={`${((weeklyTotal / 29400) * 100).toFixed(1)}%`}
           color="#14b8a6" 
           trend={((weeklyTotal / 29400) * 100) - 100}
+          isMobile={isMobile}
         />
-        <StatCard 
-          label="Monthly Output" 
-          value={Math.round(monthlyTotal).toLocaleString()} 
-          unit="m³" 
-          sub={`${((monthlyTotal / 130200) * 100).toFixed(1)}% of target`}
-          color="#22c55e" 
-          trend={((monthlyTotal / 130200) * 100) - 100}
-        />
-        <StatCard 
-          label="System Recovery" 
-          value={recovery.toFixed(1)} 
-          unit="%" 
-          sub={recovery > 75 ? "Good" : recovery > 65 ? "Caution" : "Needs attention"}
-          color={recovery > 75 ? "#22c55e" : recovery > 65 ? "#eab308" : "#ef4444"}
-          trend={recovery - 75}
-        />
-        <StatCard 
-          label="Efficiency" 
-          value={efficiency.toFixed(1)} 
-          unit="%" 
-          sub={`${(efficiency / 80 * 100).toFixed(1)}% of target`}
-          color="#a78bfa" 
-          trend={efficiency - 80}
-        />
+        {!isMobile && (
+          <>
+            <StatCard 
+              label="Monthly" 
+              value={Math.round(monthlyTotal).toLocaleString()} 
+              unit="m³" 
+              sub={`${((monthlyTotal / 130200) * 100).toFixed(1)}%`}
+              color="#22c55e" 
+              trend={((monthlyTotal / 130200) * 100) - 100}
+              isMobile={isMobile}
+            />
+            <StatCard 
+              label="Recovery" 
+              value={recovery.toFixed(1)} 
+              unit="%" 
+              sub={recovery > 75 ? "Good" : recovery > 65 ? "Caution" : "Check"}
+              color={recovery > 75 ? "#22c55e" : recovery > 65 ? "#eab308" : "#ef4444"}
+              trend={recovery - 75}
+              isMobile={isMobile}
+            />
+            <StatCard 
+              label="Efficiency" 
+              value={efficiency.toFixed(1)} 
+              unit="%" 
+              sub={`${(efficiency / 80 * 100).toFixed(1)}%`}
+              color="#a78bfa" 
+              trend={efficiency - 80}
+              isMobile={isMobile}
+            />
+          </>
+        )}
       </div>
 
-      {/* Hourly flow chart — live recent trend from in-browser buffer */}
+      {/* Mobile additional stats row */}
+      {isMobile && (
+        <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+          <StatCard 
+            label="Monthly" 
+            value={Math.round(monthlyTotal).toLocaleString()} 
+            unit="m³" 
+            sub={`${((monthlyTotal / 130200) * 100).toFixed(1)}%`}
+            color="#22c55e" 
+            trend={((monthlyTotal / 130200) * 100) - 100}
+            isMobile={isMobile}
+          />
+          <StatCard 
+            label="Recovery" 
+            value={recovery.toFixed(1)} 
+            unit="%" 
+            sub={recovery > 75 ? "Good" : "Check"}
+            color={recovery > 75 ? "#22c55e" : "#eab308"}
+            trend={recovery - 75}
+            isMobile={isMobile}
+          />
+          <StatCard 
+            label="Efficiency" 
+            value={efficiency.toFixed(1)} 
+            unit="%" 
+            sub={`${(efficiency / 80 * 100).toFixed(1)}%`}
+            color="#a78bfa" 
+            trend={efficiency - 80}
+            isMobile={isMobile}
+          />
+        </div>
+      )}
+
+      {/* Hourly flow chart */}
       <ChartPanel 
         title="Hourly Flow Rate" 
-        meta={`${timeRange === '24h' ? '24 Hours' : '1 Hour'} · Live buffer`}
+        meta={`${timeRange === '24h' ? '24 Hours' : '1 Hour'}`}
         action={<TimeRangeButtons />}
+        isMobile={isMobile}
       >
         {hourlyData.length > 0 ? (
-          <ResponsiveContainer width="100%" height={190}>
+          <ResponsiveContainer width="100%" height={isMobile ? 150 : 190}>
             <AreaChart data={hourlyData} margin={{ top: 4, right: 4, left: -15, bottom: 0 }}>
               <defs>
                 <linearGradient id="flowGrad" x1="0" y1="0" x2="0" y2="1">
@@ -321,13 +367,13 @@ export function ProductionMonitoring() {
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" />
               <XAxis 
                 dataKey="hour" 
-                tick={{ fontSize: 9, fill: "#4d7a9e" }} 
+                tick={{ fontSize: isMobile ? 7 : 9, fill: "#4d7a9e" }} 
                 axisLine={false} 
                 tickLine={false} 
                 interval={hourlyData.length > 20 ? Math.floor(hourlyData.length / 10) : 0}
               />
               <YAxis 
-                tick={{ fontSize: 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} 
+                tick={{ fontSize: isMobile ? 7 : 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} 
                 axisLine={false} 
                 tickLine={false} 
                 domain={['auto', 'auto']} 
@@ -338,80 +384,117 @@ export function ProductionMonitoring() {
                 stroke="#4d7a9e" 
                 strokeDasharray="4 3" 
                 strokeWidth={1} 
-                label={{ value: "Avg", position: "right", fontSize: 9, fill: "#4d7a9e" }} 
+                label={{ value: "Avg", position: "right", fontSize: isMobile ? 7 : 9, fill: "#4d7a9e" }} 
               />
               <Area type="monotone" dataKey="flow" stroke="#0ea5e9" strokeWidth={2} fill="url(#flowGrad)" name="Flow Rate" />
             </AreaChart>
           </ResponsiveContainer>
         ) : (
-          <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--muted-foreground)' }}>
+          <div style={{ textAlign: 'center', padding: '30px 0', color: 'var(--muted-foreground)' }}>
             <Activity size={24} style={{ opacity: 0.3, marginBottom: 8 }} />
             <p>Waiting for data...</p>
-            <p style={{ fontSize: 10, marginTop: 4 }}>Data will appear once available</p>
           </div>
         )}
       </ChartPanel>
 
-      {/* Production Targets Table — now backed by real integrated totals */}
-      <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>
-          Production Targets — Real Performance (from database)
+      {/* Production Targets Table - Responsive */}
+      <div className="rounded p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+        <div style={{ fontSize: isMobile ? 10 : 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>
+          Production Targets — Real Performance
         </div>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr>
-              {["Period", "Target (m³)", "Actual (m³)", "Variance", "Efficiency", "Status"].map((h) => (
-                <th key={h} style={{ padding: "6px 10px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.08em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
+        
+        {isMobile ? (
+          // Mobile card view
+          <div className="flex flex-col gap-2">
             {productionTargets.map((r, i) => (
-              <tr key={r.period} style={{ background: i % 2 === 0 ? "var(--card)" : "var(--muted)" }}>
-                <td style={{ padding: "7px 10px", fontSize: 11, fontWeight: 500, color: "var(--foreground)", borderBottom: "1px solid var(--border)" }}>
-                  {r.period}
-                </td>
-                <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>
-                  {r.target}
-                </td>
-                <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--foreground)", fontWeight: 600, borderBottom: "1px solid var(--border)" }}>
-                  {r.actual}
-                </td>
-                <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: r.variance.startsWith("+") ? "#22c55e" : r.variance.startsWith("-") ? "#ef4444" : "#0ea5e9", borderBottom: "1px solid var(--border)" }}>
-                  {r.variance}
-                </td>
-                <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: r.statusColor, borderBottom: "1px solid var(--border)" }}>
-                  {r.eff}
-                </td>
-                <td style={{ padding: "7px 10px", borderBottom: "1px solid var(--border)" }}>
+              <div key={r.period} className="rounded p-3" style={{ background: i % 2 === 0 ? "var(--card)" : "var(--muted)", border: "1px solid var(--border)" }}>
+                <div className="flex items-center justify-between mb-1">
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>{r.period}</span>
                   <span style={{ fontSize: 9, fontWeight: 600, color: r.statusColor, background: `${r.statusColor}15`, borderRadius: 3, padding: "1px 8px" }}>
                     {r.status}
                   </span>
-                </td>
-              </tr>
+                </div>
+                <div className="grid grid-cols-2 gap-1">
+                  <div>
+                    <span style={{ fontSize: 8, color: "var(--muted-foreground)" }}>Target</span>
+                    <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)" }}>{r.target}</div>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: 8, color: "var(--muted-foreground)" }}>Actual</span>
+                    <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--foreground)", fontWeight: 600 }}>{r.actual}</div>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: 8, color: "var(--muted-foreground)" }}>Variance</span>
+                    <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: r.variance.startsWith("+") ? "#22c55e" : "#ef4444" }}>{r.variance}</div>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: 8, color: "var(--muted-foreground)" }}>Efficiency</span>
+                    <div style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: r.statusColor }}>{r.eff}</div>
+                  </div>
+                </div>
+              </div>
             ))}
-          </tbody>
-        </table>
+          </div>
+        ) : (
+          // Desktop table view
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
+              <thead>
+                <tr>
+                  {["Period", "Target (m³)", "Actual (m³)", "Variance", "Efficiency", "Status"].map((h) => (
+                    <th key={h} style={{ padding: "6px 10px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.08em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {productionTargets.map((r, i) => (
+                  <tr key={r.period} style={{ background: i % 2 === 0 ? "var(--card)" : "var(--muted)" }}>
+                    <td style={{ padding: "7px 10px", fontSize: 11, fontWeight: 500, color: "var(--foreground)", borderBottom: "1px solid var(--border)" }}>
+                      {r.period}
+                    </td>
+                    <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>
+                      {r.target}
+                    </td>
+                    <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--foreground)", fontWeight: 600, borderBottom: "1px solid var(--border)" }}>
+                      {r.actual}
+                    </td>
+                    <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: r.variance.startsWith("+") ? "#22c55e" : "#ef4444", borderBottom: "1px solid var(--border)" }}>
+                      {r.variance}
+                    </td>
+                    <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: r.statusColor, borderBottom: "1px solid var(--border)" }}>
+                      {r.eff}
+                    </td>
+                    <td style={{ padding: "7px 10px", borderBottom: "1px solid var(--border)" }}>
+                      <span style={{ fontSize: 9, fontWeight: 600, color: r.statusColor, background: `${r.statusColor}15`, borderRadius: 3, padding: "1px 8px" }}>
+                        {r.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
-      {/* Summary stats */}
-      <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
+      {/* Summary stats - Responsive */}
+      <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)" }}>
         {[
-          { label: "Feed Flow", value: feedFlow.toFixed(1), unit: "m³/h", status: feedFlow > 50 ? "Normal" : "Low" },
-          { label: "Permeate Flow", value: permeateFlow.toFixed(1), unit: "m³/h", status: permeateFlow > 30 ? "Normal" : "Low" },
-          { label: "Concentrate Flow", value: concentrateFlow.toFixed(1), unit: "m³/h", status: concentrateFlow > 10 ? "Normal" : "Low" },
-          { label: "RO Pressure", value: roPressure.toFixed(1), unit: "bar", status: roPressure > 10 && roPressure < 16 ? "Normal" : "Check" },
+          { label: "Feed Flow", value: feedFlow.toFixed(1), unit: "m³/h", status: feedFlow > 50 ? "Normal" : "Low", color: feedFlow > 50 ? "#22c55e" : "#eab308" },
+          { label: "Permeate Flow", value: permeateFlow.toFixed(1), unit: "m³/h", status: permeateFlow > 30 ? "Normal" : "Low", color: permeateFlow > 30 ? "#22c55e" : "#eab308" },
+          { label: "Concentrate Flow", value: concentrateFlow.toFixed(1), unit: "m³/h", status: concentrateFlow > 10 ? "Normal" : "Low", color: concentrateFlow > 10 ? "#22c55e" : "#eab308" },
+          { label: "RO Pressure", value: roPressure.toFixed(1), unit: "bar", status: roPressure > 10 && roPressure < 16 ? "Normal" : "Check", color: roPressure > 10 && roPressure < 16 ? "#22c55e" : "#ef4444" },
         ].map(item => (
-          <div key={item.label} className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-            <div style={{ fontSize: 9, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
+          <div key={item.label} className="rounded p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+            <div style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
               {item.label}
             </div>
-            <div style={{ fontSize: 18, fontFamily: "var(--font-mono)", fontWeight: 700, color: "var(--foreground)", marginTop: 2 }}>
-              {item.value} <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>{item.unit}</span>
+            <div style={{ fontSize: isMobile ? 16 : 18, fontFamily: "var(--font-mono)", fontWeight: 700, color: "var(--foreground)", marginTop: 2 }}>
+              {item.value} <span style={{ fontSize: isMobile ? 10 : 12, color: "var(--muted-foreground)" }}>{item.unit}</span>
             </div>
-            <div style={{ fontSize: 9, marginTop: 2, color: item.status === "Normal" ? "#22c55e" : item.status === "Low" ? "#eab308" : "#ef4444" }}>
+            <div style={{ fontSize: isMobile ? 8 : 9, marginTop: 2, color: item.color }}>
               {item.status}
             </div>
           </div>

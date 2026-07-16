@@ -60,7 +60,7 @@ export function Sidebar({ activePage, onNavigate, alertCount = 0 }) {
         {!collapsed && (
           <div>
             <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 700, color: "#0ea5e9", letterSpacing: "0.08em", lineHeight: 1 }}>
-              AQUAOPS
+              AQUASYSTEMTECH
             </div>
             <div style={{ fontSize: 9, color: "var(--muted-foreground)", letterSpacing: "0.12em", lineHeight: 1.2, marginTop: 1 }}>
               WATER MANAGEMENT
