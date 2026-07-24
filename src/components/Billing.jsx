@@ -1,164 +1,248 @@
+// frontend/src/pages/settings/BillingSubscription.jsx
+import { useState, useEffect, useCallback } from 'react';
+import { Check, Search, Filter, Download, Eye } from 'lucide-react';
 
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
 
-import { useState } from 'react';
- 
-const S = {
-  card: { background: '#0D1F30', border: '1px solid #1A3A52', borderRadius: 10, padding: '20px' },
-  label: { fontSize: 10, letterSpacing: '0.12em', color: '#4A8FA8' },
-  btn: (primary) => ({
-    background: primary ? '#00B4D8' : 'transparent',
-    border: `1px solid ${primary ? '#00B4D8' : '#1A3A52'}`,
-    borderRadius: 6, color: primary ? '#07111F' : '#6BA3BC',
-    padding: '8px 18px', cursor: 'pointer', fontSize: 12,
-    fontFamily: 'inherit', fontWeight: primary ? 700 : 400, letterSpacing: '0.06em',
-  }),
+const STATUS_STYLES = {
+  success: 'text-emerald-400',
+  processing: 'text-amber-400',
+  failed: 'text-red-400',
 };
- 
-const invoices = [
-  { id: 'INV-2025-06', date: 'Jun 1, 2025', amount: 349.00, status: 'paid',    period: 'Jun 2025' },
-  { id: 'INV-2025-05', date: 'May 1, 2025', amount: 349.00, status: 'paid',    period: 'May 2025' },
-  { id: 'INV-2025-04', date: 'Apr 1, 2025', amount: 299.00, status: 'paid',    period: 'Apr 2025' },
-  { id: 'INV-2025-03', date: 'Mar 1, 2025', amount: 299.00, status: 'paid',    period: 'Mar 2025' },
-  { id: 'INV-2025-02', date: 'Feb 1, 2025', amount: 149.00, status: 'paid',    period: 'Feb 2025' },
-];
- 
-const plans = [
-  { name: 'Starter',    price: 149,  stations: 5,  retention: '30d',  api: 'Limited', support: 'Email',    current: false },
-  { name: 'Pro',        price: 349,  stations: 20, retention: '1yr',  api: 'Full',    support: 'Priority', current: true  },
-  { name: 'Enterprise', price: null, stations: '∞',retention: '5yr',  api: 'Full',    support: '24/7 SLA', current: false },
-];
- 
-const usageItems = [
-  { label: 'Active Stations', used: 12, limit: 20, unit: '' },
-  { label: 'API Calls / month', used: 284000, limit: 500000, unit: '' },
-  { label: 'Data Storage', used: 42, limit: 100, unit: 'GB' },
-  { label: 'Alerts Sent', used: 87, limit: 1000, unit: '' },
-];
- 
+
+function formatKes(amount) {
+  return new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES' }).format(amount);
+}
+
+function formatDate(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('en-KE', { year: 'numeric', month: '2-digit', day: '2-digit' });
+}
+
 export default function Billing() {
-  const [tab, setTab] = useState('overview');
- 
+  const [plans, setPlans] = useState([]);
+  const [history, setHistory] = useState([]);
+  const [billingCycle, setBillingCycle] = useState('monthly');
+  const [currentPlanCode, setCurrentPlanCode] = useState('starter'); // TODO: derive from active subscription
+  const [loadingPlan, setLoadingPlan] = useState(null);
+  const [error, setError] = useState(null);
+
+  const loadPlans = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/billing/plans`);
+      if (!res.ok) throw new Error('Failed to load plans');
+      setPlans(await res.json());
+    } catch (err) {
+      setError(err.message);
+    }
+  }, []);
+
+  const loadHistory = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/billing/history`, { credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to load billing history');
+      setHistory(await res.json());
+    } catch (err) {
+      setError(err.message);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadPlans();
+    loadHistory();
+  }, [loadPlans, loadHistory]);
+
+  async function handleUpgrade(plan) {
+    if (!plan.paystack_plan_code) {
+      // Enterprise / custom — no self-serve checkout
+      window.location.href = 'mailto:sales@aquasystemtech.com?subject=Enterprise Plan Inquiry';
+      return;
+    }
+
+    setLoadingPlan(plan.code);
+    setError(null);
+
+    try {
+      const userEmail = localStorage.getItem('userEmail') || ''; // adjust to your actual auth/user source
+      if (!userEmail) throw new Error('No user email available — user must be logged in');
+
+      const res = await fetch(`${API_BASE}/billing/subscribe/initialize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ planCode: plan.code, email: userEmail }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to start checkout');
+
+      // Redirect flow — simplest integration. For an in-page popup instead,
+      // swap this for Paystack Inline JS using data.reference + the public key.
+      window.location.href = data.authorizationUrl;
+    } catch (err) {
+      setError(err.message);
+      setLoadingPlan(null);
+    }
+  }
+
+  const badgeFor = (code) =>
+    code === 'starter' ? { label: 'FREE', className: 'bg-neutral-700 text-neutral-200' }
+    : code === 'growth' ? { label: 'PRO', className: 'bg-orange-500 text-white' }
+    : { label: 'ADVANCE', className: 'bg-emerald-500 text-white' };
+
   return (
-    <div style={{ fontFamily: "'DM Mono','Courier New',monospace", color: '#C8E6F5' }}>
-      <div style={{ marginBottom: 24 }}>
-        <div style={{ fontSize: 10, color: '#4A8FA8', letterSpacing: '0.14em', marginBottom: 4 }}>SUBSCRIPTION</div>
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: '#E0F4FF', margin: 0 }}>Billing</h1>
-      </div>
- 
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: 2, marginBottom: 24, borderBottom: '1px solid #1A3A52' }}>
-        {['overview','plans','invoices'].map(t => (
-          <button key={t} onClick={() => setTab(t)} style={{
-            background: 'transparent', border: 'none', borderBottom: `2px solid ${tab === t ? '#00D4FF' : 'transparent'}`,
-            color: tab === t ? '#00D4FF' : '#6BA3BC', padding: '10px 20px', cursor: 'pointer',
-            fontSize: 12, fontFamily: 'inherit', letterSpacing: '0.08em', marginBottom: -1,
-          }}>{t.toUpperCase()}</button>
-        ))}
-      </div>
- 
-      {tab === 'overview' && (
+    <div className="bg-black text-neutral-100 p-8 min-h-screen">
+      <div className="flex items-center justify-between mb-1">
         <div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-            <div style={{ ...S.card, borderTop: '2px solid #00B4D8' }}>
-              <div style={S.label}>CURRENT PLAN</div>
-              <div style={{ fontSize: 24, fontWeight: 700, color: '#E0F4FF', margin: '8px 0 4px' }}>Pro</div>
-              <div style={{ fontSize: 12, color: '#4A8FA8' }}>$349/month · renews Jul 1, 2025</div>
-              <button style={{ ...S.btn(false), marginTop: 16 }}>Manage Plan</button>
-            </div>
-            <div style={{ ...S.card, borderTop: '2px solid #00FF88' }}>
-              <div style={S.label}>NEXT INVOICE</div>
-              <div style={{ fontSize: 24, fontWeight: 700, color: '#00FF88', margin: '8px 0 4px' }}>$349.00</div>
-              <div style={{ fontSize: 12, color: '#4A8FA8' }}>Due Jul 1, 2025 · Visa ···· 4242</div>
-              <button style={{ ...S.btn(false), marginTop: 16 }}>Update Payment</button>
-            </div>
-          </div>
- 
-          {/* Usage bars */}
-          <div style={S.card}>
-            <div style={{ ...S.label, marginBottom: 16 }}>USAGE THIS CYCLE</div>
-            {usageItems.map(({ label, used, limit, unit }) => {
-              const pct = Math.round((used / limit) * 100);
-              return (
-                <div key={label} style={{ marginBottom: 18 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
-                    <span style={{ color: '#C8E6F5' }}>{label}</span>
-                    <span style={{ color: '#4A8FA8' }}>{typeof used === 'number' && used > 1000 ? used.toLocaleString() : used}{unit} / {typeof limit === 'number' && limit > 1000 ? limit.toLocaleString() : limit}{unit}</span>
-                  </div>
-                  <div style={{ height: 6, background: '#071320', borderRadius: 3, overflow: 'hidden' }}>
-                    <div style={{
-                      height: '100%', width: `${pct}%`,
-                      background: pct > 80 ? '#FF5555' : pct > 60 ? '#FFB400' : '#00B4D8',
-                      borderRadius: 3, transition: 'width 0.4s',
-                    }} />
-                  </div>
-                  <div style={{ fontSize: 10, color: pct > 80 ? '#FF5555' : '#4A8FA8', marginTop: 4, textAlign: 'right' }}>{pct}%</div>
-                </div>
-              );
-            })}
-          </div>
+          <h1 className="text-xl font-semibold">Billing & Subscription</h1>
+          <p className="text-neutral-400 text-sm mt-1">
+            Keep track of your subscription details, update your billing information, and control your account's payment
+          </p>
+        </div>
+        <div className="flex items-center bg-neutral-900 rounded-full p-1 border border-neutral-800">
+          <button
+            onClick={() => setBillingCycle('monthly')}
+            className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${
+              billingCycle === 'monthly' ? 'bg-white text-black' : 'text-neutral-400'
+            }`}
+          >
+            Monthly
+          </button>
+          <button
+            onClick={() => setBillingCycle('yearly')}
+            className={`px-4 py-1.5 rounded-full text-sm font-medium transition ${
+              billingCycle === 'yearly' ? 'bg-white text-black' : 'text-neutral-400'
+            }`}
+          >
+            Yearly
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="mt-4 bg-red-950 border border-red-800 text-red-300 text-sm rounded-lg px-4 py-3">
+          {error}
         </div>
       )}
- 
-      {tab === 'plans' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16 }}>
-          {plans.map(p => (
-            <div key={p.name} style={{ ...S.card, borderColor: p.current ? '#00B4D8' : '#1A3A52', position: 'relative' }}>
-              {p.current && (
-                <div style={{ position: 'absolute', top: -10, left: 20, background: '#00B4D8', color: '#07111F', fontSize: 9, fontWeight: 700, letterSpacing: '0.1em', padding: '2px 10px', borderRadius: 4 }}>CURRENT</div>
-              )}
-              <div style={{ fontSize: 16, fontWeight: 700, color: '#E0F4FF', marginBottom: 8 }}>{p.name}</div>
-              <div style={{ fontSize: 26, fontWeight: 700, color: p.current ? '#00B4D8' : '#C8E6F5', marginBottom: 16 }}>
-                {p.price ? `$${p.price}` : 'Custom'}<span style={{ fontSize: 12, fontWeight: 400, color: '#4A8FA8' }}>{p.price ? '/mo' : ''}</span>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mt-8">
+        {plans.map((plan) => {
+          const badge = badgeFor(plan.code);
+          const isCurrent = plan.code === currentPlanCode;
+          const isEnterprise = plan.code === 'enterprise';
+          const isDark = plan.code === 'growth';
+
+          return (
+            <div
+              key={plan.code}
+              className={`rounded-2xl p-6 border ${
+                isDark ? 'bg-neutral-950 border-neutral-700' : 'bg-neutral-950/40 border-neutral-800'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-base">{plan.name}</h3>
+                <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${badge.className}`}>
+                  {badge.label}
+                </span>
               </div>
-              {[
-                [`Stations`, p.stations],
-                [`Data retention`, p.retention],
-                [`API access`, p.api],
-                [`Support`, p.support],
-              ].map(([k, v]) => (
-                <div key={k} style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #1A3A52', padding: '8px 0', fontSize: 12 }}>
-                  <span style={{ color: '#4A8FA8' }}>{k}</span>
-                  <span style={{ color: '#C8E6F5' }}>{v}</span>
-                </div>
-              ))}
-              <button style={{ ...S.btn(!p.current), marginTop: 20, width: '100%' }}>
-                {p.current ? 'Current Plan' : p.price ? 'Switch Plan' : 'Contact Sales'}
+
+              <div className="mb-5">
+                {isEnterprise ? (
+                  <span className="text-3xl font-bold">Custom</span>
+                ) : (
+                  <>
+                    <span className="text-3xl font-bold">
+                      {formatKes(billingCycle === 'yearly' ? plan.amount_kes * 10 : plan.amount_kes)}
+                    </span>
+                    <span className="text-neutral-400 text-sm"> /{billingCycle === 'yearly' ? 'year' : 'month'}</span>
+                  </>
+                )}
+              </div>
+
+              <button
+                onClick={() => handleUpgrade(plan)}
+                disabled={isCurrent || loadingPlan === plan.code}
+                className={`w-full py-2.5 rounded-lg text-sm font-medium transition mb-6 ${
+                  isCurrent
+                    ? 'bg-neutral-800 text-neutral-400 cursor-default'
+                    : isDark
+                    ? 'bg-white text-black hover:bg-neutral-200'
+                    : isEnterprise
+                    ? 'bg-neutral-900 text-white border border-neutral-700 hover:bg-neutral-800'
+                    : 'bg-neutral-800 text-neutral-300'
+                }`}
+              >
+                {isCurrent ? 'Current Plan' : loadingPlan === plan.code ? 'Redirecting…' : isEnterprise ? 'Contact Us' : 'Upgrade Plan'}
               </button>
-            </div>
-          ))}
-        </div>
-      )}
- 
-      {tab === 'invoices' && (
-        <div style={S.card}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid #1A3A52' }}>
-                {['INVOICE','PERIOD','DATE','AMOUNT','STATUS',''].map(h => (
-                  <th key={h} style={{ textAlign: 'left', padding: '8px 12px', color: '#4A8FA8', fontWeight: 400, letterSpacing: '0.08em', fontSize: 10 }}>{h}</th>
+
+              <ul className="space-y-2.5">
+                {(plan.features || []).map((f, i) => (
+                  <li key={i} className="flex items-start gap-2 text-sm text-neutral-300">
+                    <Check size={16} className="text-emerald-500 mt-0.5 shrink-0" />
+                    <span>{f}</span>
+                  </li>
                 ))}
-              </tr>
-            </thead>
-            <tbody>
-              {invoices.map(inv => (
-                <tr key={inv.id} style={{ borderBottom: '1px solid rgba(26,58,82,0.4)' }}>
-                  <td style={{ padding: '12px 12px', color: '#6BA3BC' }}>{inv.id}</td>
-                  <td style={{ padding: '12px 12px', color: '#C8E6F5' }}>{inv.period}</td>
-                  <td style={{ padding: '12px 12px', color: '#6BA3BC' }}>{inv.date}</td>
-                  <td style={{ padding: '12px 12px', color: '#E0F4FF', fontWeight: 700 }}>${inv.amount.toFixed(2)}</td>
-                  <td style={{ padding: '12px 12px' }}>
-                    <span style={{ fontSize: 10, color: '#00FF88', background: 'rgba(0,255,136,0.1)', border: '1px solid rgba(0,255,136,0.3)', borderRadius: 4, padding: '2px 8px', letterSpacing: '0.08em' }}>PAID</span>
-                  </td>
-                  <td style={{ padding: '12px 12px' }}>
-                    <button style={{ background: 'transparent', border: 'none', color: '#00B4D8', cursor: 'pointer', fontSize: 12, fontFamily: 'inherit' }}>↓ PDF</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+              </ul>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="bg-neutral-950/40 border border-neutral-800 rounded-2xl mt-8 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold">Billing History</h3>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-1.5 text-sm text-neutral-400">
+              <Search size={14} /> Search...
+            </div>
+            <button className="flex items-center gap-1.5 bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-1.5 text-sm text-neutral-300">
+              <Filter size={14} /> Filter
+            </button>
+            <button className="flex items-center gap-1.5 bg-neutral-900 border border-neutral-800 rounded-lg px-3 py-1.5 text-sm text-neutral-300">
+              <Download size={14} /> Export
+            </button>
+          </div>
         </div>
-      )}
+
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-neutral-500 border-b border-neutral-800">
+              <th className="py-2 font-medium">Plan Name</th>
+              <th className="py-2 font-medium">Amount</th>
+              <th className="py-2 font-medium">Purchase Date</th>
+              <th className="py-2 font-medium">End Date</th>
+              <th className="py-2 font-medium">Status</th>
+              <th className="py-2 font-medium">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {history.length === 0 && (
+              <tr>
+                <td colSpan={6} className="py-6 text-center text-neutral-500">
+                  No billing history yet
+                </td>
+              </tr>
+            )}
+            {history.map((row) => (
+              <tr key={row.id} className="border-b border-neutral-900">
+                <td className="py-3">{row.plan_name}</td>
+                <td className="py-3">{formatKes(row.amount_kes)}</td>
+                <td className="py-3 text-neutral-400">{formatDate(row.purchase_date)}</td>
+                <td className="py-3 text-neutral-400">{formatDate(row.period_end)}</td>
+                <td className="py-3">
+                  <span className={STATUS_STYLES[row.status] || 'text-neutral-400'}>● {row.status}</span>
+                </td>
+                <td className="py-3">
+                  <div className="flex items-center gap-2 text-neutral-400">
+                    <Download size={14} className="cursor-pointer hover:text-white" />
+                    <Eye size={14} className="cursor-pointer hover:text-white" />
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
- 

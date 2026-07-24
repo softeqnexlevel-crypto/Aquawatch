@@ -30,7 +30,10 @@ const ROLE_COLORS = {
 };
 
 const DEFAULT_PASSWORD = "temp123456";
-const EMPTY = { firstName: "", lastName: "", email: "", password: DEFAULT_PASSWORD, role: "operator", isActive: true };
+const EMPTY = {
+  firstName: "", lastName: "", email: "", password: DEFAULT_PASSWORD,
+  role: "operator", isActive: true, permissions: ROLE_PERMISSIONS.operator,
+};
 
 // ==================== API SERVICE ====================
 const API_BASE_URL = `${import.meta.env.VITE_API_URL || "http://localhost:4000"}`;
@@ -124,7 +127,15 @@ function UserDrawer({ open, onClose, onSave, initial, isEdit = false }) {
 
   useEffect(() => {
     if (initial) {
-      setForm(initial);
+      setForm({
+        ...initial,
+        // If this user has no custom permissions saved yet, seed the
+        // checkboxes from their role's defaults so the UI isn't empty —
+        // but keep whatever they actually have stored if present.
+        permissions: (initial.permissions && initial.permissions.length > 0)
+          ? initial.permissions
+          : (ROLE_PERMISSIONS[initial.role] || []),
+      });
     } else {
       setForm({ ...EMPTY, password: DEFAULT_PASSWORD });
     }
@@ -132,6 +143,22 @@ function UserDrawer({ open, onClose, onSave, initial, isEdit = false }) {
   }, [initial, open]);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  // Changing role resets permissions to that role's defaults — admin can
+  // still fine-tune individual pages afterward via the checkboxes below.
+  const setRole = (role) => {
+    setForm(f => ({ ...f, role, permissions: ROLE_PERMISSIONS[role] || [] }));
+  };
+
+  const togglePage = (page) => {
+    setForm(f => {
+      const has = f.permissions?.includes(page);
+      const next = has
+        ? f.permissions.filter(p => p !== page)
+        : [...(f.permissions || []), page];
+      return { ...f, permissions: next };
+    });
+  };
 
   async function handleSave() {
     if (!form.firstName || !form.email) {
@@ -155,7 +182,8 @@ function UserDrawer({ open, onClose, onSave, initial, isEdit = false }) {
               firstName: form.firstName,
               lastName: form.lastName || '',
               role: form.role,
-              isActive: form.isActive
+              isActive: form.isActive,
+              permissions: form.permissions,
             })
           })
         : await apiCall('/auth/register', {
@@ -165,7 +193,8 @@ function UserDrawer({ open, onClose, onSave, initial, isEdit = false }) {
               lastName: form.lastName || '',
               email: form.email,
               password: form.password,
-              role: form.role
+              role: form.role,
+              permissions: form.permissions,
             })
           });
 
@@ -289,7 +318,7 @@ function UserDrawer({ open, onClose, onSave, initial, isEdit = false }) {
 
           <div>
             <label style={{ display: "block", fontSize: isMobile ? 9 : 10, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 4 }}>Role</label>
-            <select value={form.role || 'operator'} onChange={e => set("role", e.target.value)} style={{ ...inp, cursor: "pointer" }}>
+            <select value={form.role || 'operator'} onChange={e => setRole(e.target.value)} style={{ ...inp, cursor: "pointer" }}>
               <option value="admin">Admin</option>
               <option value="operator">Operator</option>
               <option value="client">Client</option>
@@ -325,28 +354,36 @@ function UserDrawer({ open, onClose, onSave, initial, isEdit = false }) {
           </div>
 
           <div>
-            <label style={{ display: "block", fontSize: isMobile ? 9 : 10, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 6 }}>Pages this role can access</label>
+            <label style={{ display: "block", fontSize: isMobile ? 9 : 10, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 6 }}>
+              Pages this user can access
+            </label>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
               {ALL_PAGES.map(page => {
-                const has = ROLE_PERMISSIONS[form.role]?.includes(page);
+                const has = form.permissions?.includes(page);
                 return (
-                  <span
+                  <button
                     key={page}
+                    type="button"
+                    onClick={() => togglePage(page)}
                     style={{
                       fontSize: isMobile ? 8 : 9,
                       fontWeight: 600,
-                      padding: "1px 6px",
+                      padding: "3px 8px",
                       borderRadius: 4,
                       textTransform: "capitalize",
+                      cursor: "pointer",
                       background: has ? "rgba(34,197,94,0.1)" : "var(--muted)",
                       color: has ? "#22c55e" : "var(--muted-foreground)",
-                      border: `1px solid ${has ? "rgba(34,197,94,0.2)" : "var(--border)"}`
+                      border: `1px solid ${has ? "rgba(34,197,94,0.3)" : "var(--border)"}`,
                     }}
                   >
-                    {isMobile ? page.substring(0, 5) : page}
-                  </span>
+                    {has ? "✓ " : ""}{isMobile ? page.substring(0, 5) : page}
+                  </button>
                 );
               })}
+            </div>
+            <div style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)", marginTop: 6 }}>
+              Defaults come from the selected role — click to customize per-user.
             </div>
           </div>
         </div>
@@ -385,10 +422,10 @@ export function UserManagement() {
   // ==================== FETCH USERS ====================
   const fetchUsers = async () => {
     if (!isAdmin) return;
-    
+
     setLoading(true);
     setError('');
-    
+
     try {
       const data = await apiCall('/auth/users');
       setUsers(data.users || []);
@@ -420,9 +457,9 @@ export function UserManagement() {
   // ==================== HANDLE DELETE ====================
   async function handleDelete(id) {
     if (!isAdmin || id === me?.id) return;
-    
+
     if (!window.confirm('Delete this user permanently?')) return;
-    
+
     try {
       await apiCall(`/auth/users/${id}`, {
         method: 'DELETE'
@@ -436,10 +473,10 @@ export function UserManagement() {
   // ==================== HANDLE TOGGLE ACTIVE ====================
   async function handleToggleActive(id) {
     if (!isAdmin) return;
-    
+
     const user = users.find(u => u.id === id);
     if (!user) return;
-    
+
     try {
       await apiCall(`/auth/users/${id}`, {
         method: 'PUT',
@@ -447,7 +484,8 @@ export function UserManagement() {
           firstName: user.first_name,
           lastName: user.last_name,
           role: user.role,
-          isActive: !user.is_active
+          isActive: !user.is_active,
+          permissions: user.permissions,
         })
       });
       await fetchUsers();
@@ -465,7 +503,8 @@ export function UserManagement() {
       lastName: user.last_name,
       email: user.email,
       role: user.role,
-      isActive: user.is_active
+      isActive: user.is_active,
+      permissions: user.permissions || [],
     });
     setDrawerOpen(true);
   }
@@ -609,8 +648,14 @@ export function UserManagement() {
                 <tbody>
                   {users.map((u, i) => {
                     const rc = ROLE_COLORS[u.role] || ROLE_COLORS.operator;
-                    const pages = ROLE_PERMISSIONS[u.role] || [];
-                    
+                    // Show actual effective pages (custom permissions if set,
+                    // otherwise role defaults) — matches roles.middleware.js
+                    // and AuthContext's canAccess() so the count shown here
+                    // isn't misleading when an admin has customized access.
+                    const pages = (u.permissions && u.permissions.length > 0)
+                      ? u.permissions
+                      : (ROLE_PERMISSIONS[u.role] || []);
+
                     if (isMobile) {
                       return (
                         <tr key={u.id} style={{ background: i % 2 === 0 ? "var(--card)" : "var(--muted)" }}>
@@ -692,7 +737,7 @@ export function UserManagement() {
                         </tr>
                       );
                     }
-                    
+
                     return (
                       <tr key={u.id} style={{ background: i % 2 === 0 ? "var(--card)" : "var(--muted)" }}>
                         <td style={{ padding: "10px 12px", borderBottom: "1px solid var(--border)" }}>

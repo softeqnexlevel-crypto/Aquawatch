@@ -471,7 +471,7 @@ export function AntiscalantDosing() {
         </div>
       )}
 
-      // ===================== METRICS GRID =====================
+     {/* ===================== METRICS GRID ===================== */}
       <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(auto-fit, minmax(180px, 1fr))" }}>
         <MetricCard 
           label="Dosing Rate" 
@@ -529,10 +529,10 @@ export function AntiscalantDosing() {
         />
       </div>
 
-      // ===================== CHARTS ROW =====================
+      {/* ===================== CHARTS ROW ===================== */}
       <div className="grid gap-3 sm:gap-4" style={{ gridTemplateColumns: isMobile ? "1fr" : "1.5fr 1fr" }}>
         
-        // Dosing Rate Chart
+        {/* Dosing Rate Chart */}
         <div className="rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 gap-2">
             <span style={{ 
@@ -611,7 +611,7 @@ export function AntiscalantDosing() {
           </div>
         </div>
 
-        // Monthly Consumption Chart
+        {/* Monthly Consumption Chart */}
         <div className="rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
           <div className="flex items-center justify-between mb-3">
             <span style={{ 
@@ -649,10 +649,10 @@ export function AntiscalantDosing() {
         </div>
       </div>
 
-      // ===================== SECOND ROW CHARTS =====================
+      {/* ===================== SECOND ROW CHARTS ===================== */}
       <div className="grid gap-3 sm:gap-4" style={{ gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr" }}>
         
-        // Feed Flow vs Permeate Flow
+        {/* Feed Flow vs Permeate Flow */}
         <div className="rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
           <div className="flex items-center justify-between mb-3">
             <span style={{ 
@@ -690,7 +690,7 @@ export function AntiscalantDosing() {
           </div>
         </div>
 
-        // System Status
+        {/* System Status */}
         <div className="rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
           <div className="flex items-center justify-between mb-3">
             <span style={{ 
@@ -773,6 +773,7 @@ export function AntiscalantDosing() {
         </div>
       </div>
 
+      
       // ===================== CONSUMPTION LOG TABLE =====================
       <div className="rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
         <div style={{ 

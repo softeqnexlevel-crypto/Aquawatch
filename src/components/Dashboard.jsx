@@ -233,9 +233,9 @@ function TopStatusCard({ icon: Icon, iconBg, iconColor, title, value, valueColor
 
 function KPICardV2({ label, value, unit, icon: Icon, color, trend, statusText, statusOk }) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
-  const TrendIcon = !trend ? Minus : trend.direction === "up" ? TrendingUp : trend.direction === "down" ? TrendingDown : Minus;
+  const TrendIcon = !trend ? null : trend.direction === "up" ? TrendingUp : trend.direction === "down" ? TrendingDown : Minus;
   const trendColor = !trend ? "var(--muted-foreground)" : trend.direction === "up" ? COLORS.success : trend.direction === "down" ? COLORS.danger : "var(--muted-foreground)";
-  
+
   return (
     <div className="rounded-lg p-2 sm:p-3 flex flex-col gap-1 sm:gap-2" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
       <div className="flex items-center justify-between">
@@ -248,8 +248,16 @@ function KPICardV2({ label, value, unit, icon: Icon, color, trend, statusText, s
       <div style={{ fontFamily: "var(--font-mono)", fontSize: isMobile ? 18 : 24, fontWeight: 700, color, lineHeight: 1 }}>{value}</div>
       <div className="flex items-center justify-between">
         <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-          <TrendIcon size={isMobile ? 9 : 11} style={{ color: trendColor }} />
-          <span style={{ fontSize: isMobile ? 8 : 10, color: trendColor, fontFamily: "var(--font-mono)" }}>{trend ? `${trend.pct > 0 ? '+' : ''}${trend.pct.toFixed(1)}%` : '—'}</span>
+          {trend ? (
+            <>
+              <TrendIcon size={isMobile ? 9 : 11} style={{ color: trendColor }} />
+              <span style={{ fontSize: isMobile ? 8 : 10, color: trendColor, fontFamily: "var(--font-mono)" }}>
+                {`${trend.pct > 0 ? '+' : ''}${trend.pct.toFixed(1)}%`}
+              </span>
+            </>
+          ) : (
+            <span style={{ fontSize: isMobile ? 8 : 10, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>—</span>
+          )}
         </div>
         {statusText && (
           <div style={{ display: "flex", alignItems: "center", gap: 2, fontSize: isMobile ? 8 : 10, color: statusOk ? COLORS.success : COLORS.warning }}>
