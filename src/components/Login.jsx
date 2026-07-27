@@ -1,7 +1,7 @@
-// frontend/src/components/Login.jsx - FULLY RESPONSIVE + OTP
+// frontend/src/components/Login.jsx - FULLY RESPONSIVE (NO OTP)
 
 import React, { useState, useEffect } from 'react';
-import { Phone, Mail, MapPin, Radio, BarChart3, Zap, Target, Eye, EyeOff, ShieldCheck } from 'lucide-react';
+import { Phone, Mail, MapPin, Radio, BarChart3, Zap, Target, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 import logoMark from '../assets/logo/aqua-systemtech-mark.png';
@@ -57,7 +57,7 @@ const getFieldStyles = (isMobile) => ({
   },
 });
 
-// ── Sign-in form pieces ──────────────────────────────────────────
+// ── Sign-in form ──────────────────────────────────────────────────
 function FormFields({
   email, setEmail, password, setPassword, showPw, setShowPw,
   remember, setRemember, error, loading, isModal, handleSubmit,
@@ -181,161 +181,17 @@ function FormFields({
   );
 }
 
-// ── OTP challenge form (step 2 of login, shown only when the account
-//    has two-factor auth enabled) ──────────────────────────────────
-function OtpFields({ code, setCode, error, loading, handleSubmit, onBack, isMobile }) {
-  const fieldStyles = getFieldStyles(isMobile);
-
-  return (
-    <form onSubmit={handleSubmit}>
-      {error && (
-        <div style={{
-          background: "rgba(239,68,68,0.1)",
-          border: "1px solid rgba(239,68,68,0.2)",
-          borderRadius: 8,
-          padding: "10px 14px",
-          color: "#ef4444",
-          marginBottom: 16,
-          fontSize: isMobile ? 12 : 13
-        }}>
-          {error}
-        </div>
-      )}
-
-      <div style={{
-        display: "flex", alignItems: "center", gap: 8,
-        marginBottom: isMobile ? 14 : 18,
-        color: "var(--muted-foreground)", fontSize: isMobile ? 12 : 13
-      }}>
-        <ShieldCheck size={isMobile ? 15 : 17} color={BRAND.teal} />
-        Enter the 6-digit code from your authenticator app.
-      </div>
-
-      <div style={fieldStyles.wrap}>
-        <label style={fieldStyles.label}>Authentication Code</label>
-        <input
-          type="text"
-          inputMode="numeric"
-          autoComplete="one-time-code"
-          value={code}
-          onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-          placeholder="123456"
-          maxLength={6}
-          style={{
-            ...fieldStyles.input,
-            letterSpacing: "0.3em",
-            textAlign: "center",
-            fontFamily: FONT_MONO,
-            fontSize: isMobile ? 18 : 20,
-          }}
-          autoFocus
-          required
-        />
-      </div>
-
-      <button
-        type="submit"
-        disabled={loading || code.length !== 6}
-        style={{
-          width: "100%",
-          padding: isMobile ? "11px" : "13px",
-          background: BRAND.blue,
-          color: "white",
-          border: "none",
-          borderRadius: 8,
-          fontSize: isMobile ? 13 : 14,
-          fontWeight: 600,
-          cursor: (loading || code.length !== 6) ? "not-allowed" : "pointer",
-          fontFamily: FONT_BODY,
-          opacity: (loading || code.length !== 6) ? 0.7 : 1,
-          marginBottom: 10,
-        }}
-      >
-        {loading ? 'Verifying…' : 'Verify & Sign In'}
-      </button>
-
-      <button
-        type="button"
-        onClick={onBack}
-        style={{
-          width: "100%",
-          padding: isMobile ? "9px" : "10px",
-          background: "none",
-          color: "var(--muted-foreground)",
-          border: "1px solid var(--border)",
-          borderRadius: 8,
-          fontSize: isMobile ? 12 : 13,
-          fontWeight: 500,
-          cursor: "pointer",
-          fontFamily: FONT_BODY,
-        }}
-      >
-        Back to login
-      </button>
-    </form>
-  );
-}
-
-function SocialRow({ isMobile }) {
-  const size = isMobile ? 36 : 40;
-  const fontSize = isMobile ? 13 : 15;
-
-  return (
-    <div style={{ display: "flex", gap: isMobile ? 8 : 10, justifyContent: "center", marginTop: 4 }}>
-      {[
-        { label: "G", bg: "white", fg: "#EA4335", border: "1px solid var(--border)" },
-        { label: "", bg: "#000", fg: "white" },
-        { label: "f", bg: "#1877F2", fg: "white" },
-      ].map((s, i) => (
-        <button
-          key={i}
-          type="button"
-          disabled
-          title="Coming soon"
-          style={{
-            width: size,
-            height: size,
-            borderRadius: "50%",
-            background: s.bg,
-            color: s.fg,
-            border: s.border || "none",
-            cursor: "not-allowed",
-            opacity: 0.55,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontWeight: 700,
-            fontSize: fontSize
-          }}
-        >
-          {s.label || "\u{F8FF}"}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 // ==================== MAIN LOGIN COMPONENT ====================
 export const Login = ({ onLoginSuccess, onClose, isModal = false }) => {
-  const { login, verifyOtp } = useAuth();
+  const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [remember, setRemember] = useState(false);
   const [slide, setSlide] = useState(0);
   const [isMobile, setIsMobile] = useState(false);
-
-  // Local loading/error state — kept local (not from useAuth) so the OTP
-  // step can show its own loading/error independently of the password step.
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-
-  // OTP step state. `otpStage` gates which form renders. `preAuthToken` is
-  // the short-lived token returned by login() when otpRequired is true —
-  // it proves the password step already succeeded.
-  const [otpStage, setOtpStage] = useState(false);
-  const [preAuthToken, setPreAuthToken] = useState(null);
-  const [code, setCode] = useState('');
 
   // ── Responsive detection ──────────────────────────────────────
   useEffect(() => {
@@ -359,41 +215,11 @@ export const Login = ({ onLoginSuccess, onClose, isModal = false }) => {
     const result = await login(email, password);
     setLoading(false);
 
-    if (result.otpRequired) {
-      // Password was correct — move to the OTP screen instead of
-      // treating this as a failed or successful login.
-      setPreAuthToken(result.preAuthToken);
-      setOtpStage(true);
-      return;
-    }
-
     if (result.success) {
       if (onLoginSuccess) onLoginSuccess(result.user);
     } else {
       setError(result.error || 'Login failed');
     }
-  };
-
-  const handleOtpSubmit = async (e) => {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
-    const result = await verifyOtp(preAuthToken, code);
-    setLoading(false);
-
-    if (result.success) {
-      if (onLoginSuccess) onLoginSuccess(result.user);
-    } else {
-      setError(result.error || 'Invalid code');
-      setCode('');
-    }
-  };
-
-  const handleBackToLogin = () => {
-    setOtpStage(false);
-    setPreAuthToken(null);
-    setCode('');
-    setError('');
   };
 
   const scrollToContact = (e) => {
@@ -405,11 +231,6 @@ export const Login = ({ onLoginSuccess, onClose, isModal = false }) => {
     email, setEmail, password, setPassword, showPw, setShowPw,
     remember, setRemember, error, loading, isModal, handleSubmit,
     scrollToContact, isMobile
-  };
-
-  const otpProps = {
-    code, setCode, error, loading, handleSubmit: handleOtpSubmit,
-    onBack: handleBackToLogin, isMobile
   };
 
   // ── Compact modal ──────────────────────────────────────────────
@@ -428,40 +249,16 @@ export const Login = ({ onLoginSuccess, onClose, isModal = false }) => {
             fontWeight: 700,
             margin: isMobile ? "10px 0 2px" : "14px 0 2px"
           }}>
-            {otpStage ? "Verify it's you" : "Welcome back"}
+            Welcome back
           </h2>
           <p style={{
             fontSize: isMobile ? 12 : 13,
             color: "var(--muted-foreground)",
             marginBottom: isMobile ? 14 : 18
           }}>
-            {otpStage ? "Two-factor authentication is enabled on this account" : "Sign in to your dashboard"}
+            Sign in to your dashboard
           </p>
-          {otpStage ? <OtpFields {...otpProps} /> : <FormFields {...formProps} />}
-          {!otpStage && (
-            <>
-              <div style={{
-                textAlign: "center",
-                margin: isMobile ? "14px 0 10px" : "18px 0 12px",
-                fontSize: isMobile ? 10 : 11.5,
-                color: "var(--muted-foreground)",
-                position: "relative"
-              }}>
-                <span style={{ background: "var(--card)", padding: "0 10px", position: "relative", zIndex: 1 }}>
-                  Or continue with
-                </span>
-                <div style={{
-                  position: "absolute",
-                  top: "50%",
-                  left: 0,
-                  right: 0,
-                  height: 1,
-                  background: "var(--border)"
-                }} />
-              </div>
-              <SocialRow isMobile={isMobile} />
-            </>
-          )}
+          <FormFields {...formProps} />
         </div>
       </div>
     );
@@ -586,7 +383,7 @@ export const Login = ({ onLoginSuccess, onClose, isModal = false }) => {
               marginBottom: isMobile ? 4 : 6,
               textAlign: isMobile ? "center" : "left"
             }}>
-              {otpStage ? "Verify it's you" : "Welcome back"}
+              Welcome back
             </h1>
             <p style={{
               fontSize: isMobile ? 12.5 : 13.5,
@@ -594,56 +391,26 @@ export const Login = ({ onLoginSuccess, onClose, isModal = false }) => {
               marginBottom: isMobile ? 20 : 28,
               textAlign: isMobile ? "center" : "left"
             }}>
-              {otpStage ? "Two-factor authentication is enabled on this account" : "Sign in to access your dashboard"}
+              Sign in to access your dashboard
             </p>
 
-            {otpStage ? <OtpFields {...otpProps} /> : <FormFields {...formProps} />}
+            <FormFields {...formProps} />
 
-            {!otpStage && (
-              <>
-                <div style={{
-                  textAlign: "center",
-                  margin: isMobile ? "16px 0 10px" : "22px 0 14px",
-                  fontSize: isMobile ? 10 : 11.5,
-                  color: "var(--muted-foreground)",
-                  position: "relative"
-                }}>
-                  <span style={{
-                    background: "var(--background)",
-                    padding: "0 10px",
-                    position: "relative",
-                    zIndex: 1
-                  }}>
-                    Or continue with
-                  </span>
-                  <div style={{
-                    position: "absolute",
-                    top: "50%",
-                    left: 0,
-                    right: 0,
-                    height: 1,
-                    background: "var(--border)"
-                  }} />
-                </div>
-                <SocialRow isMobile={isMobile} />
-
-                <p style={{
-                  textAlign: "center",
-                  fontSize: isMobile ? 11.5 : 12.5,
-                  color: "var(--muted-foreground)",
-                  marginTop: isMobile ? 20 : 26
-                }}>
-                  Need access? 
-                  <a
-                    href="#contact"
-                    onClick={scrollToContact}
-                    style={{ color: BRAND.blue, fontWeight: 600, textDecoration: "none" }}
-                  >
-                    Talk to sales
-                  </a>
-                </p>
-              </>
-            )}
+            <p style={{
+              textAlign: "center",
+              fontSize: isMobile ? 11.5 : 12.5,
+              color: "var(--muted-foreground)",
+              marginTop: isMobile ? 20 : 26
+            }}>
+              Need access? 
+              <a
+                href="#contact"
+                onClick={scrollToContact}
+                style={{ color: BRAND.blue, fontWeight: 600, textDecoration: "none" }}
+              >
+                Talk to sales
+              </a>
+            </p>
           </div>
         </div>
       </section>

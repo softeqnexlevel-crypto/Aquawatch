@@ -58,62 +58,10 @@ export function AuthProvider({ children }) {
 
             const data = await res.json();
 
-            if (data.otpRequired) {
-                return {
-                    success: false,
-                    otpRequired: true,
-                    preAuthToken: data.preAuthToken,
-                    message: data.message || 'OTP sent to your email/phone'
-                };
-            }
-
             localStorage.setItem('accessToken', data.accessToken);
             localStorage.setItem('refreshToken', data.refreshToken);
             setUser(data.user);
             return { success: true, user: data.user };
-        } catch (e) {
-            return { success: false, error: e.message };
-        }
-    }
-
-    async function verifyOtp(preAuthToken, code) {
-        try {
-            const res = await fetch(`${API_BASE_URL}/api/auth/login/verify-otp`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ preAuthToken, code })
-            });
-
-            if (!res.ok) {
-                const err = await res.json();
-                return { success: false, error: err.error };
-            }
-
-            const data = await res.json();
-            localStorage.setItem('accessToken', data.accessToken);
-            localStorage.setItem('refreshToken', data.refreshToken);
-            setUser(data.user);
-            return { success: true, user: data.user };
-        } catch (e) {
-            return { success: false, error: e.message };
-        }
-    }
-
-    async function resendOtp(preAuthToken) {
-        try {
-            const res = await fetch(`${API_BASE_URL}/api/auth/login/resend-otp`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ preAuthToken })
-            });
-
-            if (!res.ok) {
-                const err = await res.json();
-                return { success: false, error: err.error };
-            }
-
-            const data = await res.json();
-            return { success: true, message: data.message };
         } catch (e) {
             return { success: false, error: e.message };
         }
@@ -168,8 +116,6 @@ export function AuthProvider({ children }) {
             user,
             loading,
             login,
-            verifyOtp,
-            resendOtp,
             logout,
             refreshUser,
             canAccess,

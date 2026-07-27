@@ -29,6 +29,9 @@ import { UserManagement } from "./components/UserManagement";
 import { alerts } from "./data/mockData";
 import { useAuth } from "./contexts/AuthContext";
 
+// ✅ Use the shared, loading-aware ProtectedRoute instead of a local copy
+import { ProtectedRoute } from "./components/ProtectedRoute";
+
 // ==================== PAGE CONFIG ====================
 const pageTitles = {
   "/app": "Executive Dashboard",
@@ -182,15 +185,6 @@ function DashboardLayout() {
   );
 }
 
-// ==================== PROTECTED ROUTE ====================
-function ProtectedRoute({ children }) {
-  const { user } = useAuth();
-  if (!user) {
-    return <Navigate to="/login" replace />;
-  }
-  return children;
-}
-
 // ==================== LOGIN PAGE WRAPPER ====================
 function LoginPageWrapper() {
   const navigate = useNavigate();
@@ -216,12 +210,13 @@ function LoginPageWrapper() {
 // ==================== ROUTER ====================
 const router = createBrowserRouter([
   {
-    path: "/login",
+    path: "/",
     element: <LoginPageWrapper />,
   },
   {
-    path: "/",
-    element: <Navigate to="/login" replace />,
+    // Backward-compat: redirect any old /login links/bookmarks to the new root path
+    path: "/login",
+    element: <Navigate to="/" replace />,
   },
   {
     path: "/app",

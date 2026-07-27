@@ -1,6 +1,6 @@
 // frontend/src/components/ProtectedRoute.jsx
 import React from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate } from 'react-router'; // matches the package used in routes.jsx
 import { useAuth } from '../contexts/AuthContext';
 
 export const ProtectedRoute = ({ children, requiredRole }) => {
@@ -15,7 +15,7 @@ export const ProtectedRoute = ({ children, requiredRole }) => {
     }
 
     if (!user) {
-        return <Navigate to="/login" replace />;
+        return <Navigate to="/" replace />;
     }
 
     if (requiredRole && user.role !== requiredRole) {
