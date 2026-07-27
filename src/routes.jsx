@@ -29,8 +29,7 @@ import { UserManagement } from "./components/UserManagement";
 import { alerts } from "./data/mockData";
 import { useAuth } from "./contexts/AuthContext";
 
-// ✅ Use the shared, loading-aware ProtectedRoute instead of a local copy
-import { ProtectedRoute } from "./components/ProtectedRoute";
+import { ProtectedRoue} from "./routes/ProtectedRoute";
 
 // ==================== PAGE CONFIG ====================
 const pageTitles = {
