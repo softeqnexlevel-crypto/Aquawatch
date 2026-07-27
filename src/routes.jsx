@@ -29,7 +29,8 @@ import { UserManagement } from "./components/UserManagement";
 import { alerts } from "./data/mockData";
 import { useAuth } from "./contexts/AuthContext";
 
-import { ProtectedRoue} from "./routes/ProtectedRoute";
+
+import { ProtectedRoute } from "./routes/ProtectedRoute";
 
 // ==================== PAGE CONFIG ====================
 const pageTitles = {
