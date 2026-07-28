@@ -722,7 +722,7 @@ function ContactSection({ isMobile }) {
             Have questions or want to learn more about our water management solutions? We'd love to hear from you.
           </p>
           <div style={{ display: "flex", flexDirection: "column", gap: isMobile ? 12 : 14 }}>
-            <ContactItem icon={MapPin} label="Address" value="Nairobi, Kenya" isMobile={isMobile} />
+            <ContactItem icon={MapPin} label="Address" value="Naivasha, Kenya" isMobile={isMobile} />
             <ContactItem icon={Mail} label="Email" value="aquasystemtech.co.ke@gmail.com" href="mailto:info@aquasystemtech.co.ke" isMobile={isMobile} />
             <ContactItem icon={Phone} label="Phone" value="+254 104318839" href="tel:+254728536124" isMobile={isMobile} />
           </div>
