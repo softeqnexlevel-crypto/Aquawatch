@@ -724,7 +724,7 @@ function ContactSection({ isMobile }) {
           <div style={{ display: "flex", flexDirection: "column", gap: isMobile ? 12 : 14 }}>
             <ContactItem icon={MapPin} label="Address" value="Nairobi, Kenya" isMobile={isMobile} />
             <ContactItem icon={Mail} label="Email" value="aquasystemtech.co.ke@gmail.com" href="mailto:info@aquasystemtech.co.ke" isMobile={isMobile} />
-            <ContactItem icon={Phone} label="Phone" value="+254 728 536124" href="tel:+254728536124" isMobile={isMobile} />
+            <ContactItem icon={Phone} label="Phone" value="+254 104318839" href="tel:+254728536124" isMobile={isMobile} />
           </div>
         </div>
         <div style={{
