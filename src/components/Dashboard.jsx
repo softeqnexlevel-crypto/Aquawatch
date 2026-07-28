@@ -1,6 +1,7 @@
 // components/Dashboard.jsx - WITH LIVETRENDCHART & NO TOPNAV
+// REFACTORED: now consumes the shared DataContext instead of its own socket connection
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Droplets, Activity, FlaskConical, AlertTriangle,
   CheckCircle, Gauge, Zap, Filter, TrendingUp, TrendingDown,
@@ -11,9 +12,8 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
   ResponsiveContainer, Legend
 } from 'recharts';
-import { io } from 'socket.io-client';
 import { API_BASE_URL } from '../config';
-import { useAuth } from '../contexts/AuthContext';
+import { useData } from '../contexts/DataContext';
 
 // Import custom chart components
 import { LiveTrendChart } from './dashboardComponents/LiveTrendChart';
@@ -94,37 +94,6 @@ export const SENSOR_MAP = {
   'RO5-AntiscalantDosingActive': { label: 'Dosing Active', unit: '', icon: FlaskConical, color: COLORS.purple, shortName: 'DosingActive' },
 };
 
-const PARAMETER_ALIASES = {
-  'siemens200smart-RO5-FEEDFlow': 'RO5-FEEDFlow',
-  'siemens200smart-RO5-Permeateflow': 'RO5-Permeateflow',
-  'siemens200smart-RO5-ConcetrateFlow': 'RO5-ConcetrateFlow',
-  'siemens200smart-RO5-ROPressure': 'RO5-ROPressure',
-  'siemens200smart-RO5-InterstagePress': 'RO5-InterstagePress',
-  'siemens200smart-RO5-ConcetratePress': 'RO5-ConcetratePress',
-  'siemens200smart-RO5-Stage1Delta': 'RO5-Stage1Delta',
-  'siemens200smart-RO5-Stage2Delta': 'RO5-Stage2Delta',
-  'siemens200smart-RO5-MediaFilterInPress': 'RO5-MediaFilterInPress',
-  'siemens200smart-RO5-MediaFilterOutPress': 'RO5-MediaFilterOutPress',
-  'siemens200smart-RO5-MediaFilterDeltaP': 'RO5-MediaFilterDeltaP',
-  'siemens200smart-RO5-SystemRecovery': 'RO5-SystemRecovery',
-  'siemens200smart-RO5-PureWaterEc': 'RO5-PureWaterEc',
-  'siemens200smart-RO5-FeedTankLevel': 'RO5-FeedTankLevel',
-  'siemens200smart-RO5-SystemOperation': 'RO5-SystemOperation',
-  'siemens200smart-RO5-SystemMode': 'RO5-SystemMode',
-  'siemens200smart-RO5-AntiscalantDosingActive': 'RO5-AntiscalantDosingActive',
-};
-
-function toShortName(parameter) {
-  return PARAMETER_ALIASES[parameter] || parameter;
-}
-
-function getSensorInfo(parameter) {
-  const shortName = toShortName(parameter);
-  return SENSOR_MAP[shortName] || {
-    label: shortName, unit: '', icon: Activity, color: '#4d7a9e', shortName,
-  };
-}
-
 const MAX_HISTORY_POINTS = 500;
 
 /* ============================================================
@@ -184,7 +153,7 @@ function CircularGauge({ value, size = 88, strokeWidth = 7, color, label, status
   const offset = circumference * (1 - clamped / 100);
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
   const actualSize = isMobile ? 64 : size;
-  
+
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: isMobile ? 4 : 6 }}>
       <div style={{ position: "relative", width: actualSize, height: actualSize }}>
@@ -210,7 +179,7 @@ function CircularGauge({ value, size = 88, strokeWidth = 7, color, label, status
 
 function TopStatusCard({ icon: Icon, iconBg, iconColor, title, value, valueColor, sub, subColor, gauge, action }) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
-  
+
   return (
     <div className="rounded-lg p-3 sm:p-4 flex items-center justify-between gap-2 sm:gap-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
       <div style={{ display: "flex", gap: isMobile ? 8 : 12, alignItems: "flex-start" }}>
@@ -275,7 +244,7 @@ function EquipmentStatusItem({ icon: Icon, label, state }) {
   const color = state === 'on' ? COLORS.success : state === 'off' ? COLORS.danger : 'var(--muted-foreground)';
   const bg = state === 'on' ? 'rgba(34,197,94,0.1)' : state === 'off' ? 'rgba(239,68,68,0.1)' : 'var(--secondary)';
   const text = state === 'on' ? 'Running' : state === 'off' ? 'Stopped' : 'No data';
-  
+
   return (
     <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 6 : 8, padding: isMobile ? "6px 8px" : "8px 10px", borderRadius: 8, background: bg, border: `1px solid ${color}30` }}>
       <div style={{ width: isMobile ? 22 : 26, height: isMobile ? 22 : 26, borderRadius: 6, background: `${color}22`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -295,7 +264,7 @@ function RecentAlarmItem({ alarm }) {
     alarm.severity === "High" ? COLORS.orange :
       alarm.severity === "Medium" ? COLORS.yellow :
         alarm.severity === "Info" ? COLORS.success : COLORS.primary;
-  
+
   return (
     <div style={{ display: "flex", alignItems: "flex-start", gap: isMobile ? 6 : 8, padding: isMobile ? "6px 8px" : "8px 10px", borderRadius: 8, background: "var(--secondary)", border: `1px solid ${color}25` }}>
       <AlertTriangle size={isMobile ? 11 : 13} style={{ color, marginTop: 1, flexShrink: 0 }} />
@@ -313,28 +282,12 @@ function RecentAlarmItem({ alarm }) {
 }
 
 /* ============================================================
-  API service
+  Production summary API (separate from live sensor context —
+  this is a periodic aggregate pulled straight from the backend,
+  not part of the real-time PLC stream)
   ============================================================ */
 
 const api = {
-  getCurrentReadings: async () => {
-    const token = localStorage.getItem('accessToken');
-    const response = await fetch(`${API_BASE_URL}/api/current`, { headers: { 'Authorization': `Bearer ${token}` } });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return response.json();
-  },
-  getMqttStatus: async () => {
-    const token = localStorage.getItem('accessToken');
-    const response = await fetch(`${API_BASE_URL}/api/mqtt-status`, { headers: { 'Authorization': `Bearer ${token}` } });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return response.json();
-  },
-  getAlarms: async () => {
-    const token = localStorage.getItem('accessToken');
-    const response = await fetch(`${API_BASE_URL}/api/alarms`, { headers: { 'Authorization': `Bearer ${token}` } });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return response.json();
-  },
   getProductionSummary: async () => {
     const token = localStorage.getItem('accessToken');
     const response = await fetch(`${API_BASE_URL}/api/production-summary`, { headers: { 'Authorization': `Bearer ${token}` } });
@@ -348,17 +301,23 @@ const api = {
   ============================================================ */
 
 export function Dashboard() {
-  const { user } = useAuth();
-  const [sensorData, setSensorData] = useState({});
-  const [history, setHistory] = useState({});
-  const [connected, setConnected] = useState(false);
-  const [simulationMode, setSimulationMode] = useState(false);
-  const [alarms, setAlarms] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [lastUpdate, setLastUpdate] = useState(null);
-  const [dataInitialized, setDataInitialized] = useState(false);
-  const [retryCount, setRetryCount] = useState(0);
+  // ✅ Single source of truth for all live sensor data, history, and
+  // connection status — shared with every other component (e.g.
+  // AntiscalantDosing) via the same DataProvider/socket connection.
+  // This is what fixes the dosing-status mismatch: Dashboard no longer
+  // runs its own separate socket + its own separate key-mapping table.
+  const {
+    sensorData,
+    history,
+    loading: contextLoading,
+    error: contextError,
+    lastUpdate,
+    connected,
+    getValue,
+    getHistory,
+    refresh,
+  } = useData();
+
   const [trendRange, setTrendRange] = useState('1H');
   const [selectedSensors, setSelectedSensors] = useState(['RO5-Permeateflow']);
   const [isMobile, setIsMobile] = useState(false);
@@ -391,13 +350,20 @@ export function Dashboard() {
     return () => clearInterval(interval);
   }, []);
 
-  const getValue = (key) => {
-    const val = sensorData[key]?.value;
-    return val !== undefined && val !== null ? val : 0;
-  };
   const getNumber = (key) => safeNumber(getValue(key));
 
   const dailyProduction = productionSummary?.permeate?.daily ?? 0;
+
+  // ==================== ALARMS (derived from shared sensor context) ====================
+  // Note: this recomputes threshold-based alarms locally from live sensor
+  // values, same as before. The previous version of Dashboard.jsx also
+  // listened directly for a raw 'plc-alarm' socket event pushed from the
+  // backend and merged those in too. Since Dashboard no longer owns its
+  // own socket, that raw event stream isn't wired up here. If you want
+  // backend-pushed alarms (not just these computed ones) available here,
+  // the cleanest place to add that 'plc-alarm' listener is inside
+  // DataContext.jsx so every consumer benefits from one connection.
+  const [alarms, setAlarms] = useState([]);
 
   const generateAlerts = () => {
     const newAlerts = [];
@@ -453,128 +419,24 @@ export function Dashboard() {
     return newAlerts;
   };
 
-  const updateAlerts = () => setAlarms(generateAlerts());
-
-  const fetchRealData = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const readings = await api.getCurrentReadings();
-      if (!readings || Object.keys(readings).length === 0) throw new Error('No data received from backend');
-
-      const formatted = {};
-      Object.entries(readings).forEach(([key, value]) => {
-        const shortName = toShortName(key);
-        const info = getSensorInfo(key);
-        formatted[shortName] = { value, timestamp: new Date().toISOString(), simulated: false, unit: info.unit, label: info.label };
-      });
-      setSensorData(formatted);
-      setLastUpdate(new Date().toISOString());
-
-      setHistory(prev => {
-        const newHistory = { ...prev };
-        Object.keys(formatted).forEach(key => {
-          if (!newHistory[key]) newHistory[key] = [];
-          const rawVal = formatted[key].value;
-          const numValue = typeof rawVal === 'string' && isNaN(parseFloat(rawVal)) ? (isActive(rawVal) ? 1 : 0) : safeNumber(rawVal);
-          newHistory[key].push({ time: new Date().toISOString(), value: numValue });
-          if (newHistory[key].length > MAX_HISTORY_POINTS) newHistory[key] = newHistory[key].slice(-MAX_HISTORY_POINTS);
-        });
-        return newHistory;
-      });
-
-      try {
-        const mqttStatus = await api.getMqttStatus();
-        setConnected(mqttStatus.connected || false);
-        setSimulationMode(mqttStatus.simulationMode || false);
-      } catch (err) {
-        console.warn('Could not fetch MQTT status:', err);
-      }
-
-      updateAlerts();
-      setDataInitialized(true);
-      setRetryCount(0);
-    } catch (err) {
-      console.error('Failed to fetch real data:', err);
-      setError(err.message || 'Failed to connect to backend');
-      setRetryCount(prev => prev + 1);
-      setDataInitialized(false);
-    } finally {
-      setLoading(false);
+  // Recompute alarms whenever the shared sensor data changes, and also
+  // on a steady interval as a safety net (same cadence as before).
+  useEffect(() => {
+    if (Object.keys(sensorData).length > 0) {
+      setAlarms(generateAlerts());
     }
-  };
-
-  // WebSocket connection
-  useEffect(() => {
-    const socket = io(API_BASE_URL, {
-      transports: ['websocket', 'polling'], 
-      reconnection: true, 
-      reconnectionAttempts: 5, 
-      reconnectionDelay: 1000,
-    });
-
-    socket.on('connect', () => { 
-      setConnected(true); 
-      fetchRealData(); 
-    });
-    socket.on('disconnect', () => setConnected(false));
-    socket.on('connect_error', (err) => { 
-      console.error('WebSocket connection error:', err); 
-      setError('WebSocket connection failed - check if backend is running'); 
-      fetchRealData(); 
-    });
-
-    socket.on('plc-data', (data) => {
-      const shortName = toShortName(data.parameter);
-      const info = getSensorInfo(data.parameter);
-      const timestamp = data.timestamp || new Date().toISOString();
-      const value = data.dataType === 'bit' ? data.value : safeNumber(data.value);
-
-      setSensorData(prev => ({ 
-        ...prev, 
-        [shortName]: { value, timestamp, simulated: data.simulated || false, unit: data.unit || info.unit, label: info.label } 
-      }));
-
-      setHistory(prev => {
-        const existing = prev[shortName] || [];
-        const historyValue = data.dataType === 'bit' ? (isActive(data.value) ? 1 : 0) : value;
-        const updated = [...existing, { time: timestamp, value: historyValue }].slice(-MAX_HISTORY_POINTS);
-        return { ...prev, [shortName]: updated };
-      });
-
-      setLastUpdate(timestamp);
-      setTimeout(() => updateAlerts(), 100);
-    });
-
-    socket.on('plc-alarm', (alarmData) => {
-      const newAlarms = alarmData.alarms.map(alarm => ({
-        id: `${alarm.parameter}-${Date.now()}-${Math.random()}`,
-        type: alarm.message || 'Alarm', equipment: `RO5 - ${alarm.parameter}`,
-        severity: alarm.severity === 'high' ? 'Critical' : alarm.severity === 'warning' ? 'High' : 'Medium',
-        time: new Date().toLocaleTimeString(), status: 'Active', value: alarmData.value,
-        isPowerProblem: alarm.parameter?.toLowerCase().includes('power') || false,
-      }));
-      setAlarms(prev => [...newAlarms, ...prev].slice(0, 20));
-    });
-
-    socket.on('mqtt-status', (status) => { 
-      setConnected(status.connected || false); 
-      setSimulationMode(status.simulationMode || false); 
-    });
-
-    return () => socket.disconnect();
-  }, []);
+  }, [sensorData]);
 
   useEffect(() => {
-    const interval = setInterval(() => { 
-      if (Object.keys(sensorData).length > 0) updateAlerts(); 
+    const interval = setInterval(() => {
+      if (Object.keys(sensorData).length > 0) setAlarms(generateAlerts());
     }, 10000);
     return () => clearInterval(interval);
   }, [sensorData]);
 
-  const handleRefresh = () => { 
-    fetchRealData(); 
-    fetchProductionSummary(); 
+  const handleRefresh = () => {
+    refresh();
+    fetchProductionSummary();
   };
 
   // ==================== VALUES ====================
@@ -590,7 +452,7 @@ export function Dashboard() {
   const feedTankLevel = getNumber('RO5-FeedTankLevel');
   const systemOperation = getValue('RO5-SystemOperation');
   const systemMode = getValue('RO5-SystemMode');
-  const dosingActive = getValue('RO5-AntiscalantDosingActive');
+  const dosingActive = getValue('RO5-AntiscalantDosingActive'); // now the same normalized 'ON'/'OFF' string AntiscalantDosing.jsx uses
 
   const isSystemOn = isActive(systemOperation) || feedFlow > 5 || permeateFlow > 5;
   const isAutoMode = isActive(systemMode);
@@ -604,26 +466,28 @@ export function Dashboard() {
   const criticalAlarmsCount = activeAlarmsList.filter(a => a.severity === 'Critical').length;
   const roHealthScore = computeHealthScore(alarms);
 
+  const dataInitialized = Object.keys(sensorData).length > 0;
+
   // ==================== LOADING / ERROR STATES ====================
-  if (loading && !dataInitialized) {
+  if (contextLoading && !dataInitialized) {
     return (
       <div className="flex items-center justify-center h-full p-8">
         <div style={{ color: "var(--muted-foreground)", textAlign: "center" }}>
           <RefreshCw size={24} className="animate-spin" style={{ margin: "0 auto 12px", color: COLORS.primary }} />
           <p>Connecting to backend...</p>
-          <p style={{ fontSize: 12, marginTop: 8, opacity: 0.7 }}>{retryCount > 0 ? `Retry ${retryCount}...` : 'Fetching real-time data...'}</p>
+          <p style={{ fontSize: 12, marginTop: 8, opacity: 0.7 }}>Fetching real-time data...</p>
         </div>
       </div>
     );
   }
 
-  if (error && !dataInitialized) {
+  if (contextError && !dataInitialized) {
     return (
       <div className="flex items-center justify-center h-full p-8">
         <div style={{ color: COLORS.danger, textAlign: "center", maxWidth: 500 }}>
           <AlertTriangle size={48} style={{ margin: "0 auto 16px" }} />
           <p style={{ fontWeight: 600, fontSize: 18, marginBottom: 8 }}>No Data Available</p>
-          <p style={{ fontSize: 14, opacity: 0.8, marginBottom: 16 }}>{error}</p>
+          <p style={{ fontSize: 14, opacity: 0.8, marginBottom: 16 }}>{contextError}</p>
           <p style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 16 }}>Make sure the backend server is running at {API_BASE_URL}</p>
           <div className="flex gap-3 justify-center">
             <button onClick={handleRefresh} style={{ padding: "10px 24px", borderRadius: 6, background: COLORS.primary, border: "none", color: "white", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 600 }}>
@@ -640,26 +504,26 @@ export function Dashboard() {
 
   return (
     <div className="flex flex-col h-full overflow-auto" style={{ background: 'var(--background)' }}>
-      
+
       {/* Dashboard Content */}
       <div className="flex-1 overflow-auto p-3 sm:p-4">
 
         {/* Status Bar */}
-        <div className="flex items-center justify-between flex-wrap gap-2 mb-3 sm:mb-4 p-2 sm:p-3 rounded" style={{ 
-          background: connected ? (simulationMode ? '#1e293b' : 'rgba(34,197,94,0.05)') : 'rgba(239,68,68,0.05)',
-          border: `1px solid ${connected ? (simulationMode ? '#334155' : 'rgba(34,197,94,0.15)') : 'rgba(239,68,68,0.15)'}` 
+        <div className="flex items-center justify-between flex-wrap gap-2 mb-3 sm:mb-4 p-2 sm:p-3 rounded" style={{
+          background: connected ? 'rgba(34,197,94,0.05)' : 'rgba(239,68,68,0.05)',
+          border: `1px solid ${connected ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)'}`
         }}>
           <div className="flex items-center gap-3 flex-wrap">
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{ 
+              <div style={{
                 width: 8, height: 8, borderRadius: '50%',
-                background: connected ? (simulationMode ? COLORS.warning : COLORS.success) : COLORS.danger,
-                boxShadow: connected ? `0 0 8px ${simulationMode ? '#f59e0b80' : '#22c55e80'}` : 'none'
+                background: connected ? COLORS.success : COLORS.danger,
+                boxShadow: connected ? `0 0 8px #22c55e80` : 'none'
               }} />
-              <span style={{ fontSize: 10, fontWeight: 600, color: connected ? (simulationMode ? COLORS.warning : COLORS.success) : COLORS.danger }}>
-                {connected ? (simulationMode ? 'SIMULATION MODE' : 'LIVE DATA') : 'DISCONNECTED'}
+              <span style={{ fontSize: 10, fontWeight: 600, color: connected ? COLORS.success : COLORS.danger }}>
+                {connected ? 'LIVE DATA' : 'DISCONNECTED'}
               </span>
-              {connected && !simulationMode && (
+              {connected && (
                 <span style={{ fontSize: 9, color: 'var(--muted-foreground)' }}>· All systems online</span>
               )}
             </div>
@@ -667,17 +531,17 @@ export function Dashboard() {
           <div className="flex items-center gap-4 flex-wrap">
             <button
               onClick={handleRefresh}
-              disabled={loading}
+              disabled={contextLoading}
               style={{
                 padding: '4px 12px', borderRadius: 4, background: 'var(--secondary)',
                 border: '1px solid var(--border)', color: 'var(--foreground)',
-                cursor: loading ? 'not-allowed' : 'pointer', fontSize: 10, 
+                cursor: contextLoading ? 'not-allowed' : 'pointer', fontSize: 10,
                 display: 'flex', alignItems: 'center', gap: 4,
-                opacity: loading ? 0.5 : 1
+                opacity: contextLoading ? 0.5 : 1
               }}
             >
-              <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
-              {loading ? 'Loading...' : 'Refresh'}
+              <RefreshCw size={12} className={contextLoading ? 'animate-spin' : ''} />
+              {contextLoading ? 'Loading...' : 'Refresh'}
             </button>
             <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>
               <span style={{ fontFamily: 'var(--font-mono)', color: COLORS.primary }}>{activeSensors}</span>/{totalSensors} sensors
@@ -719,44 +583,44 @@ export function Dashboard() {
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1.5 sm:gap-3">
             <KPICardV2 label="Feed Flow" unit="m³/h" icon={Droplets} value={safeFormat(feedFlow, 1)}
               color={feedFlow > 40 ? COLORS.success : feedFlow > 0 ? COLORS.warning : COLORS.danger}
-              trend={getTrend(history, 'FEEDFlow')} statusText={feedFlow > 40 ? "Normal" : feedFlow > 0 ? "Check" : "No flow"} statusOk={feedFlow > 40} />
+              trend={getTrend(history, 'RO5-FEEDFlow')} statusText={feedFlow > 40 ? "Normal" : feedFlow > 0 ? "Check" : "No flow"} statusOk={feedFlow > 40} />
             <KPICardV2 label="Permeate Flow" unit="m³/h" icon={Droplets} value={safeFormat(permeateFlow, 1)}
               color={permeateFlow > 30 ? COLORS.success : permeateFlow > 0 ? COLORS.warning : COLORS.danger}
-              trend={getTrend(history, 'Permeateflow')} statusText={permeateFlow > 30 ? "Normal" : permeateFlow > 0 ? "Low" : "No flow"} statusOk={permeateFlow > 30} />
+              trend={getTrend(history, 'RO5-Permeateflow')} statusText={permeateFlow > 30 ? "Normal" : permeateFlow > 0 ? "Low" : "No flow"} statusOk={permeateFlow > 30} />
             <KPICardV2 label="System Recovery" unit="%" icon={Activity} value={safeFormat(systemRecovery, 1)}
               color={systemRecovery > 75 ? COLORS.success : systemRecovery > 0 ? COLORS.warning : COLORS.primary}
-              trend={getTrend(history, 'SystemRecovery')} statusText={systemRecovery > 75 ? "Good" : systemRecovery > 0 ? "Check" : "—"} statusOk={systemRecovery > 75} />
+              trend={getTrend(history, 'RO5-SystemRecovery')} statusText={systemRecovery > 75 ? "Good" : systemRecovery > 0 ? "Check" : "—"} statusOk={systemRecovery > 75} />
             <KPICardV2 label="RO Pressure" unit="bar" icon={Gauge} value={safeFormat(roPressure, 1)}
               color={roPressure >= 8 && roPressure <= 16 ? COLORS.success : roPressure > 16 ? COLORS.danger : roPressure > 0 ? COLORS.warning : COLORS.primary}
-              trend={getTrend(history, 'ROPressure')} statusText={roPressure >= 8 && roPressure <= 16 ? "Normal" : roPressure > 0 ? "Check" : "—"} statusOk={roPressure >= 8 && roPressure <= 16} />
+              trend={getTrend(history, 'RO5-ROPressure')} statusText={roPressure >= 8 && roPressure <= 16 ? "Normal" : roPressure > 0 ? "Check" : "—"} statusOk={roPressure >= 8 && roPressure <= 16} />
             <KPICardV2 label="Concentrate Flow" unit="m³/h" icon={Activity} value={safeFormat(concentrateFlow, 1)}
               color={concentrateFlow > 15 ? COLORS.success : COLORS.warning}
-              trend={getTrend(history, 'ConcentrateFlow')} statusText={concentrateFlow > 15 ? "Normal" : "Low"} statusOk={concentrateFlow > 15} />
+              trend={getTrend(history, 'RO5-ConcetrateFlow')} statusText={concentrateFlow > 15 ? "Normal" : "Low"} statusOk={concentrateFlow > 15} />
             <KPICardV2 label="Filter Delta P" unit="bar" icon={Filter} value={safeFormat(filterDeltaP, 2)}
               color={filterDeltaP > 0.4 ? COLORS.danger : filterDeltaP > 0 ? COLORS.success : COLORS.primary}
-              trend={getTrend(history, 'MediaFilterDeltaP')} statusText={filterDeltaP > 0.4 ? "Check" : filterDeltaP > 0 ? "Normal" : "—"} statusOk={filterDeltaP <= 0.4 && filterDeltaP > 0} />
+              trend={getTrend(history, 'RO5-MediaFilterDeltaP')} statusText={filterDeltaP > 0.4 ? "Check" : filterDeltaP > 0 ? "Normal" : "—"} statusOk={filterDeltaP <= 0.4 && filterDeltaP > 0} />
             <KPICardV2 label="Stage 1 Delta P" unit="bar" icon={Zap} value={safeFormat(stage1Delta, 2)}
               color={stage1Delta > 0.55 ? COLORS.danger : stage1Delta > 0 ? COLORS.success : COLORS.primary}
-              trend={getTrend(history, 'Stage1Delta')} statusText={stage1Delta > 0.55 ? "Check" : stage1Delta > 0 ? "Normal" : "—"} statusOk={stage1Delta <= 0.55 && stage1Delta > 0} />
+              trend={getTrend(history, 'RO5-Stage1Delta')} statusText={stage1Delta > 0.55 ? "Check" : stage1Delta > 0 ? "Normal" : "—"} statusOk={stage1Delta <= 0.55 && stage1Delta > 0} />
             <KPICardV2 label="Stage 2 Delta P" unit="bar" icon={Zap} value={safeFormat(stage2Delta, 2)}
               color={stage2Delta > 0.50 ? COLORS.warning : stage2Delta > 0 ? COLORS.success : COLORS.primary}
-              trend={getTrend(history, 'Stage2Delta')} statusText={stage2Delta > 0.50 ? "Check" : stage2Delta > 0 ? "Normal" : "—"} statusOk={stage2Delta <= 0.50 && stage2Delta > 0} />
+              trend={getTrend(history, 'RO5-Stage2Delta')} statusText={stage2Delta > 0.50 ? "Check" : stage2Delta > 0 ? "Normal" : "—"} statusOk={stage2Delta <= 0.50 && stage2Delta > 0} />
             <KPICardV2 label="Product Water EC" unit="µS/cm" icon={FlaskConical} value={safeFormat(pureWaterEC, 0)}
               color={pureWaterEC > 150 ? COLORS.danger : pureWaterEC > 0 ? COLORS.success : COLORS.primary}
-              trend={getTrend(history, 'PureWaterEC')} statusText={pureWaterEC > 150 ? "High" : pureWaterEC > 0 ? "Within limits" : "—"} statusOk={pureWaterEC <= 150 && pureWaterEC > 0} />
+              trend={getTrend(history, 'RO5-PureWaterEc')} statusText={pureWaterEC > 150 ? "High" : pureWaterEC > 0 ? "Within limits" : "—"} statusOk={pureWaterEC <= 150 && pureWaterEC > 0} />
             <KPICardV2 label="Daily Production" unit="m³" icon={TrendingUp} value={dailyProdDisplay}
               color={dailyProduction > 0 ? COLORS.success : COLORS.primary}
-              trend={getTrend(history, 'Permeateflow', 60 * 60 * 1000)} statusText={summaryLoading ? "Loading" : `${safeFormat(permeateFlow, 1)} m³/h now`} statusOk={true} />
+              trend={getTrend(history, 'RO5-Permeateflow', 60 * 60 * 1000)} statusText={summaryLoading ? "Loading" : `${safeFormat(permeateFlow, 1)} m³/h now`} statusOk={true} />
           </div>
         </div>
 
         {/* ── Performance Trends using LiveTrendChart ── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4 mb-3 sm:mb-4">
           <div className="lg:col-span-2 rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-            <LiveTrendChart 
-              data={{ ...sensorData, history }} 
-              sensorKey={selectedSensors[0] || 'RO5-Permeateflow'} 
-              height={isMobile ? 180 : 220} 
+            <LiveTrendChart
+              data={{ ...sensorData, history }}
+              sensorKey={selectedSensors[0] || 'RO5-Permeateflow'}
+              height={isMobile ? 180 : 220}
             />
           </div>
 
@@ -836,7 +700,7 @@ export function Dashboard() {
           <SystemHealthRadar data={sensorData} />
         </div>
 
-       
+
 
         {/* ── Flow balance, distribution charts ── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-3 sm:mb-4">
@@ -846,18 +710,18 @@ export function Dashboard() {
         </div>
 
         {/* ── Footer ── */}
-        <div style={{ 
-          textAlign: "center", 
-          padding: "12px 0", 
-          borderTop: "1px solid var(--border)", 
-          display: "flex", 
-          justifyContent: "space-between", 
-          fontSize: 10, 
+        <div style={{
+          textAlign: "center",
+          padding: "12px 0",
+          borderTop: "1px solid var(--border)",
+          display: "flex",
+          justifyContent: "space-between",
+          fontSize: 10,
           color: "var(--muted-foreground)",
           flexWrap: "wrap",
           gap: 8
         }}>
-         
+
         </div>
       </div>
 
