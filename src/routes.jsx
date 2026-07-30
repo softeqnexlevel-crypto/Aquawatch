@@ -3,6 +3,7 @@
 import { createBrowserRouter, Outlet, Navigate, useLocation, useNavigate, RouterProvider } from "react-router";
 import { useState, useEffect } from "react";
 import { DataProvider } from "./contexts/DataContext";
+import { AlertsProvider, useAlerts } from "./contexts/AlertsContext";
 import { ScrollContainer } from "./components/ScrollContainer";
 
 // Components
@@ -26,7 +27,6 @@ import TagRules from './components/TagRules';
 import Billing from "./components/Billing";
 import { UserManagement } from "./components/UserManagement";
 
-import { alerts } from "./data/mockData";
 import { useAuth } from "./contexts/AuthContext";
 
 
@@ -107,11 +107,29 @@ function useDarkMode() {
 }
 
 // ==================== LAYOUT ====================
+// ✅ DataProvider + AlertsProvider now wrap the ENTIRE layout (Sidebar +
+// TopNav + page content), not just the <Outlet/> content. Previously
+// Sidebar/TopNav sat outside DataProvider, so they had no way to reach
+// live sensor/alert data at all — their alert badge was reading a static
+// mock file (./data/mockData) that never changed. Now DashboardLayoutInner
+// (a child of both providers) reads the real, live alert count via
+// useAlerts() and passes it down.
 function DashboardLayout() {
+  return (
+    <DataProvider>
+      <AlertsProvider>
+        <DashboardLayoutInner />
+      </AlertsProvider>
+    </DataProvider>
+  );
+}
+
+function DashboardLayoutInner() {
   const { darkMode, toggleDark } = useDarkMode();
   const location = useLocation();
   const navigate = useNavigate();
   const [isMobile, setIsMobile] = useState(false);
+  const { activeAlerts } = useAlerts(); // ✅ real, live alert count
 
   // Mobile detection
   useEffect(() => {
@@ -121,7 +139,7 @@ function DashboardLayout() {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  const activeAlerts = alerts.filter((a) => a.status === "Active").length;
+  const alertCount = activeAlerts.length;
   const currentPage = pathToPage[location.pathname] || "dashboard";
   const title = pageTitles[location.pathname] || "AquaSystemTech";
 
@@ -131,54 +149,52 @@ function DashboardLayout() {
   };
 
   return (
-    <div 
-      className={darkMode ? "dark" : ""} 
-      style={{ 
-        width: "100%", 
-        height: "100vh", 
-        display: "flex", 
-        overflow: "hidden", 
+    <div
+      className={darkMode ? "dark" : ""}
+      style={{
+        width: "100%",
+        height: "100vh",
+        display: "flex",
+        overflow: "hidden",
         background: "var(--background)",
         position: "relative",
       }}
     >
       {/* Sidebar - hidden on mobile when not open */}
-      <div style={{ 
+      <div style={{
         flexShrink: 0,
         zIndex: 50,
       }}>
         <Sidebar
           activePage={currentPage}
           onNavigate={handleNavigate}
-          alertCount={activeAlerts}
+          alertCount={alertCount}
         />
       </div>
 
       {/* Main content */}
-      <div style={{ 
-        flex: 1, 
-        display: "flex", 
-        flexDirection: "column", 
+      <div style={{
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
         overflow: "hidden",
         minWidth: 0, // Prevents overflow
       }}>
         <TopNav
           darkMode={darkMode}
           onToggleDark={toggleDark}
-          alertCount={activeAlerts}
+          alertCount={alertCount}
           title={title}
         />
-        
+
         <ScrollContainer>
-          <DataProvider>
-            <div style={{ 
-              padding: isMobile ? '8px' : '16px',
-              height: '100%',
-              overflow: 'auto',
-            }}>
-              <Outlet />
-            </div>
-          </DataProvider>
+          <div style={{
+            padding: isMobile ? '8px' : '16px',
+            height: '100%',
+            overflow: 'auto',
+          }}>
+            <Outlet />
+          </div>
         </ScrollContainer>
       </div>
     </div>
@@ -195,16 +211,25 @@ function LoginPageWrapper() {
   };
 
   return (
-    <div className={darkMode ? "dark" : ""} style={{ 
-      minHeight: "100vh", 
-      background: "var(--background)" 
+    <div className={darkMode ? "dark" : ""} style={{
+      minHeight: "100vh",
+      background: "var(--background)"
     }}>
-      <Login 
+      <Login
         onLoginSuccess={handleLoginSuccess}
         isModal={false}
       />
     </div>
   );
+}
+
+// ==================== DASHBOARD ROUTE WRAPPER ====================
+// Route configs can't pass extra props via `Component:`, only via
+// `element:`. This wrapper lets Dashboard's "View All →" alarms link
+// actually navigate to the Alerts Center page.
+function DashboardRoute() {
+  const navigate = useNavigate();
+  return <Dashboard onViewAllAlerts={() => navigate('/app/alerts')} />;
 }
 
 // ==================== ROUTER ====================
@@ -226,7 +251,7 @@ const router = createBrowserRouter([
       </ProtectedRoute>
     ),
     children: [
-      { index: true, Component: Dashboard },
+      { index: true, element: <DashboardRoute /> },
       { path: "tanklevel", Component: FeedTankManagement },
       { path: "tagrules", Component: TagRules },
       { path: "production", Component: ProductionMonitoring },

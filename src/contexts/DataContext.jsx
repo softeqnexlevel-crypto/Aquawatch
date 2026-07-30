@@ -21,9 +21,26 @@ const KEY_MAPPING = {
   'siemens200smart-RO5-SystemRecovery': 'RO5-SystemRecovery',
   'siemens200smart-RO5-PureWaterEc': 'RO5-PureWaterEc',
   'siemens200smart-RO5-FeedTankLevel': 'RO5-FeedTankLevel',
+
+  // ✅ SYSTEM OPERATION MAPPINGS — widened the same way AntiscalantDoser
+  // was, since a single-alias mapping is exactly what caused the
+  // "Power Problem - System Offline" alert to fire permanently: if the
+  // backend's real key doesn't match the one alias below, the value
+  // never lands in sensorData, getValue() falls back to 0, and
+  // isActive(0) is always false — i.e. "OFF" no matter what the plant
+  // is actually doing. Check the '📊 Fetched readings' console log
+  // below to see the *actual* raw key your backend sends, and if it's
+  // still not in this list, add it.
   'siemens200smart-RO5-SystemOperation': 'RO5-SystemOperation',
+  'RO5-SystemOperation': 'RO5-SystemOperation',
+  'RO5-SystemOn': 'RO5-SystemOperation',
+  'siemens200smart-RO5-SystemOn': 'RO5-SystemOperation',
+  'SystemOperation': 'RO5-SystemOperation',
+
   'siemens200smart-RO5-SystemMode': 'RO5-SystemMode',
-  
+  'RO5-SystemMode': 'RO5-SystemMode',
+  'SystemMode': 'RO5-SystemMode',
+
   // ✅ ANTISCALANT DOSER MAPPINGS
   'siemens200smart-RO5-AntiscalantDosingActive': 'RO5-AntiscalantDosingActive',
   'RO5-AntiscalantDoser': 'RO5-AntiscalantDosingActive',
@@ -64,26 +81,17 @@ const getUnitForParameter = (param) => {
  */
 const normalizeAntiscalantValue = (value) => {
   if (value === undefined || value === null) return 'OFF';
-  
-  // If it's already a string "ON" or "OFF"
+
   if (typeof value === 'string') {
     const normalized = value.toUpperCase().trim();
     if (normalized === 'ON' || normalized === 'TRUE' || normalized === '1') return 'ON';
     if (normalized === 'OFF' || normalized === 'FALSE' || normalized === '0') return 'OFF';
-    // If it's any other string, treat as OFF
     return 'OFF';
   }
-  
-  // If it's a boolean
-  if (typeof value === 'boolean') {
-    return value ? 'ON' : 'OFF';
-  }
-  
-  // If it's a number
-  if (typeof value === 'number') {
-    return value === 1 ? 'ON' : 'OFF';
-  }
-  
+
+  if (typeof value === 'boolean') return value ? 'ON' : 'OFF';
+  if (typeof value === 'number') return value === 1 ? 'ON' : 'OFF';
+
   return 'OFF';
 };
 
@@ -97,36 +105,38 @@ export const DataProvider = ({ children }) => {
 
   const fetchInitialData = async () => {
     try {
+      setLoading(true); // ✅ so the Dashboard "Refresh" button visibly shows a loading state again
       const response = await fetch(`${API_BASE_URL}/api/current`);
       if (!response.ok) throw new Error(`HTTP ${response.status}: Failed to fetch data`);
       const readings = await response.json();
-      
-      console.log('📊 Fetched readings:', readings);
-      
+
+      console.log('📊 Fetched readings (raw backend keys):', readings);
+      console.log('📊 Raw keys list:', Object.keys(readings));
+
       const formattedData = {};
       Object.entries(readings).forEach(([rawKey, value]) => {
-        // Try to find the key in KEY_MAPPING
         let key = KEY_MAPPING[rawKey] || rawKey;
-        
-        // ✅ Special handling for Antiscalant - normalize the value
+
         let finalValue = value;
         if (key === 'RO5-AntiscalantDosingActive' || rawKey.includes('Antiscalant')) {
           finalValue = normalizeAntiscalantValue(value);
           console.log(`🔍 Antiscalant normalized: ${rawKey} → ${key} = ${value} → ${finalValue}`);
         }
-        
+
         formattedData[key] = {
           value: finalValue,
           timestamp: new Date().toISOString(),
           unit: getUnitForParameter(key)
         };
       });
-      
+
       console.log('📊 Formatted sensor data keys:', Object.keys(formattedData));
+      console.log('🔍 SystemOperation value:', formattedData['RO5-SystemOperation']?.value, '(undefined here means the raw key from your backend is not yet in KEY_MAPPING — check the raw keys list above)');
       console.log('🔍 Antiscalant value:', formattedData['RO5-AntiscalantDosingActive']?.value);
-      
+
       setSensorData(formattedData);
       setLoading(false);
+      setError(null);
       setLastUpdate(new Date().toISOString());
     } catch (err) {
       console.error('Failed to fetch initial data:', err);
@@ -153,14 +163,12 @@ export const DataProvider = ({ children }) => {
       const rawKey = newData.parameter;
       let key = KEY_MAPPING[rawKey] || rawKey;
       const timestamp = newData.timestamp || new Date().toISOString();
-      
-      // ✅ Special handling for Antiscalant - normalize the value
+
       let value = newData.value;
       if (key === 'RO5-AntiscalantDosingActive' || rawKey.includes('Antiscalant')) {
         value = normalizeAntiscalantValue(newData.value);
-        console.log(`🔴 Antiscalant received: ${rawKey} → ${key} = ${newData.value} → ${value}`);
       }
-      
+
       setSensorData(prev => ({
         ...prev,
         [key]: {
@@ -211,7 +219,6 @@ export const DataProvider = ({ children }) => {
 
   const getValue = (key) => {
     const value = sensorData[key]?.value;
-    // If value is undefined or null, return 0 for numeric or 'OFF' for Antiscalant
     if (key === 'RO5-AntiscalantDosingActive') {
       return value !== undefined && value !== null ? value : 'OFF';
     }

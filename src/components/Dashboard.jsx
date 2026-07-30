@@ -14,6 +14,7 @@ import {
 } from 'recharts';
 import { API_BASE_URL } from '../config';
 import { useData } from '../contexts/DataContext';
+import { useAlerts } from '../contexts/AlertsContext';
 
 // Import custom chart components
 import { LiveTrendChart } from './dashboardComponents/LiveTrendChart';
@@ -300,7 +301,7 @@ const api = {
   Dashboard Component
   ============================================================ */
 
-export function Dashboard() {
+export function Dashboard({ onViewAllAlerts } = {}) {
   // ✅ Single source of truth for all live sensor data, history, and
   // connection status — shared with every other component (e.g.
   // AntiscalantDosing) via the same DataProvider/socket connection.
@@ -354,85 +355,14 @@ export function Dashboard() {
 
   const dailyProduction = productionSummary?.permeate?.daily ?? 0;
 
-  // ==================== ALARMS (derived from shared sensor context) ====================
-  // Note: this recomputes threshold-based alarms locally from live sensor
-  // values, same as before. The previous version of Dashboard.jsx also
-  // listened directly for a raw 'plc-alarm' socket event pushed from the
-  // backend and merged those in too. Since Dashboard no longer owns its
-  // own socket, that raw event stream isn't wired up here. If you want
-  // backend-pushed alarms (not just these computed ones) available here,
-  // the cleanest place to add that 'plc-alarm' listener is inside
-  // DataContext.jsx so every consumer benefits from one connection.
-  const [alarms, setAlarms] = useState([]);
-
-  const generateAlerts = () => {
-    const newAlerts = [];
-    let id = 1;
-    const now = new Date();
-    const addAlert = (type, severity, equipment, value, threshold, isPowerProblem = false) => {
-      newAlerts.push({
-        id: `ALT-${String(id++).padStart(3, '0')}`,
-        type, severity, status: 'Active', equipment,
-        value: typeof value === 'number' ? value.toFixed(1) : String(value),
-        threshold, time: now.toLocaleTimeString(), date: now.toLocaleDateString(), isPowerProblem,
-      });
-    };
-
-    const isSystemOnLocal = isActive(getValue('RO5-SystemOperation'));
-    if (!isSystemOnLocal) addAlert('Power Problem - System Offline', 'Critical', 'RO5 - SystemOperation', 'OFF', 'ON required', true);
-
-    const roPressure = getNumber('RO5-ROPressure');
-    if (roPressure > 16 && roPressure > 0) addAlert('High RO Pressure', 'Critical', 'RO5 - ROPressure', roPressure, '> 16 bar');
-
-    const stage1Delta = getNumber('RO5-Stage1Delta');
-    if (stage1Delta > 0.60 && stage1Delta > 0) addAlert('High Differential Pressure - Stage 1', 'Critical', 'RO5 - Stage1Delta', stage1Delta, '> 0.60 bar');
-    else if (stage1Delta > 0.50 && stage1Delta > 0) addAlert('High Differential Pressure - Stage 1', 'High', 'RO5 - Stage1Delta', stage1Delta, '> 0.50 bar');
-
-    const stage2Delta = getNumber('RO5-Stage2Delta');
-    if (stage2Delta > 0.55 && stage2Delta > 0) addAlert('High Differential Pressure - Stage 2', 'High', 'RO5 - Stage2Delta', stage2Delta, '> 0.55 bar');
-
-    const filterDeltaP = getNumber('RO5-MediaFilterDeltaP');
-    if (filterDeltaP > 0.40 && filterDeltaP > 0) addAlert('High Filter Delta P', 'Critical', 'RO5 - MediaFilterDeltaP', filterDeltaP, '> 0.40 bar');
-    else if (filterDeltaP > 0.30 && filterDeltaP > 0) addAlert('High Filter Delta P', 'Medium', 'RO5 - MediaFilterDeltaP', filterDeltaP, '> 0.30 bar');
-
-    const systemRecovery = getNumber('RO5-SystemRecovery');
-    if (systemRecovery < 68 && systemRecovery > 0) addAlert('Low System Recovery', 'Critical', 'RO5 - SystemRecovery', systemRecovery, '< 68%');
-    else if (systemRecovery < 72 && systemRecovery > 0) addAlert('Low System Recovery', 'Medium', 'RO5 - SystemRecovery', systemRecovery, '< 72%');
-
-    const feedTankLevel = getNumber('RO5-FeedTankLevel');
-    if (feedTankLevel < 20 && feedTankLevel > 0) addAlert('Low Feed Tank Level', 'Critical', 'RO5 - FeedTankLevel', feedTankLevel, '< 20%');
-    else if (feedTankLevel < 30 && feedTankLevel > 0) addAlert('Low Feed Tank Level', 'Medium', 'RO5 - FeedTankLevel', feedTankLevel, '< 30%');
-
-    const feedFlow = getNumber('RO5-FEEDFlow');
-    if (feedFlow < 50 && feedFlow > 0) addAlert('Low Feed Flow', 'High', 'RO5 - FEEDFlow', feedFlow, '< 50 m³/h');
-
-    const pureWaterEC = getNumber('RO5-PureWaterEc');
-    if (pureWaterEC > 50 && pureWaterEC > 0) addAlert('High Product Water EC', 'Medium', 'RO5 - PureWaterEc', pureWaterEC, '> 50 µS/cm');
-
-    if (newAlerts.length === 0) {
-      newAlerts.push({
-        id: `ALT-${String(id++).padStart(3, '0')}`, type: 'All Systems Operating Normally', severity: 'Info',
-        status: 'Acknowledged', equipment: 'RO5 - System Health', value: 'All systems go', threshold: 'N/A',
-        time: now.toLocaleTimeString(), date: now.toLocaleDateString(), isPowerProblem: false,
-      });
-    }
-    return newAlerts;
-  };
-
-  // Recompute alarms whenever the shared sensor data changes, and also
-  // on a steady interval as a safety net (same cadence as before).
-  useEffect(() => {
-    if (Object.keys(sensorData).length > 0) {
-      setAlarms(generateAlerts());
-    }
-  }, [sensorData]);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (Object.keys(sensorData).length > 0) setAlarms(generateAlerts());
-    }, 10000);
-    return () => clearInterval(interval);
-  }, [sensorData]);
+  // ==================== ALARMS ====================
+  // ✅ Now reads from the shared AlertsContext (utils/alertEngine.js)
+  // instead of recomputing its own alert list with its own threshold
+  // numbers. This is what fixes: (1) Dashboard and AlertsCenter showing
+  // different verdicts for the same sensor at the same instant, and
+  // (2) acknowledging an alert in one place actually sticking everywhere,
+  // since there's now exactly one ledger instead of three independent ones.
+  const { activeAlerts: activeAlarmsList, counts: alertCounts } = useAlerts();
 
   const handleRefresh = () => {
     refresh();
@@ -462,9 +392,8 @@ export function Dashboard() {
   const activeSensors = Object.keys(sensorData).filter(key => sensorData[key]?.value !== undefined && sensorData[key]?.value !== null).length;
   const totalSensors = 15;
 
-  const activeAlarmsList = alarms.filter(a => a.status === 'Active');
-  const criticalAlarmsCount = activeAlarmsList.filter(a => a.severity === 'Critical').length;
-  const roHealthScore = computeHealthScore(alarms);
+  const criticalAlarmsCount = alertCounts.Critical;
+  const roHealthScore = computeHealthScore(activeAlarmsList);
 
   const dataInitialized = Object.keys(sensorData).length > 0;
 
@@ -648,7 +577,12 @@ export function Dashboard() {
             <div id="alarms-panel" className="rounded-lg p-3 sm:p-4 flex flex-col gap-2" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
               <div className="flex items-center justify-between">
                 <SectionTitle>Recent Alarms</SectionTitle>
-                <span style={{ fontSize: 10.5, color: COLORS.primary, fontWeight: 600, cursor: 'pointer' }}>View All →</span>
+                <button
+                  onClick={() => onViewAllAlerts ? onViewAllAlerts() : console.warn('Dashboard: no onViewAllAlerts handler was passed in — wire this up wherever <Dashboard /> is rendered, e.g. onViewAllAlerts={() => navigate("/app/alerts")}')}
+                  style={{ fontSize: 10.5, color: COLORS.primary, fontWeight: 600, cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}
+                >
+                  View All →
+                </button>
               </div>
               <div className="flex flex-col gap-1.5 sm:gap-2 max-h-[150px] overflow-auto">
                 {activeAlarmsList.length > 0 ? activeAlarmsList.slice(0, isMobile ? 2 : 4).map(a => <RecentAlarmItem key={a.id} alarm={a} />) : (
