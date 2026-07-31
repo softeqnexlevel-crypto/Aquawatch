@@ -8,6 +8,17 @@ export const DistributionHistogram = ({ data, sensorKey }) => {
   const history = data?.history?.[sensorKey] || [];
   const sensor = SENSOR_MAP[sensorKey] || { label: sensorKey || 'Sensor', color: COLORS.primary };
 
+  // Picks enough decimal places that adjacent bin edges don't round to
+  // the same displayed value. A fixed .toFixed(1) works fine when the
+  // data spans a wide range, but collapses to identical labels (e.g.
+  // "11.3-11.3" repeated) when the range is tiny — like RO Pressure
+  // barely moving between 11.31 and 11.32 across only a few readings.
+  const getPrecision = (binSize) => {
+    if (!isFinite(binSize) || binSize <= 0) return 2;
+    const decimals = Math.ceil(-Math.log10(binSize));
+    return Math.min(Math.max(decimals, 1), 6); // clamp to 1–6 decimals
+  };
+
   const histogramData = useMemo(() => {
     if (!history || history.length === 0) return [];
 
@@ -19,20 +30,31 @@ export const DistributionHistogram = ({ data, sensorKey }) => {
     const range = max - min;
 
     if (range === 0) {
-      return [{ range: `${min.toFixed(1)}`, count: values.length }];
+      return [{ range: `${min.toFixed(2)}`, label: min.toFixed(2), count: values.length }];
     }
 
-    const binSize = range / bins;
+    // Don't create more bins than there is real data to fill them with —
+    // 20 bins for 4 readings just produces a wall of empty, overlapping
+    // labels. Cap to the smaller of: what the user picked, or a sane
+    // number derived from how many readings actually exist.
+    const effectiveBins = Math.max(1, Math.min(bins, values.length));
+    const binSize = range / effectiveBins;
+    const precision = getPrecision(binSize);
 
-    const binsArray = Array.from({ length: bins }, (_, i) => ({
-      range: `${(min + i * binSize).toFixed(1)}-${(min + (i + 1) * binSize).toFixed(1)}`,
-      count: 0,
-      start: min + i * binSize,
-      end: min + (i + 1) * binSize
-    }));
+    const binsArray = Array.from({ length: effectiveBins }, (_, i) => {
+      const start = min + i * binSize;
+      const end = min + (i + 1) * binSize;
+      return {
+        range: `${start.toFixed(precision)}-${end.toFixed(precision)}`, // full range — shown in tooltip
+        label: start.toFixed(precision),                                 // short label — shown on axis
+        count: 0,
+        start,
+        end,
+      };
+    });
 
     values.forEach(v => {
-      const binIndex = Math.min(Math.floor((v - min) / binSize), bins - 1);
+      const binIndex = Math.min(Math.floor((v - min) / binSize), effectiveBins - 1);
       if (binsArray[binIndex]) {
         binsArray[binIndex].count++;
       }
@@ -101,7 +123,7 @@ export const DistributionHistogram = ({ data, sensorKey }) => {
             ))}
           </select>
           <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>
-            n={values.length}
+            n={values.length}{histogramData.length > 1 && histogramData.length < bins ? ` · ${histogramData.length} bins used` : ''}
           </span>
         </div>
       </div>
@@ -116,7 +138,6 @@ export const DistributionHistogram = ({ data, sensorKey }) => {
       }}>
         <span>Mean: <span style={{ color: 'var(--foreground)', fontFamily: 'var(--font-mono)' }}>{mean.toFixed(2)}</span></span>
         <span>Median: <span style={{ color: 'var(--foreground)', fontFamily: 'var(--font-mono)' }}>{median.toFixed(2)}</span></span>
-        <span>Min: <span style={{ color: COLORS.danger, fontFamily: 'var(--font-mono)' }}>{Math.min(...values).toFixed(2)}</span></span>
         <span>Max: <span style={{ color: COLORS.success, fontFamily: 'var(--font-mono)' }}>{Math.max(...values).toFixed(2)}</span></span>
       </div>
 
@@ -125,11 +146,14 @@ export const DistributionHistogram = ({ data, sensorKey }) => {
           <BarChart data={histogramData}>
             <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
             <XAxis
-              dataKey="range"
-              tick={{ fontSize: 8, fill: 'var(--muted-foreground)' }}
+              dataKey="label"
+              tick={{ fontSize: 9, fill: 'var(--muted-foreground)' }}
               axisLine={false}
               tickLine={false}
-              interval={Math.floor(bins / 10)}
+              angle={-40}
+              textAnchor="end"
+              height={40}
+              interval={0}
             />
             <YAxis
               tick={{ fontSize: 9, fill: 'var(--muted-foreground)', fontFamily: 'var(--font-mono)' }}
