@@ -22,8 +22,13 @@ export const DistributionHistogram = ({ data, sensorKey }) => {
   const histogramData = useMemo(() => {
     if (!history || history.length === 0) return [];
 
+    // Extract values and filter out invalid ones
     const values = history.map(d => d.value).filter(v => v !== undefined && v !== null && !isNaN(v));
     if (values.length === 0) return [];
+
+    // Log the actual values for debugging
+    console.log(`📊 ${sensorKey} values:`, values);
+    console.log(`📊 Min: ${Math.min(...values)}, Max: ${Math.max(...values)}, Mean: ${values.reduce((a, b) => a + b, 0) / values.length}`);
 
     const min = Math.min(...values);
     const max = Math.max(...values);
@@ -53,16 +58,24 @@ export const DistributionHistogram = ({ data, sensorKey }) => {
       };
     });
 
+    // Count values in each bin
     values.forEach(v => {
-      const binIndex = Math.min(Math.floor((v - min) / binSize), effectiveBins - 1);
+      // Handle edge case where value equals the max
+      let binIndex;
+      if (v === max) {
+        binIndex = effectiveBins - 1;
+      } else {
+        binIndex = Math.min(Math.floor((v - min) / binSize), effectiveBins - 1);
+      }
       if (binsArray[binIndex]) {
         binsArray[binIndex].count++;
       }
     });
 
     return binsArray;
-  }, [history, bins]);
+  }, [history, bins, sensorKey]);
 
+  // If no data, show empty state
   if (!history || history.length === 0) {
     return (
       <div style={{
@@ -85,6 +98,7 @@ export const DistributionHistogram = ({ data, sensorKey }) => {
   const values = history.map(d => d.value).filter(v => v !== undefined && v !== null && !isNaN(v));
   const mean = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
   const median = values.length > 0 ? [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] : 0;
+  const maxValue = values.length > 0 ? Math.max(...values) : 0;
 
   return (
     <div style={{
@@ -136,9 +150,10 @@ export const DistributionHistogram = ({ data, sensorKey }) => {
         color: 'var(--muted-foreground)',
         flexWrap: 'wrap'
       }}>
-        <span>Mean: <span style={{ color: 'var(--foreground)', fontFamily: 'var(--font-mono)' }}>{mean.toFixed(2)}</span></span>
-        <span>Median: <span style={{ color: 'var(--foreground)', fontFamily: 'var(--font-mono)' }}>{median.toFixed(2)}</span></span>
-        <span>Max: <span style={{ color: COLORS.success, fontFamily: 'var(--font-mono)' }}>{Math.max(...values).toFixed(2)}</span></span>
+        <span>Mean: <span style={{ color: 'var(--foreground)', fontFamily: 'var(--font-mono)' }}>{mean.toFixed(2)} bar</span></span>
+        <span>Median: <span style={{ color: 'var(--foreground)', fontFamily: 'var(--font-mono)' }}>{median.toFixed(2)} bar</span></span>
+        <span>Max: <span style={{ color: COLORS.success, fontFamily: 'var(--font-mono)' }}>{maxValue.toFixed(2)} bar</span></span>
+        <span>Min: <span style={{ color: COLORS.warning, fontFamily: 'var(--font-mono)' }}>{Math.min(...values).toFixed(2)} bar</span></span>
       </div>
 
       {histogramData.length > 0 ? (
@@ -171,7 +186,7 @@ export const DistributionHistogram = ({ data, sensorKey }) => {
                     borderRadius: 4,
                     padding: '8px 12px'
                   }}>
-                    <p style={{ fontSize: 10, color: '#4d7a9e' }}>Range: {d.range}</p>
+                    <p style={{ fontSize: 10, color: '#4d7a9e' }}>Range: {d.range} bar</p>
                     <p style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: COLORS.primary }}>
                       Count: {d.count}
                     </p>
