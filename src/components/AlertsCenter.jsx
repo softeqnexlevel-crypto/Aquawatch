@@ -1,9 +1,21 @@
-
+// components/AlertsCenter.jsx
+// REFACTORED: reads from the shared AlertsContext (utils/alertEngine.js +
+// contexts/AlertsContext.jsx) instead of recomputing its own alert list
+// with its own threshold table. Fixes:
+//   - Acknowledge no longer gets wiped out by the next sensor update
+//   - "System Offline" false-positives (root cause was in DataContext's
+//     key mapping, fixed there — this file just displays whatever the
+//     shared engine says, so it's now consistent with Dashboard too)
+//   - Adds a real "Clear" (dismiss) action for stale/handled alerts,
+//     plus "Clear All Acknowledged" for bulk admin cleanup
+//   - Adds a History log so cleared/acknowledged/dismissed events aren't
+//     just lost on refresh
 
 import React, { useState } from "react";
 import { AlertTriangle, CheckCircle, Bell, Filter, ChevronRight, X, Trash2, Power, History } from "lucide-react";
 import { useData } from "../contexts/DataContext";
 import { useAlerts } from "../contexts/AlertsContext";
+import { useAuth } from "../contexts/AuthContext";
 
 const severityColors = {
   Critical: { bg: "rgba(239,68,68,0.08)", border: "rgba(239,68,68,0.3)", text: "#ef4444", dot: "#ef4444" },
@@ -41,6 +53,7 @@ function formatHistoryLine(event) {
 export function AlertsCenter() {
   const { connected } = useData();
   const { alerts, activeAlerts, acknowledgeAlert, clearAlert, clearAllAcknowledged, history } = useAlerts();
+  const { isExpired } = useAuth(); // ✅ view-only guard — no acknowledging/clearing once trial has expired
 
   const [severityFilter, setSeverityFilter] = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -77,8 +90,10 @@ export function AlertsCenter() {
           {acknowledgedCount > 0 && (
             <button
               onClick={clearAllAcknowledged}
+              disabled={isExpired}
+              title={isExpired ? 'Upgrade your plan to manage alerts' : undefined}
               className="flex items-center gap-1 px-3 py-1.5 rounded transition-colors"
-              style={{ fontSize: 10, fontWeight: 600, color: "var(--muted-foreground)", background: "var(--secondary)", border: "1px solid var(--border)" }}
+              style={{ fontSize: 10, fontWeight: 600, color: "var(--muted-foreground)", background: "var(--secondary)", border: "1px solid var(--border)", opacity: isExpired ? 0.5 : 1, cursor: isExpired ? 'not-allowed' : 'pointer' }}
             >
               <Trash2 size={11} /> Clear {acknowledgedCount} Acknowledged
             </button>
@@ -225,17 +240,23 @@ export function AlertsCenter() {
 
               <div className="flex items-center gap-1 flex-shrink-0">
                 {isActiveStatus && !alert.isPowerProblem && (
-                  <button onClick={() => acknowledgeAlert(alert.id)} className="flex items-center gap-1 px-2 py-1 rounded transition-colors" style={{
-                    fontSize: 9, fontWeight: 600, color: "#22c55e", background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.2)"
+                  <button
+                    onClick={() => acknowledgeAlert(alert.id)}
+                    disabled={isExpired}
+                    title={isExpired ? 'Upgrade your plan to acknowledge alerts' : undefined}
+                    className="flex items-center gap-1 px-2 py-1 rounded transition-colors" style={{
+                    fontSize: 9, fontWeight: 600, color: "#22c55e", background: "rgba(34,197,94,0.1)", border: "1px solid rgba(34,197,94,0.2)",
+                    opacity: isExpired ? 0.5 : 1, cursor: isExpired ? 'not-allowed' : 'pointer'
                   }}>
                     <CheckCircle size={10} /> Acknowledge
                   </button>
                 )}
                 <button
                   onClick={() => clearAlert(alert.id)}
-                  title="Clear this alert (it will reappear if the condition is still true)"
+                  disabled={isExpired}
+                  title={isExpired ? 'Upgrade your plan to clear alerts' : "Clear this alert (it will reappear if the condition is still true)"}
                   className="flex items-center gap-1 px-2 py-1 rounded transition-colors"
-                  style={{ fontSize: 9, fontWeight: 600, color: "var(--muted-foreground)", background: "var(--secondary)", border: "1px solid var(--border)" }}
+                  style={{ fontSize: 9, fontWeight: 600, color: "var(--muted-foreground)", background: "var(--secondary)", border: "1px solid var(--border)", opacity: isExpired ? 0.5 : 1, cursor: isExpired ? 'not-allowed' : 'pointer' }}
                 >
                   <X size={10} /> Clear
                 </button>

@@ -111,6 +111,18 @@ export function AuthProvider({ children }) {
         return perms.includes(page);
     }
 
+    // ✅ Subscription convenience helpers — derived from the
+    // subscriptionStatus/daysRemaining/planCode fields the backend now
+    // merges into the /me and /login response (see auth.routes.js and
+    // billing.service.js). Components can read these directly off
+    // useAuth() instead of re-deriving the trial math themselves.
+    const subscriptionStatus = user?.subscriptionStatus || 'trial'; // 'trial' | 'active' | 'expired'
+    const daysRemaining = typeof user?.daysRemaining === 'number' ? user.daysRemaining : null;
+    const isTrial = subscriptionStatus === 'trial';
+    const isSubscriptionActive = subscriptionStatus === 'active';
+    const isExpired = subscriptionStatus === 'expired';
+    const planCode = user?.planCode || null;
+
     return (
         <AuthContext.Provider value={{
             user,
@@ -121,7 +133,14 @@ export function AuthProvider({ children }) {
             canAccess,
             isAuthenticated: !!user,
             hasRole: (role) => user?.role === role,
-            hasAnyRole: (roles) => roles.includes(user?.role)
+            hasAnyRole: (roles) => roles.includes(user?.role),
+            // Subscription state
+            subscriptionStatus,
+            daysRemaining,
+            isTrial,
+            isSubscriptionActive,
+            isExpired,
+            planCode,
         }}>
             {children}
         </AuthContext.Provider>

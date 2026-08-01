@@ -60,8 +60,15 @@ const CustomTooltip = ({ active, payload, label }) => {
 };
 
 // ===================== CALENDAR HELPERS =====================
-const calendarDays = Array.from({ length: 30 }, (_, i) => i + 1);
-const weekDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+const getDaysInMonth = (year, month) => {
+  return new Date(year, month, 0).getDate();
+};
+
+const getFirstDayOfMonth = (year, month) => {
+  return new Date(year, month - 1, 1).getDay(); // 0 = Sunday, 1 = Monday, etc.
+};
+
+const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 // ===================== MAIN COMPONENT =====================
 export function MaintenanceManagement() {
@@ -70,6 +77,27 @@ export function MaintenanceManagement() {
   const [showNewDrawer, setShowNewDrawer] = useState(false);
   const [filterStatus, setFilterStatus] = useState('All');
   const [isMobile, setIsMobile] = useState(false);
+
+  // Get current date info for calendar
+  const currentDate = new Date();
+  const currentYear = currentDate.getFullYear();
+  const currentMonth = currentDate.getMonth() + 1;
+  const daysInMonth = getDaysInMonth(currentYear, currentMonth);
+  const firstDayIndex = getFirstDayOfMonth(currentYear, currentMonth);
+
+  // Create calendar days array with proper offsets
+  const calendarDays = useMemo(() => {
+    const days = [];
+    // Add empty cells for days before the first day of the month
+    for (let i = 0; i < firstDayIndex; i++) {
+      days.push(null);
+    }
+    // Add actual days
+    for (let i = 1; i <= daysInMonth; i++) {
+      days.push(i);
+    }
+    return days;
+  }, [firstDayIndex, daysInMonth]);
 
   // Mobile detection
   useEffect(() => {
@@ -217,14 +245,14 @@ export function MaintenanceManagement() {
   // ===================== GENERATE MAINTENANCE HOURS =====================
   const maintenanceHoursMonthly = useMemo(() => {
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
-    const currentMonth = new Date().getMonth();
+    const currentMonthIndex = new Date().getMonth();
     
     return months.map((month, i) => {
       const corrective = Math.floor(8 + (i * 1.5) + Math.random() * 4);
       const preventive = Math.floor(10 + (i * 0.8) + Math.random() * 3);
       const inspection = Math.floor(4 + Math.random() * 3);
       
-      if (i === currentMonth) {
+      if (i === currentMonthIndex) {
         const totalIssues = (stage1Delta > 0.5 ? 1 : 0) + (stage2Delta > 0.5 ? 1 : 0) + (filterDeltaP > 0.3 ? 1 : 0);
         return {
           month,
@@ -510,9 +538,26 @@ export function MaintenanceManagement() {
                 {isMobile ? d.charAt(0) : d}
               </div>
             ))}
-            {calendarDays.map(day => {
+            {calendarDays.map((day, index) => {
+              if (day === null) {
+                // Empty cell for days before the month starts
+                return (
+                  <div 
+                    key={`empty-${index}`} 
+                    style={{ 
+                      minHeight: isMobile ? 36 : 52, 
+                      padding: isMobile ? "2px 3px" : "4px 5px", 
+                      border: "1px solid var(--border)" 
+                    }}
+                  />
+                );
+              }
+              
               const events = maintenanceDays[day] || [];
-              const isToday = day === new Date().getDate();
+              const isToday = day === currentDate.getDate() && 
+                              currentMonth === (currentDate.getMonth() + 1) && 
+                              currentYear === currentDate.getFullYear();
+              
               return (
                 <div 
                   key={day} 

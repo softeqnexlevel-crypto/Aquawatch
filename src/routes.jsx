@@ -4,7 +4,9 @@ import { createBrowserRouter, Outlet, Navigate, useLocation, useNavigate, Router
 import { useState, useEffect } from "react";
 import { DataProvider } from "./contexts/DataContext";
 import { AlertsProvider, useAlerts } from "./contexts/AlertsContext";
+import { useAuth } from "./contexts/AuthContext";
 import { ScrollContainer } from "./components/ScrollContainer";
+import { TrialBanner } from "./components/TrialBanner";
 
 // Components
 import { Sidebar } from "./components/Sidebar";
@@ -26,8 +28,6 @@ import TagRules from './components/TagRules';
 // Configuration Pages
 import Billing from "./components/Billing";
 import { UserManagement } from "./components/UserManagement";
-
-import { useAuth } from "./contexts/AuthContext";
 
 
 import { ProtectedRoute } from "./routes/ProtectedRoute";
@@ -186,6 +186,8 @@ function DashboardLayoutInner() {
           alertCount={alertCount}
           title={title}
         />
+
+        <TrialBanner />
 
         <ScrollContainer>
           <div style={{

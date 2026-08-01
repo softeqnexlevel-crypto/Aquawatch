@@ -15,6 +15,7 @@ import {
 import { API_BASE_URL } from '../config';
 import { useData } from '../contexts/DataContext';
 import { useAlerts } from '../contexts/AlertsContext';
+import { useAuth } from '../contexts/AuthContext';
 
 // Import custom chart components
 import { LiveTrendChart } from './dashboardComponents/LiveTrendChart';
@@ -363,6 +364,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   // (2) acknowledging an alert in one place actually sticking everywhere,
   // since there's now exactly one ledger instead of three independent ones.
   const { activeAlerts: activeAlarmsList, counts: alertCounts } = useAlerts();
+  const { isExpired } = useAuth(); // ✅ view-only guard — trial expired means no new-data pulls
 
   const handleRefresh = () => {
     refresh();
@@ -460,17 +462,18 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           <div className="flex items-center gap-4 flex-wrap">
             <button
               onClick={handleRefresh}
-              disabled={contextLoading}
+              disabled={contextLoading || isExpired}
+              title={isExpired ? 'Upgrade your plan to pull new data' : undefined}
               style={{
                 padding: '4px 12px', borderRadius: 4, background: 'var(--secondary)',
                 border: '1px solid var(--border)', color: 'var(--foreground)',
-                cursor: contextLoading ? 'not-allowed' : 'pointer', fontSize: 10,
+                cursor: (contextLoading || isExpired) ? 'not-allowed' : 'pointer', fontSize: 10,
                 display: 'flex', alignItems: 'center', gap: 4,
-                opacity: contextLoading ? 0.5 : 1
+                opacity: (contextLoading || isExpired) ? 0.5 : 1
               }}
             >
               <RefreshCw size={12} className={contextLoading ? 'animate-spin' : ''} />
-              {contextLoading ? 'Loading...' : 'Refresh'}
+              {isExpired ? 'View Only' : contextLoading ? 'Loading...' : 'Refresh'}
             </button>
             <span style={{ fontSize: 10, color: 'var(--muted-foreground)' }}>
               <span style={{ fontFamily: 'var(--font-mono)', color: COLORS.primary }}>{activeSensors}</span>/{totalSensors} sensors

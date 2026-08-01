@@ -1,8 +1,11 @@
 // frontend/src/pages/settings/BillingSubscription.jsx
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Check, Search, Filter, Download, Eye } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { API_BASE_URL } from '../config';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+
+const API_BASE = `${API_BASE_URL}/api/billing`;
 
 const STATUS_STYLES = {
   success: 'text-emerald-400',
@@ -20,16 +23,27 @@ function formatDate(iso) {
 }
 
 export default function Billing() {
+  // ✅ Pull the logged-in user's email straight from AuthContext instead
+  // of localStorage.getItem('userEmail') — nothing in AuthContext ever
+  // set that key (only accessToken/refreshToken are stored), so checkout
+  // was always failing with "No user email available."
+  const { user, subscriptionStatus, daysRemaining, planCode: activePlanCode } = useAuth();
+
   const [plans, setPlans] = useState([]);
   const [history, setHistory] = useState([]);
   const [billingCycle, setBillingCycle] = useState('monthly');
-  const [currentPlanCode, setCurrentPlanCode] = useState('starter'); // TODO: derive from active subscription
   const [loadingPlan, setLoadingPlan] = useState(null);
   const [error, setError] = useState(null);
+  const [expandedRowId, setExpandedRowId] = useState(null);
+
+  // ✅ Derived from the real subscription, not hardcoded. While on trial
+  // (no active paid plan yet), nothing is marked "current" so all plans
+  // show their normal "Upgrade Plan" button.
+  const currentPlanCode = subscriptionStatus === 'active' ? activePlanCode : null;
 
   const loadPlans = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/billing/plans`);
+      const res = await fetch(`${API_BASE}/plans`);
       if (!res.ok) throw new Error('Failed to load plans');
       setPlans(await res.json());
     } catch (err) {
@@ -39,7 +53,11 @@ export default function Billing() {
 
   const loadHistory = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/billing/history`, { credentials: 'include' });
+      const token = localStorage.getItem('accessToken');
+      const res = await fetch(`${API_BASE}/history`, {
+        credentials: 'include',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       if (!res.ok) throw new Error('Failed to load billing history');
       setHistory(await res.json());
     } catch (err) {
@@ -53,7 +71,7 @@ export default function Billing() {
   }, [loadPlans, loadHistory]);
 
   async function handleUpgrade(plan) {
-    if (!plan.paystack_plan_code) {
+    if (!plan.paystack_plan_code && !plan.paystackPlanCode) {
       // Enterprise / custom — no self-serve checkout
       window.location.href = 'mailto:sales@aquasystemtech.com?subject=Enterprise Plan Inquiry';
       return;
@@ -63,14 +81,17 @@ export default function Billing() {
     setError(null);
 
     try {
-      const userEmail = localStorage.getItem('userEmail') || ''; // adjust to your actual auth/user source
-      if (!userEmail) throw new Error('No user email available — user must be logged in');
+      if (!user?.email) throw new Error('No user email available — please log in again');
 
-      const res = await fetch(`${API_BASE}/billing/subscribe/initialize`, {
+      const token = localStorage.getItem('accessToken');
+      const res = await fetch(`${API_BASE}/subscribe/initialize`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         credentials: 'include',
-        body: JSON.stringify({ planCode: plan.code, email: userEmail }),
+        body: JSON.stringify({ planCode: plan.code, email: user.email }),
       });
 
       const data = await res.json();
@@ -90,6 +111,33 @@ export default function Billing() {
     : code === 'growth' ? { label: 'PRO', className: 'bg-orange-500 text-white' }
     : { label: 'ADVANCE', className: 'bg-emerald-500 text-white' };
 
+  // ✅ No backend receipt/PDF generation exists yet, so this builds a
+  // simple plain-text receipt client-side from the row's own data rather
+  // than leaving the button doing nothing. Swap this out if a real
+  // receipt endpoint gets built later.
+  function downloadReceipt(row) {
+    const lines = [
+      'Aqua Systemtech — Billing Receipt',
+      '='.repeat(34),
+      `Plan: ${row.planName}`,
+      `Amount: ${formatKes(row.amountKes)}`,
+      `Purchase Date: ${formatDate(row.purchaseDate)}`,
+      `Period End: ${formatDate(row.periodEnd)}`,
+      `Status: ${row.status}`,
+      `Reference: ${row.paystackReference || '—'}`,
+    ].join('\n');
+
+    const blob = new Blob([lines], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `receipt-${row.paystackReference || row.id}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div className="bg-black text-neutral-100 p-8 min-h-screen">
       <div className="flex items-center justify-between mb-1">
@@ -98,6 +146,16 @@ export default function Billing() {
           <p className="text-neutral-400 text-sm mt-1">
             Keep track of your subscription details, update your billing information, and control your account's payment
           </p>
+          {subscriptionStatus === 'trial' && (
+            <p className="text-amber-400 text-sm mt-2">
+              You're on a free trial — {daysRemaining} day{daysRemaining === 1 ? '' : 's'} remaining.
+            </p>
+          )}
+          {subscriptionStatus === 'expired' && (
+            <p className="text-red-400 text-sm mt-2">
+              Your trial has ended. Upgrade below to restore full access.
+            </p>
+          )}
         </div>
         <div className="flex items-center bg-neutral-900 rounded-full p-1 border border-neutral-800">
           <button
@@ -152,7 +210,7 @@ export default function Billing() {
                 ) : (
                   <>
                     <span className="text-3xl font-bold">
-                      {formatKes(billingCycle === 'yearly' ? plan.amount_kes * 10 : plan.amount_kes)}
+                      {formatKes(billingCycle === 'yearly' ? plan.amountKes * 10 : plan.amountKes)}
                     </span>
                     <span className="text-neutral-400 text-sm"> /{billingCycle === 'yearly' ? 'year' : 'month'}</span>
                   </>
@@ -224,21 +282,44 @@ export default function Billing() {
               </tr>
             )}
             {history.map((row) => (
-              <tr key={row.id} className="border-b border-neutral-900">
-                <td className="py-3">{row.plan_name}</td>
-                <td className="py-3">{formatKes(row.amount_kes)}</td>
-                <td className="py-3 text-neutral-400">{formatDate(row.purchase_date)}</td>
-                <td className="py-3 text-neutral-400">{formatDate(row.period_end)}</td>
-                <td className="py-3">
-                  <span className={STATUS_STYLES[row.status] || 'text-neutral-400'}>● {row.status}</span>
-                </td>
-                <td className="py-3">
-                  <div className="flex items-center gap-2 text-neutral-400">
-                    <Download size={14} className="cursor-pointer hover:text-white" />
-                    <Eye size={14} className="cursor-pointer hover:text-white" />
-                  </div>
-                </td>
-              </tr>
+              <React.Fragment key={row.id}>
+                <tr className="border-b border-neutral-900">
+                  <td className="py-3">{row.planName}</td>
+                  <td className="py-3">{formatKes(row.amountKes)}</td>
+                  <td className="py-3 text-neutral-400">{formatDate(row.purchaseDate)}</td>
+                  <td className="py-3 text-neutral-400">{formatDate(row.periodEnd)}</td>
+                  <td className="py-3">
+                    <span className={STATUS_STYLES[row.status] || 'text-neutral-400'}>● {row.status}</span>
+                  </td>
+                  <td className="py-3">
+                    <div className="flex items-center gap-2 text-neutral-400">
+                      <Download
+                        size={14}
+                        className="cursor-pointer hover:text-white"
+                        onClick={() => downloadReceipt(row)}
+                        title="Download receipt"
+                      />
+                      <Eye
+                        size={14}
+                        className="cursor-pointer hover:text-white"
+                        onClick={() => setExpandedRowId(expandedRowId === row.id ? null : row.id)}
+                        title="View details"
+                      />
+                    </div>
+                  </td>
+                </tr>
+                {expandedRowId === row.id && (
+                  <tr className="border-b border-neutral-900 bg-neutral-950/60">
+                    <td colSpan={6} className="py-3 px-2 text-xs text-neutral-400">
+                      <div className="grid grid-cols-2 gap-y-1 gap-x-6 max-w-md">
+                        <span>Paystack Reference</span><span className="text-neutral-200">{row.paystackReference || '—'}</span>
+                        <span>Plan Code</span><span className="text-neutral-200">{row.planCode}</span>
+                        <span>Record ID</span><span className="text-neutral-200">{row.id}</span>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
             ))}
           </tbody>
         </table>
