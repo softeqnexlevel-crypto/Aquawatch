@@ -42,7 +42,7 @@ const ALERT_REFERENCE = [
   // Sensor threshold alerts
   { type: "High RO Pressure", threshold: "> 16 bar", severity: "Critical", source: "Sensor" },
   { type: "Low RO Pressure", threshold: "< 10 bar", severity: "High", source: "Sensor" },
-  { type: "High Differential Pressure - Stage 1", threshold: "> 2.0 bar", severity: "Critical", source: "Sensor" },
+  // { type: "High Differential Pressure - Stage 1", threshold: "> 2.0 bar", severity: "Critical", source: "Sensor" },
   { type: "High Differential Pressure - Stage 2", threshold: "> 2.0 bar", severity: "Critical", source: "Sensor" },
   { type: "High Filter Delta P", threshold: "> 0.40 bar", severity: "Critical", source: "Sensor" },
   { type: "High Filter Delta P", threshold: "> 0.30 bar", severity: "Medium", source: "Sensor" },
