@@ -1,4 +1,4 @@
-// pages/Settings.jsx - FULLY MOBILE RESPONSIVE
+// pages/Settings.jsx - FULLY MOBILE RESPONSIVE (FIXED)
 
 import { useState, useRef, useEffect } from "react";
 import { Link } from "react-router-dom";
@@ -57,6 +57,13 @@ async function apiCall(endpoint, options = {}) {
   return response.json();
 }
 
+// ── Helper: Safely parse number ──────────────────────────────────────────────
+function safeNumber(value, fallback = 0) {
+  if (value === null || value === undefined || value === '') return fallback;
+  const num = typeof value === 'string' ? parseFloat(value) : Number(value);
+  return isNaN(num) ? fallback : num;
+}
+
 const DEFAULTS = {
   plantName: "Nairobi Water Treatment Plant",
   operatorId: "WTP-2024-NBI-001",
@@ -99,16 +106,22 @@ function SettingRow({ label, desc, children, isMobile }) {
   );
 }
 
+// ── FIXED: StatusBadge with proper number validation ─────────────────────────
 function StatusBadge({ label, value, warning, critical, unit, isMobile }) {
-  const isCritical = value >= critical;
-  const isWarning = value >= warning && value < critical;
+  // Safely convert all values to numbers
+  const safeValue = safeNumber(value, 0);
+  const safeWarning = safeNumber(warning, 0);
+  const safeCritical = safeNumber(critical, 0);
+
+  const isCritical = safeValue >= safeCritical;
+  const isWarning = safeValue >= safeWarning && safeValue < safeCritical;
   const color = isCritical ? '#ef4444' : isWarning ? '#eab308' : '#22c55e';
 
   return (
     <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
       <span style={{ fontSize: isMobile ? 9 : 10, color: 'var(--muted-foreground)' }}>{label}:</span>
       <span style={{ fontSize: isMobile ? 10 : 11, fontFamily: 'var(--font-mono)', color }}>
-        {value.toFixed(1)} {unit}
+        {safeValue.toFixed(1)} {unit}
       </span>
       <span style={{
         fontSize: isMobile ? 7 : 8,
@@ -197,12 +210,12 @@ export function Settings() {
     fetchSystemInfo();
   }, []);
 
-  // Get real-time values
-  const currentRecovery = getValue('RO5-SystemRecovery') || 0;
-  const currentFlow = getValue('RO5-FEEDFlow') || 0;
+  // ── FIXED: Safely get real-time values ─────────────────────────────────────
+  const currentRecovery = safeNumber(getValue('RO5-SystemRecovery'), 0);
+  const currentFlow = safeNumber(getValue('RO5-FEEDFlow'), 0);
   const currentDosing = 2.0 + (currentFlow / 100) * 0.5;
-  const filterDelta = getValue('RO5-MediaFilterDeltaP') || 0;
-  const systemOperation = getValue('RO5-SystemOperation') || 0;
+  const filterDelta = safeNumber(getValue('RO5-MediaFilterDeltaP'), 0);
+  const systemOperation = safeNumber(getValue('RO5-SystemOperation'), 0);
 
   const set = (key) => (e) => setForm(f => ({ ...f, [key]: e.target.value }));
 
@@ -282,6 +295,7 @@ export function Settings() {
   }
 
   function formatUptime(seconds) {
+    if (!seconds || seconds < 0) return '—';
     const days = Math.floor(seconds / 86400);
     const hours = Math.floor((seconds % 86400) / 3600);
     const mins = Math.floor((seconds % 3600) / 60);
