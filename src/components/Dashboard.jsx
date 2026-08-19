@@ -241,20 +241,73 @@ function KPICardV2({ label, value, unit, icon: Icon, color, trend, statusText, s
   );
 }
 
-function EquipmentStatusItem({ icon: Icon, label, state }) {
+function EquipmentStatusItem({ icon: Icon, label, state, value, unit }) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
   const color = state === 'on' ? COLORS.success : state === 'off' ? COLORS.danger : 'var(--muted-foreground)';
   const bg = state === 'on' ? 'rgba(34,197,94,0.1)' : state === 'off' ? 'rgba(239,68,68,0.1)' : 'var(--secondary)';
   const text = state === 'on' ? 'Running' : state === 'off' ? 'Stopped' : 'No data';
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 6 : 8, padding: isMobile ? "6px 8px" : "8px 10px", borderRadius: 8, background: bg, border: `1px solid ${color}30` }}>
-      <div style={{ width: isMobile ? 22 : 26, height: isMobile ? 22 : 26, borderRadius: 6, background: `${color}22`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-        <Icon size={isMobile ? 11 : 13} color={color} />
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: isMobile ? 6 : 8, padding: isMobile ? "6px 8px" : "8px 10px", borderRadius: 8, background: bg, border: `1px solid ${color}30` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 6 : 8 }}>
+        <div style={{ width: isMobile ? 22 : 26, height: isMobile ? 22 : 26, borderRadius: 6, background: `${color}22`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <Icon size={isMobile ? 11 : 13} color={color} />
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: isMobile ? 9 : 10.5, color: "var(--foreground)", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</div>
+          <div style={{ fontSize: isMobile ? 8 : 9.5, color, fontWeight: 600 }}>{text}</div>
+        </div>
       </div>
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: isMobile ? 9 : 10.5, color: "var(--foreground)", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{label}</div>
-        <div style={{ fontSize: isMobile ? 8 : 9.5, color, fontWeight: 600 }}>{text}</div>
+      {value !== undefined && (
+        <div style={{ fontSize: isMobile ? 8 : 10, fontFamily: 'var(--font-mono)', color: 'var(--muted-foreground)' }}>
+          {value.toFixed(1)} {unit}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PumpStartupSequence({ feedPumpOn, highPressurePumpOn, dosingPumpOn }) {
+  const steps = [
+    { id: 1, name: 'Feed Pump', active: feedPumpOn, order: 1 },
+    { id: 2, name: 'H.P. Pump', active: highPressurePumpOn, order: 2 },
+    { id: 3, name: 'Dosing Pump', active: dosingPumpOn, order: 3 },
+  ];
+
+  return (
+    <div style={{ padding: '6px 10px', background: 'var(--secondary)', borderRadius: 6 }}>
+      <div style={{ fontSize: 8, color: 'var(--muted-foreground)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+        Startup Sequence
+      </div>
+      <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+        {steps.map((step, idx) => (
+          <React.Fragment key={step.id}>
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: 3,
+              opacity: step.active ? 1 : 0.4
+            }}>
+              <div style={{ 
+                width: 6, 
+                height: 6, 
+                borderRadius: '50%',
+                background: step.active ? COLORS.success : COLORS.border,
+                boxShadow: step.active ? `0 0 8px ${COLORS.success}80` : 'none'
+              }} />
+              <span style={{ 
+                fontSize: 8, 
+                fontWeight: 600,
+                color: step.active ? 'var(--foreground)' : 'var(--muted-foreground)'
+              }}>
+                {step.name}
+              </span>
+            </div>
+            {idx < steps.length - 1 && (
+              <span style={{ color: 'var(--muted-foreground)', fontSize: 8 }}>→</span>
+            )}
+          </React.Fragment>
+        ))}
       </div>
     </div>
   );
@@ -315,12 +368,15 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     refresh,
   } = useData();
 
-  const [trendRange, setTrendRange] = useState('1H');
   const [selectedSensors, setSelectedSensors] = useState(['RO5-Permeateflow']);
   const [isMobile, setIsMobile] = useState(false);
-
   const [productionSummary, setProductionSummary] = useState(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
+  const [systemStateHistory, setSystemStateHistory] = useState({
+    currentState: 'OFF',
+    lastChanged: null,
+    previousState: null,
+  });
 
   // Mobile detection
   useEffect(() => {
@@ -386,32 +442,62 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const isDosingOn = dosingActive === 'ON' || isActive(dosingActive);
   
   // ✅ FIX: Determine operation mode based on feed pump and backwash status
-  // When feed pump is OFF → System is OFF
-  // When feed pump is ON and backwash is ON → BACKWASH mode
-  // When feed pump is ON and backwash is OFF → FILTER mode
   const operationMode = !feedPumpOn ? 'OFF' : backwashOn ? 'BACKWASH' : 'FILTER';
   
-  // ✅ FIX: System mode (AUTO/MANUAL)
+  // ✅ FIX: System mode display
   const isAutoMode = typeof systemMode === 'string' && systemMode.toLowerCase().trim() === 'auto';
-  const isManualMode = typeof systemMode === 'string' && systemMode.toLowerCase().trim() === 'manual';
-  const systemModeDisplay = isAutoMode ? 'AUTO' : isManualMode ? 'MANUAL' : 'MANUAL';
+  const systemModeDisplay = isAutoMode ? 'AUTO' : 'MANUAL';
+
+  // ✅ FIX: Equipment statuses
+  const highPressurePumpOn = operationMode === 'FILTER' && isSystemOn;
+  const dosingPumpOn = operationMode === 'FILTER' && isDosingOn;
 
   // ✅ FIX: Operation mode display text and status
   const getOperationDisplay = () => {
     if (operationMode === 'OFF') {
       return { label: 'OFF', color: COLORS.danger, sub: 'System offline - Feed pump stopped' };
     } else if (operationMode === 'BACKWASH') {
-      return { label: 'BACKWASH', color: COLORS.warning, sub: 'Prefilter backwash in progress' };
+      return { label: 'BACKWASH', color: COLORS.warning, sub: 'Backwash in progress - Feed pump only' };
     } else { // FILTER
-      return { label: 'FILTER', color: COLORS.success, sub: 'Filtering — all systems normal' };
+      return { label: 'FILTER', color: COLORS.success, sub: 'Filtering — all pumps running' };
     }
   };
   
   const opStatus = getOperationDisplay();
 
-  // ✅ FIX: Equipment statuses
-  const highPressurePumpOn = operationMode === 'FILTER' && isSystemOn;
-  const boosterPumpOn = operationMode === 'FILTER' && isSystemOn;
+  // ✅ NEW: Startup sequence status
+  const getStartupStatus = () => {
+    if (!feedPumpOn) {
+      return { stage: 'Stopped', color: COLORS.danger, message: 'System stopped' };
+    }
+    if (feedPumpOn && !highPressurePumpOn && operationMode === 'BACKWASH') {
+      return { stage: 'Backwash', color: COLORS.warning, message: 'Backwash in progress - Feed pump only' };
+    }
+    if (feedPumpOn && highPressurePumpOn && !dosingPumpOn && operationMode === 'FILTER') {
+      return { stage: 'Starting', color: COLORS.warning, message: 'High pressure pump running - Waiting for dosing' };
+    }
+    if (feedPumpOn && highPressurePumpOn && dosingPumpOn) {
+      return { stage: 'Running', color: COLORS.success, message: 'All systems normal' };
+    }
+    return { stage: 'Unknown', color: COLORS.muted, message: 'Checking...' };
+  };
+
+  const startupStatus = getStartupStatus();
+
+  // ✅ NEW: Track system state changes
+  useEffect(() => {
+    const newState = operationMode;
+    if (newState !== systemStateHistory.currentState) {
+      setSystemStateHistory({
+        currentState: newState,
+        lastChanged: new Date().toISOString(),
+        previousState: systemStateHistory.currentState,
+      });
+    }
+  }, [operationMode]);
+
+  // ✅ NEW: Detect if system is starting up
+  const isStartingUp = feedPumpOn && !highPressurePumpOn && operationMode === 'FILTER';
 
   const dailyProdDisplay = summaryLoading ? '...' : Math.round(dailyProduction).toLocaleString();
   const activeSensors = Object.keys(sensorData).filter(key => sensorData[key]?.value !== undefined && sensorData[key]?.value !== null).length;
@@ -511,16 +597,16 @@ export function Dashboard({ onViewAllAlerts } = {}) {
 
         {/* ── Top status cards ── */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-3 sm:mb-4">
-          {/* ✅ FIX: System Operation shows ON when feed pump is running, OFF when not */}
+          {/* System Operation - Shows ON/OFF based on feed pump */}
           <TopStatusCard
             icon={Settings} iconBg="rgba(34,197,94,0.12)" iconColor={isSystemOn ? COLORS.success : COLORS.danger}
             title="System Operation"
             value={isSystemOn ? "ON" : "OFF"}
             valueColor={isSystemOn ? COLORS.success : COLORS.danger}
             sub={isSystemOn ? "All systems running" : "System offline - Feed pump stopped"}
-            subColor={isSystemOn ? COLORS.success : COLORS.danger}
+            subColor="var(--muted-foreground)"
           />
-          {/* ✅ FIX: System Mode shows FILTER/BACKWASH/OFF */}
+          {/* System Mode - Shows FILTER/BACKWASH/OFF */}
           <TopStatusCard
             icon={Settings} iconBg="rgba(14,165,233,0.12)" iconColor={opStatus.color}
             title="System Mode"
@@ -587,34 +673,114 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             />
           </div>
 
-          {/* System Status panel */}
+          {/* System Status panel - Enhanced */}
           <div className="flex flex-col gap-3">
             <div className="rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
               <SectionTitle>System Status</SectionTitle>
-              <div className="flex justify-around">
+              
+              {/* ✅ NEW: Startup Sequence Timeline */}
+              <PumpStartupSequence 
+                feedPumpOn={feedPumpOn}
+                highPressurePumpOn={highPressurePumpOn}
+                dosingPumpOn={dosingPumpOn}
+              />
+              
+              {/* ✅ NEW: Startup Status Message */}
+              <div style={{ 
+                marginTop: 8, 
+                padding: '6px 12px', 
+                borderRadius: 4,
+                background: `${startupStatus.color}22`,
+                border: `1px solid ${startupStatus.color}40`,
+                fontSize: 10,
+                color: startupStatus.color,
+                fontWeight: 600,
+                textAlign: 'center'
+              }}>
+                {startupStatus.message}
+              </div>
+
+              {/* ✅ NEW: Startup Delay Indicator */}
+              {isStartingUp && (
+                <div style={{ 
+                  marginTop: 4,
+                  padding: '4px 12px', 
+                  borderRadius: 4, 
+                  background: 'rgba(245, 158, 11, 0.1)',
+                  border: '1px solid rgba(245, 158, 11, 0.3)',
+                  fontSize: 8,
+                  color: COLORS.warning,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  justifyContent: 'center'
+                }}>
+                  <RefreshCw size={10} className="animate-spin" />
+                  Startup in progress... Waiting for pumps to come online
+                </div>
+              )}
+
+              {/* ✅ NEW: State change timestamp */}
+              {systemStateHistory.lastChanged && (
+                <div style={{ 
+                  fontSize: 8, 
+                  color: 'var(--muted-foreground)', 
+                  marginTop: 6,
+                  textAlign: 'center'
+                }}>
+                  Last state change: {new Date(systemStateHistory.lastChanged).toLocaleTimeString()}
+                  {systemStateHistory.previousState && 
+                    ` (was ${systemStateHistory.previousState})`}
+                </div>
+              )}
+
+              {/* Gauges */}
+              <div className="flex justify-around" style={{ marginTop: 8 }}>
                 <CircularGauge value={feedTankLevel} color={feedTankLevel > 30 ? COLORS.success : COLORS.warning} label="Feed Tank" statusLabel={feedTankLevel > 30 ? "Normal" : "Low"} />
                 <CircularGauge value={systemRecovery} color={systemRecovery > 75 ? COLORS.success : COLORS.warning} label="Recovery" statusLabel={systemRecovery > 75 ? "Good" : "Check"} />
                 <CircularGauge value={roHealthScore} color={roHealthScore > 80 ? COLORS.success : roHealthScore > 50 ? COLORS.warning : COLORS.danger} label="RO Health" statusLabel={roHealthScore > 80 ? "Excellent" : roHealthScore > 50 ? "Fair" : "Poor"} />
               </div>
 
+              {/* Equipment Status with flow values */}
               <div style={{ marginTop: 12 }}>
                 <SectionTitle>Equipment Status</SectionTitle>
                 <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
-                  {/* ✅ FIX: High Pressure Pump only runs in FILTER mode */}
-                  <EquipmentStatusItem icon={Wrench} label="High Pressure Pump" state={highPressurePumpOn ? 'on' : 'off'} />
-                  {/* ✅ FIX: Feed Pump runs in both FILTER and BACKWASH modes */}
-                  <EquipmentStatusItem icon={Wrench} label="Feed Pump" state={feedPumpOn ? 'on' : 'off'} />
-                  {/* ✅ FIX: Dosing Pump only runs in FILTER mode when dosing is active */}
-                  <EquipmentStatusItem icon={FlaskConical} label="Dosing Pump" state={(operationMode === 'FILTER' && isDosingOn) ? 'on' : 'off'} />
+                  <EquipmentStatusItem 
+                    icon={Wrench} 
+                    label="High Pressure Pump" 
+                    state={highPressurePumpOn ? 'on' : 'off'}
+                    value={roPressure}
+                    unit="bar"
+                  />
+                  <EquipmentStatusItem 
+                    icon={Wrench} 
+                    label="Feed Pump" 
+                    state={feedPumpOn ? 'on' : 'off'}
+                    value={feedFlow}
+                    unit="m³/h"
+                  />
+                  <EquipmentStatusItem 
+                    icon={FlaskConical} 
+                    label="Dosing Pump" 
+                    state={dosingPumpOn ? 'on' : 'off'}
+                  />
+                  <EquipmentStatusItem 
+                    icon={Filter} 
+                    label="Prefilter" 
+                    state={backwashOn ? 'backwash' : 'filtering'}
+                    value={filterDeltaP}
+                    unit="bar"
+                  />
                 </div>
               </div>
             </div>
 
+            {/* Alarms Panel */}
             <div id="alarms-panel" className="rounded-lg p-3 sm:p-4 flex flex-col gap-2" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
               <div className="flex items-center justify-between">
                 <SectionTitle>Recent Alarms</SectionTitle>
                 <button
-                  onClick={() => onViewAllAlerts ? onViewAllAlerts() : console.warn('Dashboard: no onViewAllAlerts handler was passed in — wire this up wherever <Dashboard /> is rendered, e.g. onViewAllAlerts={() => navigate("/app/alerts")}')}
+                  onClick={() => onViewAllAlerts ? onViewAllAlerts() : console.warn('Dashboard: no onViewAllAlerts handler was passed in')}
                   style={{ fontSize: 10.5, color: COLORS.primary, fontWeight: 600, cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}
                 >
                   View All →
@@ -633,44 +799,41 @@ export function Dashboard({ onViewAllAlerts } = {}) {
 
         {/* ── Advanced Charts Row ── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 mb-3 sm:mb-4">
-          {/* ── Sensor Selector ── */}
-        <div className="mb-3 sm:mb-4">
-          <div className="rounded-lg p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-            <span style={{ fontSize: isMobile ? 9 : 11, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 6, display: "block" }}>
-              Select Sensor for Comparison
-            </span>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? 4 : 8 }}>
-              {Object.keys(SENSOR_MAP).slice(0, isMobile ? 8 : 15).map(key => {
-                const sensor = SENSOR_MAP[key];
-                const isSelected = selectedSensors.includes(key);
-                return (
-                  <button
-                    key={key}
-                    onClick={() => setSelectedSensors([key])}
-                    style={{
-                      padding: isMobile ? '2px 8px' : '4px 12px',
-                      borderRadius: isMobile ? 8 : 12,
-                      background: isSelected ? sensor.color : 'var(--secondary)',
-                      color: isSelected ? 'white' : 'var(--muted-foreground)',
-                      border: isSelected ? `2px solid ${sensor.color}` : '1px solid var(--border)',
-                      fontSize: isMobile ? 8 : 10,
-                      cursor: 'pointer',
-                      transition: 'all 0.2s',
-                      fontWeight: isSelected ? 600 : 400,
-                      opacity: isSelected ? 1 : 0.7,
-                    }}
-                  >
-                    {isMobile ? sensor.shortName || sensor.label : sensor.label}
-                  </button>
-                );
-              })}
+          <div className="mb-3 sm:mb-4">
+            <div className="rounded-lg p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+              <span style={{ fontSize: isMobile ? 9 : 11, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 6, display: "block" }}>
+                Select Sensor for Comparison
+              </span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? 4 : 8 }}>
+                {Object.keys(SENSOR_MAP).slice(0, isMobile ? 8 : 15).map(key => {
+                  const sensor = SENSOR_MAP[key];
+                  const isSelected = selectedSensors.includes(key);
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => setSelectedSensors([key])}
+                      style={{
+                        padding: isMobile ? '2px 8px' : '4px 12px',
+                        borderRadius: isMobile ? 8 : 12,
+                        background: isSelected ? sensor.color : 'var(--secondary)',
+                        color: isSelected ? 'white' : 'var(--muted-foreground)',
+                        border: isSelected ? `2px solid ${sensor.color}` : '1px solid var(--border)',
+                        fontSize: isMobile ? 8 : 10,
+                        cursor: 'pointer',
+                        transition: 'all 0.2s',
+                        fontWeight: isSelected ? 600 : 400,
+                        opacity: isSelected ? 1 : 0.7,
+                      }}
+                    >
+                      {isMobile ? sensor.shortName || sensor.label : sensor.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
-        </div>
           <SystemHealthRadar data={sensorData} />
         </div>
-
-
 
         {/* ── Flow balance, distribution charts ── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-3 sm:mb-4">
@@ -691,7 +854,8 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           flexWrap: "wrap",
           gap: 8
         }}>
-
+          <span>RO System v2.0</span>
+          <span>© {new Date().getFullYear()} All rights reserved</span>
         </div>
       </div>
 
