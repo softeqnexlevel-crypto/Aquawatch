@@ -1,8 +1,9 @@
-// frontend/src/components/Login.jsx - FULLY RESPONSIVE (NO OTP)
+// frontend/src/components/Login.jsx - FULLY RESPONSIVE (NO OTP) WITH RETRY LOGIC
 
 import React, { useState, useEffect } from 'react';
 import { Phone, Mail, MapPin, Radio, BarChart3, Zap, Target, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import { loginWithRetry } from '../utils/api';
 
 import logoMark from '../assets/logo/aqua-systemtech-mark.png';
 import roSkidHmi from '../assets/gallery/ro-skid-hmi.png';
@@ -53,7 +54,8 @@ const getFieldStyles = (isMobile) => ({
     fontSize: isMobile ? 13 : 14,
     outline: "none",
     boxSizing: "border-box",
-    fontFamily: FONT_BODY
+    fontFamily: FONT_BODY,
+    transition: "border-color 0.2s ease"
   },
 });
 
@@ -61,23 +63,48 @@ const getFieldStyles = (isMobile) => ({
 function FormFields({
   email, setEmail, password, setPassword, showPw, setShowPw,
   remember, setRemember, error, loading, isModal, handleSubmit,
-  scrollToContact, isMobile
+  scrollToContact, isMobile, retryCount
 }) {
   const fieldStyles = getFieldStyles(isMobile);
+
+  // Handle input focus for better UX
+  const handleFocus = (e) => {
+    e.target.style.borderColor = BRAND.blue;
+  };
+
+  const handleBlur = (e) => {
+    e.target.style.borderColor = "var(--border)";
+  };
 
   return (
     <form onSubmit={handleSubmit}>
       {error && (
         <div style={{
-          background: "rgba(239,68,68,0.1)",
-          border: "1px solid rgba(239,68,68,0.2)",
+          background: error.includes('waking up') || error.includes('timeout') 
+            ? "rgba(234,179,8,0.1)" 
+            : "rgba(239,68,68,0.1)",
+          border: `1px solid ${error.includes('waking up') || error.includes('timeout') 
+            ? "rgba(234,179,8,0.2)" 
+            : "rgba(239,68,68,0.2)"}`,
           borderRadius: 8,
           padding: "10px 14px",
-          color: "#ef4444",
+          color: error.includes('waking up') || error.includes('timeout') 
+            ? "#eab308" 
+            : "#ef4444",
           marginBottom: 16,
           fontSize: isMobile ? 12 : 13
         }}>
           {error}
+          {(error.includes('waking up') || error.includes('timeout')) && (
+            <div style={{ marginTop: 6, fontSize: isMobile ? 11 : 12, opacity: 0.8 }}>
+              ⏳ The server is waking up. This may take 30-60 seconds. Please wait...
+            </div>
+          )}
+          {retryCount > 0 && (
+            <div style={{ marginTop: 6, fontSize: isMobile ? 11 : 12, opacity: 0.6 }}>
+              Retry attempt {retryCount}/5
+            </div>
+          )}
         </div>
       )}
 
@@ -89,6 +116,8 @@ function FormFields({
           onChange={(e) => setEmail(e.target.value)}
           placeholder="you@aquasystemtech.co.ke"
           style={fieldStyles.input}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
           required
         />
       </div>
@@ -102,6 +131,8 @@ function FormFields({
             onChange={(e) => setPassword(e.target.value)}
             placeholder="••••••••"
             style={{ ...fieldStyles.input, paddingRight: 40 }}
+            onFocus={handleFocus}
+            onBlur={handleBlur}
             required
           />
           <button
@@ -116,7 +147,9 @@ function FormFields({
               border: "none",
               cursor: "pointer",
               color: "var(--muted-foreground)",
-              display: "flex"
+              display: "flex",
+              padding: 4,
+              borderRadius: 4
             }}
             aria-label={showPw ? "Hide password" : "Show password"}
           >
@@ -164,7 +197,7 @@ function FormFields({
         style={{
           width: "100%",
           padding: isMobile ? "11px" : "13px",
-          background: BRAND.blue,
+          background: loading ? BRAND.tealDeep : BRAND.blue,
           color: "white",
           border: "none",
           borderRadius: 8,
@@ -172,11 +205,38 @@ function FormFields({
           fontWeight: 600,
           cursor: loading ? "not-allowed" : "pointer",
           fontFamily: FONT_BODY,
-          opacity: loading ? 0.7 : 1
+          opacity: loading ? 0.7 : 1,
+          transition: "opacity 0.2s ease, background 0.2s ease",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 8
         }}
       >
-        {loading ? 'Signing in…' : 'Sign In'}
+        {loading ? (
+          <>
+            <span style={{
+              display: "inline-block",
+              width: 16,
+              height: 16,
+              border: "2px solid rgba(255,255,255,0.3)",
+              borderTop: "2px solid white",
+              borderRadius: "50%",
+              animation: "spin 0.8s linear infinite"
+            }} />
+            Signing in…
+          </>
+        ) : (
+          'Sign In'
+        )}
       </button>
+
+      <style>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `}</style>
     </form>
   );
 }
@@ -192,6 +252,8 @@ export const Login = ({ onLoginSuccess, onClose, isModal = false }) => {
   const [isMobile, setIsMobile] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [retryCount, setRetryCount] = useState(0);
+  const [isRetrying, setIsRetrying] = useState(false);
 
   // ── Responsive detection ──────────────────────────────────────
   useEffect(() => {
@@ -208,17 +270,75 @@ export const Login = ({ onLoginSuccess, onClose, isModal = false }) => {
     return () => clearInterval(t);
   }, [isModal]);
 
+  // ── Login handler with retry ──────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setLoading(true);
-    const result = await login(email, password);
-    setLoading(false);
+    setRetryCount(0);
+    setIsRetrying(false);
 
-    if (result.success) {
-      if (onLoginSuccess) onLoginSuccess(result.user);
-    } else {
-      setError(result.error || 'Login failed');
+    try {
+      // Use the retry-enabled login
+      const result = await loginWithRetry(email, password);
+      
+      setLoading(false);
+      
+      if (result.success || result.user) {
+        // Store tokens if not already stored
+        if (result.accessToken) {
+          localStorage.setItem('accessToken', result.accessToken);
+        }
+        if (result.refreshToken) {
+          localStorage.setItem('refreshToken', result.refreshToken);
+        }
+        if (result.user) {
+          localStorage.setItem('user', JSON.stringify(result.user));
+        }
+        
+        if (onLoginSuccess) onLoginSuccess(result.user || result);
+      } else {
+        setError(result.error || 'Login failed. Please try again.');
+      }
+    } catch (err) {
+      setLoading(false);
+      
+      // User-friendly error messages
+      let errorMsg = err.message || 'Login failed';
+      
+      if (errorMsg.includes('timeout') || errorMsg.includes('waking up')) {
+        errorMsg = '⏳ Server is waking up. Please wait a moment and try again.';
+        setRetryCount(1);
+      } else if (errorMsg.includes('ERR_CONNECTION_CLOSED')) {
+        errorMsg = '🔌 Connection lost. Please check your internet connection and try again.';
+      } else if (errorMsg.includes('Session expired')) {
+        errorMsg = '🔒 Session expired. Please login again.';
+      } else if (errorMsg.includes('401')) {
+        errorMsg = 'Invalid email or password. Please try again.';
+      } else if (errorMsg.includes('Failed to fetch')) {
+        errorMsg = '🌐 Cannot reach server. The server may be waking up. Please try again in 30 seconds.';
+        setRetryCount(1);
+      }
+      
+      setError(errorMsg);
+      
+      // Auto-retry for connection/timeout issues
+      if (
+        errorMsg.includes('waking up') || 
+        errorMsg.includes('timeout') || 
+        errorMsg.includes('Failed to fetch') ||
+        errorMsg.includes('ERR_CONNECTION_CLOSED')
+      ) {
+        setIsRetrying(true);
+        // Auto retry after 3 seconds
+        setTimeout(() => {
+          setIsRetrying(false);
+          // Only retry if user hasn't changed anything
+          if (email && password) {
+            handleSubmit(e);
+          }
+        }, 3000);
+      }
     }
   };
 
@@ -230,7 +350,7 @@ export const Login = ({ onLoginSuccess, onClose, isModal = false }) => {
   const formProps = {
     email, setEmail, password, setPassword, showPw, setShowPw,
     remember, setRemember, error, loading, isModal, handleSubmit,
-    scrollToContact, isMobile
+    scrollToContact, isMobile, retryCount
   };
 
   // ── Compact modal ──────────────────────────────────────────────
@@ -238,7 +358,15 @@ export const Login = ({ onLoginSuccess, onClose, isModal = false }) => {
     return (
       <div style={modalStyles.overlay}>
         <div style={modalStyles.modal}>
-          <button onClick={onClose} style={modalStyles.closeButton} aria-label="Close">×</button>
+          <button 
+            onClick={onClose} 
+            style={modalStyles.closeButton} 
+            aria-label="Close"
+            onMouseEnter={(e) => e.target.style.color = 'var(--foreground)'}
+            onMouseLeave={(e) => e.target.style.color = 'var(--muted-foreground)'}
+          >
+            ×
+          </button>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
             <img src={logoMark} alt="" style={{ height: isMobile ? 20 : 24, width: "auto" }} />
             <span style={{ fontSize: isMobile ? 13 : 15, fontWeight: 700, fontFamily: FONT_DISPLAY }}>Aqua Systemtech</span>
@@ -259,6 +387,17 @@ export const Login = ({ onLoginSuccess, onClose, isModal = false }) => {
             Sign in to your dashboard
           </p>
           <FormFields {...formProps} />
+          
+          {isRetrying && (
+            <div style={{
+              marginTop: 12,
+              textAlign: 'center',
+              fontSize: isMobile ? 11 : 12,
+              color: 'var(--muted-foreground)'
+            }}>
+              ⏳ Retrying connection...
+            </div>
+          )}
         </div>
       </div>
     );
@@ -396,6 +535,17 @@ export const Login = ({ onLoginSuccess, onClose, isModal = false }) => {
 
             <FormFields {...formProps} />
 
+            {isRetrying && (
+              <div style={{
+                marginTop: 12,
+                textAlign: 'center',
+                fontSize: isMobile ? 11 : 12,
+                color: 'var(--muted-foreground)'
+              }}>
+                ⏳ Retrying connection...
+              </div>
+            )}
+
             <p style={{
               textAlign: "center",
               fontSize: isMobile ? 11.5 : 12.5,
@@ -406,7 +556,7 @@ export const Login = ({ onLoginSuccess, onClose, isModal = false }) => {
               <a
                 href="#contact"
                 onClick={scrollToContact}
-                style={{ color: BRAND.blue, fontWeight: 600, textDecoration: "none" }}
+                style={{ color: BRAND.blue, fontWeight: 600, textDecoration: "none", marginLeft: 4 }}
               >
                 Talk to sales
               </a>
@@ -691,6 +841,7 @@ function ContactSection({ isMobile }) {
     console.log('Contact form submission:', form);
     setSent(true);
     setForm({ name: "", email: "", message: "" });
+    setTimeout(() => setSent(false), 5000);
   };
 
   return (
@@ -723,8 +874,8 @@ function ContactSection({ isMobile }) {
           </p>
           <div style={{ display: "flex", flexDirection: "column", gap: isMobile ? 12 : 14 }}>
             <ContactItem icon={MapPin} label="Address" value="Naivasha, Kenya" isMobile={isMobile} />
-            <ContactItem icon={Mail} label="Email" value="aquasystemtech.co.ke@gmail.com" href="mailto:info@aquasystemtech.co.ke" isMobile={isMobile} />
-            <ContactItem icon={Phone} label="Phone" value="+254 104318839" href="tel:+254728536124" isMobile={isMobile} />
+            <ContactItem icon={Mail} label="Email" value="aquasystemtech.co.ke@gmail.com" href="mailto:aquasystemtech.co.ke@gmail.com" isMobile={isMobile} />
+            <ContactItem icon={Phone} label="Phone" value="+254 104318839" href="tel:+254104318839" isMobile={isMobile} />
           </div>
         </div>
         <div style={{
@@ -751,7 +902,7 @@ function ContactSection({ isMobile }) {
               marginBottom: 14,
               fontSize: isMobile ? 12 : 13
             }}>
-              Message sent — we'll get back to you shortly.
+              ✅ Message sent — we'll get back to you shortly.
             </div>
           )}
           <form onSubmit={handleSubmit}>
@@ -802,8 +953,11 @@ function ContactSection({ isMobile }) {
                 fontSize: isMobile ? 13 : 14,
                 fontWeight: 600,
                 cursor: "pointer",
-                fontFamily: FONT_BODY
+                fontFamily: FONT_BODY,
+                transition: "background 0.2s ease"
               }}
+              onMouseEnter={(e) => e.target.style.background = BRAND.tealDeep}
+              onMouseLeave={(e) => e.target.style.background = BRAND.blue}
             >
               Send Message
             </button>
@@ -949,7 +1103,8 @@ const modalStyles = {
     color: 'var(--muted-foreground)',
     cursor: 'pointer',
     padding: '4px 8px',
-    borderRadius: '4px'
+    borderRadius: '4px',
+    transition: 'color 0.2s ease'
   }
 };
 
