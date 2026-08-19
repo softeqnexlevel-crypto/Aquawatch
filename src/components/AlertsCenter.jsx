@@ -11,6 +11,15 @@
 //   - Adds a History log so cleared/acknowledged/dismissed events aren't
 //     just lost on refresh
 //   - MQTT alarm support: displays PLC bit alarms with descriptions
+//   - Removed Interstage Pressure and Concentrate Pressure alerts
+//
+// ✅ 2026-08-19: ALERT_REFERENCE below updated to match the live
+// THRESHOLDS/BIT_ALARMS tables in utils/alertEngine.js exactly, per the
+// client's request to simplify Stage 1/2 Delta P and Recovery to single
+// trigger points (2.0 bar and 70% respectively) instead of two-tier
+// warning/critical bands. This list is just a static reference display —
+// if you change a threshold in alertEngine.js, update the matching row
+// here too or the two will drift out of sync again.
 
 import React, { useState } from "react";
 import { AlertTriangle, CheckCircle, Bell, Filter, ChevronRight, X, Trash2, Power, History } from "lucide-react";
@@ -18,8 +27,6 @@ import { useData } from "../contexts/DataContext";
 import { useAlerts } from "../contexts/AlertsContext";
 import { useAuth } from "../contexts/AuthContext";
 import { MQTT_ALARMS } from "../utils/alertEngine";
-
-console.log('MQTT Alarms:', MQTT_ALARMS);
 
 const severityColors = {
   Critical: { bg: "rgba(239,68,68,0.08)", border: "rgba(239,68,68,0.3)", text: "#ef4444", dot: "#ef4444" },
@@ -29,39 +36,50 @@ const severityColors = {
   Info: { bg: "rgba(34,197,94,0.08)", border: "rgba(34,197,94,0.3)", text: "#22c55e", dot: "#22c55e" },
 };
 
-// ✅ FIX: Removed duplicate "High RO Pressure" - now unique keys
+// ✅ UPDATED: matches THRESHOLDS / BIT_ALARMS in utils/alertEngine.js
+// exactly as of the client's latest threshold-simplification request.
 const ALERT_REFERENCE = [
   // Sensor threshold alerts
-  { type: "High RO Pressure", threshold: "> 16 bar", severity: "Critical" },
-  { type: "Low RO Pressure", threshold: "< 10 bar", severity: "High" },
-  { type: "High Stage 1 ΔP", threshold: "> 0.60 bar", severity: "Critical" },
-  { type: "High Filter ΔP", threshold: "> 0.40 bar", severity: "Critical" },
-  { type: "Low System Recovery", threshold: "< 68%", severity: "Critical" },
-  { type: "Low Feed Tank Level", threshold: "< 20%", severity: "Critical" },
-  { type: "Power Problem", threshold: "System Offline", severity: "Critical" },
-  { type: "System Manual Mode", threshold: "Not Auto", severity: "High" },
-  { type: "Dosing Stopped", threshold: "Dosing Off", severity: "High" },
-  { type: "Low Permeate Production", threshold: "< 20 m³/h", severity: "Medium" },
-  { type: "Mass Balance Error", threshold: "> 5 m³/h", severity: "Medium" },
-  
-  // MQTT Alarms Reference - with distinct names
-  { type: "High Prefilter Delta P", threshold: "ON (PLC)", severity: "Critical" },
-  { type: "High Media Filter Delta P", threshold: "ON (PLC)", severity: "Critical" },
-  { type: "Stage 1 Delta P High", threshold: "ON (PLC)", severity: "High" },
-  { type: "Stage 2 Delta P High", threshold: "ON (PLC)", severity: "High" },
-  { type: "High RO Pressure (PLC)", threshold: "ON (PLC)", severity: "Critical" },
-  { type: "Feed Tank Low Level", threshold: "ON (PLC)", severity: "Critical" },
+  { type: "High RO Pressure", threshold: "> 16 bar", severity: "Critical", source: "Sensor" },
+  { type: "Low RO Pressure", threshold: "< 10 bar", severity: "High", source: "Sensor" },
+  { type: "High Differential Pressure - Stage 1", threshold: "> 2.0 bar", severity: "Critical", source: "Sensor" },
+  { type: "High Differential Pressure - Stage 2", threshold: "> 2.0 bar", severity: "Critical", source: "Sensor" },
+  { type: "High Filter Delta P", threshold: "> 0.40 bar", severity: "Critical", source: "Sensor" },
+  { type: "High Filter Delta P", threshold: "> 0.30 bar", severity: "Medium", source: "Sensor" },
+  { type: "Low System Recovery", threshold: "< 70%", severity: "Critical", source: "Sensor" },
+  { type: "Low Feed Tank Level", threshold: "< 20%", severity: "Critical", source: "Sensor" },
+  { type: "Low Feed Tank Level", threshold: "< 30%", severity: "Medium", source: "Sensor" },
+  { type: "Low Feed Flow", threshold: "< 50 m³/h", severity: "High", source: "Sensor" },
+  { type: "High Product Water EC", threshold: "> 50 µS/cm", severity: "Medium", source: "Sensor" },
+  { type: "Low Concentrate Flow", threshold: "< 10 m³/h", severity: "Medium", source: "Sensor" },
+
+  // ❌ REMOVED per client request: Interstage and Concentrate Pressure alerts
+
+  // PLC Bit Alarms (digital)
+  { type: "High Prefilter Delta P", threshold: "PLC Bit = ON", severity: "High", source: "PLC" },
+  { type: "High Media Filter Delta P", threshold: "PLC Bit = ON", severity: "High", source: "PLC" },
+  { type: "High Differential Pressure - Stage 1", threshold: "PLC Bit = ON", severity: "Critical", source: "PLC" },
+  { type: "High Differential Pressure - Stage 2", threshold: "PLC Bit = ON", severity: "High", source: "PLC" },
+  { type: "High RO Pressure", threshold: "PLC Bit = ON", severity: "Critical", source: "PLC" },
+  { type: "Low Feed Tank Level", threshold: "PLC Bit = ON", severity: "Critical", source: "PLC" },
+  { type: "Power Problem", threshold: "PLC Bit = ON", severity: "Critical", source: "PLC" },
+
+  // Status alerts
+  { type: "System in Manual Mode", threshold: "Auto mode required", severity: "High", source: "Status" },
+  { type: "Antiscalant Dosing Stopped", threshold: "Running required", severity: "High", source: "Status" },
+  { type: "Low Permeate Production", threshold: "< 20 m³/h", severity: "Medium", source: "Status" },
+  { type: "Mass Balance Error", threshold: "> 5 m³/h", severity: "Medium", source: "Status" },
 ];
 
 // MQTT alarm icon mapping
 const getAlarmIcon = (alertId) => {
-  if (alertId.includes('Prefilter')) return '🔧';
-  if (alertId.includes('PowerProblem')) return '⚡';
-  if (alertId.includes('Media')) return '🧹';
-  if (alertId.includes('Stage1')) return '📊';
-  if (alertId.includes('Stage2')) return '📊';
-  if (alertId.includes('HighROPressure')) return '💨';
-  if (alertId.includes('FeedTankLow')) return '📉';
+  if (alertId?.includes('Prefilter')) return '🔧';
+  if (alertId?.includes('PowerProblem')) return '⚡';
+  if (alertId?.includes('Media')) return '🧹';
+  if (alertId?.includes('S1Delta')) return '📊';
+  if (alertId?.includes('S2Delta')) return '📊';
+  if (alertId?.includes('HighROPressure')) return '💨';
+  if (alertId?.includes('FeedTankLow')) return '📉';
   return '🔔';
 };
 
@@ -226,21 +244,34 @@ export function AlertsCenter() {
         {filtered.map(alert => {
           const cfg = severityColors[alert.severity] || severityColors.Info;
           const isActiveStatus = alert.status === "Active";
-          
-          // ✅ Get the MQTT alarm description if it exists
+
+          // Check if this is a PLC alarm — prefer the flag already set by
+          // alertEngine.js's mergeAlerts (isPLCAlarm: c.source === 'PLC'),
+          // fall back to the MQTT_ALARMS lookup for older/cached alert
+          // objects that predate that field.
+          const isPLCAlarm = alert.isPLCAlarm || MQTT_ALARMS.some(a => a.id === alert.id);
+
+          // Get the MQTT alarm description if it exists
           const mqttAlarm = MQTT_ALARMS.find(a => a.id === alert.id);
           const description = alert.description || mqttAlarm?.description || '';
           const alarmIcon = getAlarmIcon(alert.id);
 
-          // Check if this is a MQTT alarm (PLC bit)
-          const isMQTTAlarm = MQTT_ALARMS.some(a => a.id === alert.id);
+          // Determine border color based on alarm type
+          let borderLeftColor = 'none';
+          if (alert.isPowerProblem) {
+            borderLeftColor = '#ef4444';
+          } else if (isPLCAlarm) {
+            borderLeftColor = '#a78bfa';
+          } else {
+            borderLeftColor = '#0ea5e9';
+          }
 
           return (
             <div key={alert.id} className="rounded p-3 flex items-start gap-3 transition-all" style={{
-              background: cfg.bg, 
+              background: cfg.bg,
               border: `1px solid ${alert.isPowerProblem ? '#ef4444' : cfg.border}`,
-              opacity: isActiveStatus ? 1 : 0.65, 
-              borderLeft: alert.isPowerProblem ? '4px solid #ef4444' : isMQTTAlarm ? '4px solid #a78bfa' : 'none'
+              opacity: isActiveStatus ? 1 : 0.65,
+              borderLeft: `4px solid ${borderLeftColor}`
             }}>
               <div className="flex items-center justify-center mt-0.5 flex-shrink-0" style={{ width: 28, height: 28, background: `${cfg.dot}15`, borderRadius: 4 }}>
                 {alert.isPowerProblem ? <Power size={13} style={{ color: cfg.dot }} /> : <AlertTriangle size={13} style={{ color: cfg.dot }} />}
@@ -249,7 +280,7 @@ export function AlertsCenter() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <span style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>
-                    {isMQTTAlarm ? `${alarmIcon} ` : ''}{alert.type}
+                    {isPLCAlarm ? `${alarmIcon} ` : ''}{alert.type}
                   </span>
                   <span style={{ fontSize: 9, fontWeight: 700, color: cfg.text, background: `${cfg.dot}18`, borderRadius: 3, padding: "1px 6px", letterSpacing: "0.06em" }}>
                     {alert.severity.toUpperCase()}
@@ -260,11 +291,43 @@ export function AlertsCenter() {
                     background: isActiveStatus ? "rgba(34,197,94,0.1)" : "rgba(77,122,158,0.1)",
                     borderRadius: 3, padding: "1px 6px"
                   }}>{alert.status.toUpperCase()}</span>
-                  {alert.source === 'sensor' && alert.sensorKey?.startsWith('calc') && (
-                    <span style={{ fontSize: 7, fontWeight: 600, color: "#a78bfa", background: "rgba(167,139,250,0.1)", borderRadius: 2, padding: "1px 4px" }}>CALC</span>
+
+                  {/* Source badges */}
+                  {isPLCAlarm && (
+                    <span style={{
+                      fontSize: 7,
+                      fontWeight: 600,
+                      color: "#8b5cf6",
+                      background: "rgba(139,92,246,0.1)",
+                      borderRadius: 2,
+                      padding: "1px 6px"
+                    }}>
+                      PLC ALARM
+                    </span>
                   )}
-                  {isMQTTAlarm && (
-                    <span style={{ fontSize: 7, fontWeight: 600, color: "#8b5cf6", background: "rgba(139,92,246,0.1)", borderRadius: 2, padding: "1px 4px" }}>PLC</span>
+                  {!isPLCAlarm && alert.source === 'sensor' && (
+                    <span style={{
+                      fontSize: 7,
+                      fontWeight: 600,
+                      color: "#0ea5e9",
+                      background: "rgba(14,165,233,0.1)",
+                      borderRadius: 2,
+                      padding: "1px 6px"
+                    }}>
+                      SENSOR THRESHOLD
+                    </span>
+                  )}
+                  {!isPLCAlarm && alert.source !== 'sensor' && (
+                    <span style={{
+                      fontSize: 7,
+                      fontWeight: 600,
+                      color: "#f59e0b",
+                      background: "rgba(245,158,11,0.1)",
+                      borderRadius: 2,
+                      padding: "1px 6px"
+                    }}>
+                      STATUS
+                    </span>
                   )}
                 </div>
 
@@ -274,10 +337,15 @@ export function AlertsCenter() {
                   {" · "}Threshold: <span style={{ fontFamily: "var(--font-mono)", color: "var(--muted-foreground)" }}>{alert.threshold}</span>
                 </div>
 
-                {/* ✅ Add description for MQTT alarms */}
-                {description && (
+                {/* Show description for PLC alarms */}
+                {isPLCAlarm && description && (
                   <div style={{ fontSize: 10, color: "var(--muted-foreground)", marginTop: 2, fontStyle: 'italic' }}>
                     💡 {description}
+                  </div>
+                )}
+                {!isPLCAlarm && alert.source === 'sensor' && (
+                  <div style={{ fontSize: 9, color: "var(--muted-foreground)", marginTop: 2 }}>
+                    📊 Alert triggered by sensor reading exceeding threshold
                   </div>
                 )}
 
@@ -338,6 +406,7 @@ export function AlertsCenter() {
                 <div>
                   <div style={{ fontSize: 10, fontWeight: 500, color: "var(--foreground)" }}>{cfg.type}</div>
                   <div style={{ fontSize: 9, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)" }}>Threshold: {cfg.threshold}</div>
+                  <div style={{ fontSize: 8, color: "var(--muted-foreground)" }}>Source: {cfg.source || 'Sensor'}</div>
                 </div>
                 <span style={{ fontSize: 8, fontWeight: 700, color: s.text, background: s.bg, borderRadius: 3, padding: "1px 5px", marginLeft: 8, flexShrink: 0 }}>
                   {cfg.severity.toUpperCase()}

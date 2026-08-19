@@ -4,6 +4,12 @@
 // no React, no state of its own. Callers (AlertsContext) own the state
 // and pass in whatever "previous" info the engine needs (previous active
 // rule IDs for hysteresis, previous alert list for merge/acknowledgment).
+//
+// Why this exists: Dashboard.jsx, AntiscalantDosing.jsx, and
+// AlertsCenter.jsx each used to define their own threshold numbers and
+// their own alert-generation logic. They drifted (e.g. RO pressure
+// critical at >16 bar in one place, >15 bar in another) and every
+// re-render threw away acknowledgment state. This file fixes both.
 
 // ==================== VALUE NORMALIZATION ====================
 
@@ -42,6 +48,25 @@ export const toDisplayString = (value, decimals = 1) => {
 };
 
 // ==================== CANONICAL THRESHOLD TABLE ====================
+// `value`  = trigger point
+// `clear`  = the point it must cross back past before the alert clears
+//            (the hysteresis buffer — prevents flicker when a reading
+//            sits right on the trigger line)
+// direction 'high'  -> alert fires when value > trigger, clears when value <= clear (clear < trigger)
+// direction 'low'   -> alert fires when value < trigger, clears when value >= clear (clear > trigger)
+//
+// ✅ UPDATED per client request (2026-08-19 forwarded message):
+//   - Stage 1 Delta P  -> single trigger at 2.0 bar (was 0.50/0.60 two-tier)
+//   - Stage 2 Delta P  -> single trigger at 2.0 bar (was 0.55)
+//   - System Recovery  -> single trigger below 70% (was 68/72 two-tier)
+//   - Interstage Pressure alarm -> removed entirely (client asked to drop it)
+//   - Concentrate Pressure alarm -> removed entirely (client asked to drop it)
+//
+// Note: RO5-S1DeltaHigh / RO5-S2DeltaHigh PLC bits are also evaluated
+// separately below in BIT_ALARMS. If the PLC's own internal threshold for
+// those bits differs from 2.0 bar, both this numeric rule and the PLC bit
+// can fire independently at different points — worth confirming with the
+// client what the PLC-side threshold is set to so the two stay in sync.
 
 export const THRESHOLDS = {
   'RO5-ROPressure': {
@@ -54,14 +79,13 @@ export const THRESHOLDS = {
   'RO5-Stage1Delta': {
     equipment: 'RO5 - Stage1Delta',
     rules: [
-      { type: 'critical', direction: 'high', value: 0.60, clear: 0.55, severity: 'Critical', message: 'High Differential Pressure - Stage 1' },
-      { type: 'warning', direction: 'high', value: 0.50, clear: 0.45, severity: 'High', message: 'High Differential Pressure - Stage 1' },
+      { type: 'critical', direction: 'high', value: 2.0, clear: 1.9, severity: 'Critical', message: 'High Differential Pressure - Stage 1' },
     ],
   },
   'RO5-Stage2Delta': {
     equipment: 'RO5 - Stage2Delta',
     rules: [
-      { type: 'high', direction: 'high', value: 0.55, clear: 0.50, severity: 'High', message: 'High Differential Pressure - Stage 2' },
+      { type: 'critical', direction: 'high', value: 2.0, clear: 1.9, severity: 'Critical', message: 'High Differential Pressure - Stage 2' },
     ],
   },
   'RO5-MediaFilterDeltaP': {
@@ -74,8 +98,7 @@ export const THRESHOLDS = {
   'RO5-SystemRecovery': {
     equipment: 'RO5 - SystemRecovery',
     rules: [
-      { type: 'critical', direction: 'low', value: 68, clear: 69.5, severity: 'Critical', message: 'Low System Recovery' },
-      { type: 'warning', direction: 'low', value: 72, clear: 73.5, severity: 'Medium', message: 'Low System Recovery' },
+      { type: 'critical', direction: 'low', value: 70, clear: 71.5, severity: 'Critical', message: 'Low System Recovery' },
     ],
   },
   'RO5-FeedTankLevel': {
@@ -103,84 +126,34 @@ export const THRESHOLDS = {
       { type: 'low', direction: 'low', value: 10, clear: 11, severity: 'Medium', message: 'Low Concentrate Flow' },
     ],
   },
-  'RO5-InterstagePress': {
-    equipment: 'RO5 - InterstagePress',
-    rules: [
-      { type: 'high', direction: 'high', value: 10, clear: 9.3, severity: 'Medium', message: 'High Interstage Pressure' },
-    ],
-  },
-  'RO5-ConcetratePress': {
-    equipment: 'RO5 - ConcetratePress',
-    rules: [
-      { type: 'high', direction: 'high', value: 8, clear: 7.4, severity: 'Low', message: 'High Concentrate Pressure' },
-    ],
-  },
+  // ✅ REMOVED per client request: RO5-InterstagePress (High Interstage Pressure)
+  // ✅ REMOVED per client request: RO5-ConcetratePress (High Concentrate Pressure)
 };
 
-// ==================== MQTT ALARM DEFINITIONS ====================
-// These correspond to the PLC bits from your MQTT data:
-// HighPrefilterDeltaP, PowerProblem, HighMediaDeltaP, S2DeltaHigh,
-// S1DeltaHigh, HighROPressure, FeedTankLow
-
-export const MQTT_ALARMS = [
-  {
-    id: 'RO5-HighPrefilterDeltaP',
-    sensorKey: 'RO5-HighPrefilterDeltaP',
-    equipment: 'RO5 - Prefilter',
-    severity: 'Critical',
-    message: 'High Prefilter Delta P - Prefilter Blocked',
-    description: 'Prefilter is blocked and needs immediate cleaning or replacement',
-  },
-  {
-    id: 'RO5-PowerProblem',
-    sensorKey: 'RO5-PowerProblem',
-    equipment: 'RO5 - Power System',
-    severity: 'Critical',
-    message: 'Power Problem - System Offline',
-    description: 'Power supply issue detected. System may be offline.',
-    isPowerProblem: true,
-  },
-  {
-    id: 'RO5-HighMediaDeltaP',
-    sensorKey: 'RO5-HighMediaDeltaP',
-    equipment: 'RO5 - Media Filter',
-    severity: 'Critical',
-    message: 'High Media Filter Delta P',
-    description: 'Media filter differential pressure is too high. Filter may be clogged.',
-  },
-  {
-    id: 'RO5-S2DeltaHigh',
-    sensorKey: 'RO5-S2DeltaHigh',
-    equipment: 'RO5 - Stage 2',
-    severity: 'High',
-    message: 'Stage 2 Delta P High',
-    description: 'Stage 2 differential pressure has exceeded the acceptable limit.',
-  },
-  {
-    id: 'RO5-S1DeltaHigh',
-    sensorKey: 'RO5-S1DeltaHigh',
-    equipment: 'RO5 - Stage 1',
-    severity: 'High',
-    message: 'Stage 1 Delta P High',
-    description: 'Stage 1 differential pressure has exceeded the acceptable limit.',
-  },
-  {
-    id: 'RO5-HighROPressure',
-    sensorKey: 'RO5-HighROPressure',
-    equipment: 'RO5 - RO System',
-    severity: 'Critical',
-    message: 'High RO Pressure',
-    description: 'RO system pressure is dangerously high. Immediate action required.',
-  },
-  {
-    id: 'RO5-FeedTankLow',
-    sensorKey: 'RO5-FeedTankLow',
-    equipment: 'RO5 - Feed Tank',
-    severity: 'Critical',
-    message: 'Feed Tank Low Level',
-    description: 'Feed tank level is critically low. Refill required immediately.',
-  },
+// ==================== PLC BIT ALARMS ====================
+// These are alarm conditions sent directly by the PLC as ON/OFF bits over
+// MQTT (see plcService.js — bit-type records get converted to 'ON'/'OFF'
+// strings). They're the authoritative source for these specific
+// conditions, since the PLC itself already knows when they're true rather
+// than us re-deriving it from a raw numeric threshold on the frontend.
+const BIT_ALARMS = [
+  { key: 'RO5-HighPrefilterDeltaP', message: 'High Prefilter Delta P', equipment: 'RO5 - Prefilter', severity: 'High', description: 'Prefilter is clogged and needs backwashing or replacement.' },
+  { key: 'RO5-PowerProblem', message: 'Power Problem', equipment: 'RO5 - Power Supply', severity: 'Critical', description: 'PLC reports a power supply fault. Check incoming power and control panel.' },
+  { key: 'RO5-HighMediaDeltaP', message: 'High Media Filter Delta P', equipment: 'RO5 - Media Filter', severity: 'High', description: 'Media filter differential pressure is high — filter may need backwashing.' },
+  { key: 'RO5-S2DeltaHigh', message: 'High Differential Pressure - Stage 2', equipment: 'RO5 - Stage 2', severity: 'High', description: 'Stage 2 membrane differential pressure has exceeded the PLC-set limit.' },
+  { key: 'RO5-S1DeltaHigh', message: 'High Differential Pressure - Stage 1', equipment: 'RO5 - Stage 1', severity: 'Critical', description: 'Stage 1 membrane differential pressure has exceeded the PLC-set limit.' },
+  { key: 'RO5-HighROPressure', message: 'High RO Pressure', equipment: 'RO5 - RO Pressure', severity: 'Critical', description: 'RO system pressure has exceeded the PLC-set limit.' },
+  { key: 'RO5-FeedTankLow', message: 'Low Feed Tank Level', equipment: 'RO5 - Feed Tank', severity: 'Critical', description: 'Feed tank level is low — feed pump may stop soon to prevent dry-run.' },
 ];
+
+// ✅ Exported for AlertsCenter.jsx — maps each PLC bit alarm's candidate
+// id (as generated by the `push(`${key}:bit`, ...)` call below) to a
+// human-readable description, and marks it as PLC-sourced so the UI can
+// badge it correctly and show the description line under each alert.
+export const MQTT_ALARMS = BIT_ALARMS.map(({ key, description }) => ({
+  id: `${key}:bit`,
+  description,
+}));
 
 // ==================== CORE EVALUATION ====================
 
@@ -199,29 +172,28 @@ export function evaluateSensorAlerts(getValue, previousActiveIds = new Set()) {
 
   const push = (id, active, meta) => candidates.push({ id, active, source: 'sensor', ...meta });
 
-  // -------------------- MQTT Alarm Rules --------------------
-  // Evaluate each MQTT alarm bit. When the bit is ON (active), trigger the alert.
-  // When OFF, the alert clears automatically.
-  
-  MQTT_ALARMS.forEach((alarm) => {
-    const value = getValue(alarm.sensorKey);
-    const isAlarmActive = isActive(value);
-    
-    push(alarm.id, isAlarmActive, {
-      sensorKey: alarm.sensorKey,
-      severity: alarm.severity,
-      message: alarm.message,
-      equipment: alarm.equipment,
-      value: isAlarmActive ? 'ON' : 'OFF',
-      threshold: 'ON',
-      isPowerProblem: alarm.isPowerProblem || false,
-      description: alarm.description,
-    });
-  });
-
   // -------------------- Binary / status rules --------------------
   const systemOperation = getValue('RO5-SystemOperation');
   const isSystemOn = isActive(systemOperation);
+
+  // ⚠️ TEMPORARILY DISABLED — this rule was firing "Power Problem - System
+  // Offline" permanently because the raw backend key for system status
+  // wasn't matching any alias in DataContext.jsx's KEY_MAPPING. That's now
+  // fixed (RO5-SystemActive is mapped to RO5-SystemOperation), and the real
+  // PLC PowerProblem bit is now covered directly via BIT_ALARMS below, so
+  // this derived rule is left disabled to avoid a duplicate/competing
+  // "power problem" signal. Re-enable only if you want a *second*,
+  // independently-derived check on top of the PLC's own bit.
+  //
+  // push('RO5-SystemOperation:offline', !isSystemOn, {
+  //   sensorKey: 'RO5-SystemOperation',
+  //   severity: 'Critical',
+  //   message: 'Power Problem - System Offline',
+  //   equipment: 'RO5 - SystemOperation',
+  //   value: toDisplayString(systemOperation),
+  //   threshold: 'ON required',
+  //   isPowerProblem: true,
+  // });
 
   const systemMode = getValue('RO5-SystemMode');
   const isAutoMode = isActive(systemMode);
@@ -245,6 +217,22 @@ export function evaluateSensorAlerts(getValue, previousActiveIds = new Set()) {
     threshold: 'Running required',
   });
 
+  // -------------------- PLC bit alarms --------------------
+  BIT_ALARMS.forEach(({ key, message, equipment, severity, description }) => {
+    const raw = getValue(key);
+    if (raw === undefined || raw === null) return; // no reading yet — skip, don't false-alarm
+    push(`${key}:bit`, isActive(raw), {
+      sensorKey: key,
+      severity,
+      message,
+      equipment,
+      value: toDisplayString(raw),
+      threshold: 'OFF required',
+      source: 'PLC',
+      description,
+    });
+  });
+
   // -------------------- Numeric threshold rules (with hysteresis) --------------------
   Object.entries(THRESHOLDS).forEach(([sensorKey, config]) => {
     const raw = getValue(sensorKey);
@@ -257,8 +245,8 @@ export function evaluateSensorAlerts(getValue, previousActiveIds = new Set()) {
       const isHigh = rule.direction === 'high';
 
       const nowActive = wasActive
-        ? (isHigh ? value > rule.clear : value < rule.clear)
-        : (isHigh ? value > rule.value : value < rule.value);
+        ? (isHigh ? value > rule.clear : value < rule.clear)   // needs to cross the buffer to clear
+        : (isHigh ? value > rule.value : value < rule.value);  // needs to cross the trigger to fire
 
       push(id, nowActive, {
         sensorKey,
@@ -271,7 +259,7 @@ export function evaluateSensorAlerts(getValue, previousActiveIds = new Set()) {
     });
   });
 
-  // -------------------- Calculated rules --------------------
+  // -------------------- Calculated rules (combine multiple sensors) --------------------
   const feedFlow = toNumber(getValue('RO5-FEEDFlow'));
   const permeateFlow = toNumber(getValue('RO5-Permeateflow'));
   const concentrateFlow = toNumber(getValue('RO5-ConcetrateFlow'));
@@ -301,6 +289,16 @@ export function evaluateSensorAlerts(getValue, previousActiveIds = new Set()) {
 
 /**
  * Merge freshly-evaluated candidates against the previous alert list.
+ * - A candidate that's newly active becomes a new 'Active' alert.
+ * - A candidate that's still active and already existed keeps whatever
+ *   status it had (so 'Acknowledged' survives re-evaluation instead of
+ *   getting stomped back to 'Active' every tick).
+ * - A candidate that's no longer active is dropped from the live list,
+ *   and a 'cleared' event is recorded if it had been active before.
+ *
+ * @param {Array<Candidate>} candidates
+ * @param {Array<Alert>} previousAlerts
+ * @returns {{ alerts: Array<Alert>, events: Array<HistoryEvent> }}
  */
 export function mergeAlerts(candidates, previousAlerts = []) {
   const prevById = new Map(previousAlerts.map((a) => [a.id, a]));
@@ -313,17 +311,10 @@ export function mergeAlerts(candidates, previousAlerts = []) {
 
     if (c.active) {
       if (prev) {
-        // Still firing — keep its status
-        merged.push({ 
-          ...prev, 
-          value: c.value, 
-          threshold: c.threshold, 
-          lastSeen: nowIso,
-          // Update description if it exists
-          description: c.description || prev.description,
-        });
+        // Still firing — keep its status (Active or Acknowledged) intact.
+        merged.push({ ...prev, value: c.value, threshold: c.threshold, lastSeen: nowIso });
       } else {
-        // Brand new trigger
+        // Brand new trigger (first time, or re-triggered after clearing).
         const alert = {
           id: c.id,
           type: c.message,
@@ -333,44 +324,22 @@ export function mergeAlerts(candidates, previousAlerts = []) {
           value: c.value,
           threshold: c.threshold,
           source: c.source,
-          isPowerProblem: !!c.isPowerProblem,
           description: c.description || '',
+          isPLCAlarm: c.source === 'PLC',
+          isPowerProblem: !!c.isPowerProblem,
           firstTriggered: nowIso,
           lastSeen: nowIso,
           date: new Date().toLocaleDateString(),
           time: new Date().toLocaleTimeString(),
         };
         merged.push(alert);
-        events.push({ 
-          id: `${c.id}-trig-${Date.now()}`, 
-          alertId: c.id, 
-          kind: 'triggered', 
-          type: c.message, 
-          severity: c.severity, 
-          time: nowIso,
-          description: c.description || '',
-        });
+        events.push({ id: `${c.id}-trig-${Date.now()}`, alertId: c.id, kind: 'triggered', type: c.message, severity: c.severity, time: nowIso });
       }
     } else if (prev) {
-      // Was active, now cleared
-      events.push({ 
-        id: `${c.id}-clear-${Date.now()}`, 
-        alertId: c.id, 
-        kind: 'cleared', 
-        type: c.message, 
-        severity: c.severity, 
-        time: nowIso 
-      });
+      // Was active, now cleared — drop from the live list, log it.
+      events.push({ id: `${c.id}-clear-${Date.now()}`, alertId: c.id, kind: 'cleared', type: c.message, severity: c.severity, time: nowIso });
     }
   });
 
   return { alerts: merged, events };
 }
-
-// Export MQTT_ALARMS for use in other components
-export const getMQTTAlarmDescriptions = () => {
-  return MQTT_ALARMS.reduce((acc, alarm) => {
-    acc[alarm.id] = alarm.description;
-    return acc;
-  }, {});
-};
