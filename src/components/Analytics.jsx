@@ -1,14 +1,37 @@
 // components/Analytics.jsx - FULLY MOBILE RESPONSIVE
+//
+// ✅ 2026-08-19: Fixed "Total Output" and "Chemical" cards showing
+// fluctuating instead of accumulated values. Root cause: these were
+// computed as `currentFlow * hours` (a flat extrapolation of whatever
+// the instantaneous flow reading happens to be right now), so the
+// number moved every time the live flow reading changed — not what a
+// real cumulative production total should do.
+//
+// Now pulls real accumulated volumes from GET /api/production-summary,
+// the same endpoint Dashboard.jsx already uses, which computes proper
+// trapezoidal integration (flow × time) over actual stored measurements
+// on the backend (see getProductionVolume() in database/postgres.js).
+// That's a true running total that only grows, unaffected by the
+// current instantaneous reading.
+//
+// Also removed the 6-month "Production & Recovery Trend" chart and the
+// chemical-consumption bar chart, both of which filled in months with
+// no real history using `Math.random()` — per client request, this is
+// skipped for now rather than shipping fabricated numbers. If a real
+// month-by-month trend is wanted later, it needs a new backend endpoint
+// exposing getMeasurementAggregates() with a monthly bucket, since the
+// frontend only holds the last 500 in-memory readings and can't
+// reconstruct 6 months of history on its own.
 
-import React, { useState, useRef, useMemo, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import {
-  AreaChart, Area, BarChart, Bar, LineChart, Line,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell
+  BarChart, Bar, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from "recharts";
-import { Download, FileText, RefreshCw, CheckCircle, TrendingUp, TrendingDown, Activity, Droplet, Filter, Wrench } from "lucide-react";
+import { Download, RefreshCw, CheckCircle, Activity, Droplet, Filter, Wrench } from "lucide-react";
 import { useData } from "../contexts/DataContext";
-import { format, subDays, startOfMonth, endOfMonth } from 'date-fns';
-import * as XLSX from 'xlsx';
+import { API_BASE_URL } from "../config";
+import { format } from 'date-fns';
 
 const COLORS = {
   success: '#22c55e',
@@ -68,8 +91,8 @@ function Toast({ toast }) {
 // ===================== USE TOAST HOOK =====================
 function useToast() {
   const [toast, setToast] = useState(null);
-  const timerRef = useRef(null);
-  const intervalRef = useRef(null);
+  const timerRef = React.useRef(null);
+  const intervalRef = React.useRef(null);
 
   function showToast(title, sub, iconColor, onComplete) {
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -123,15 +146,28 @@ function ReportCard({ title, items, onExport, icon: Icon, isMobile }) {
   );
 }
 
-// ===================== PERIODS =====================
-const periods = ["Daily", "Weekly", "Monthly"];
+// ===================== PRODUCTION SUMMARY API =====================
+// Same endpoint + auth pattern Dashboard.jsx already uses — kept
+// identical so both pages agree on the same real accumulated numbers
+// instead of drifting apart with their own separate calculations.
+const api = {
+  getProductionSummary: async () => {
+    const token = localStorage.getItem('accessToken');
+    const response = await fetch(`${API_BASE_URL}/api/production-summary`, { headers: { 'Authorization': `Bearer ${token}` } });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  },
+};
 
-// ===================== MAIN COMPONENT =====================
+const DOSING_RATE = 2.66; // mg/L — fixed dosing rate used to derive chemical consumption from real accumulated volume
+const RECOVERY_TARGET = 75;
+
 export function Analytics() {
   const { sensorData, getValue, getHistory, lastUpdate } = useData();
-  const [period, setPeriod] = useState("Monthly");
   const { toast, showToast } = useToast();
   const [isMobile, setIsMobile] = useState(false);
+  const [productionSummary, setProductionSummary] = useState(null);
+  const [summaryLoading, setSummaryLoading] = useState(true);
 
   // Mobile detection
   useEffect(() => {
@@ -141,148 +177,68 @@ export function Analytics() {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Get real data
+  // ✅ Real accumulated production totals — polled the same way
+  // Dashboard.jsx does, so both pages stay in sync with the backend's
+  // actual integrated volume rather than each computing their own guess.
+  const fetchProductionSummary = async () => {
+    try {
+      const data = await api.getProductionSummary();
+      setProductionSummary(data);
+      setSummaryLoading(false);
+    } catch (err) {
+      console.error('Failed to fetch production summary:', err);
+      setSummaryLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchProductionSummary();
+    const interval = setInterval(fetchProductionSummary, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Live instantaneous sensor readings — these are legitimately meant to
+  // fluctuate (they're "right now" values), unlike the accumulated totals
+  // above, so they're kept separate and only used where "current" is the
+  // actual intent (e.g. "Current Flow", live gauges, maintenance deltas).
   const feedFlow = getValue('RO5-FEEDFlow') || 0;
   const permeateFlow = getValue('RO5-Permeateflow') || 0;
   const concentrateFlow = getValue('RO5-ConcetrateFlow') || 0;
   const recovery = getValue('RO5-SystemRecovery') || 0;
   const roPressure = getValue('RO5-ROPressure') || 0;
-  const pureWaterEC = getValue('RO5-PureWaterEc') || 0;
   const stage1Delta = getValue('RO5-Stage1Delta') || 0;
   const stage2Delta = getValue('RO5-Stage2Delta') || 0;
-  const filterDeltaP = getValue('RO5-MediaFilterDeltaP') || 0;
 
-  const RECOVERY_TARGET = 75;
-  const DOSING_RATE = 2.66;
-  const totalOutput = permeateFlow * 24 * 30;
-  const displayStage2Delta = stage2Delta;
-
-  // Get history
-  const feedHistory = getHistory('RO5-FEEDFlow');
-  const permeateHistory = getHistory('RO5-Permeateflow');
   const recoveryHistory = getHistory('RO5-SystemRecovery');
 
-  // Calculate metrics
-  const metrics = useMemo(() => {
+  // Real accumulated volumes (m³), straight from the backend's
+  // trapezoidal-integration query — these only grow over their period,
+  // they don't jump around with the current instantaneous flow reading.
+  const dailyVolume = productionSummary?.permeate?.daily ?? 0;
+  const weeklyVolume = productionSummary?.permeate?.weekly ?? 0;
+  const monthlyVolume = productionSummary?.permeate?.monthly ?? 0;
+
+  // Recovery daily average — computed from real logged history (not
+  // fabricated), just naturally limited to whatever window of history
+  // is currently held in memory.
+  const recoveryAvg = React.useMemo(() => {
     const now = new Date();
-    const weekAgo = subDays(now, 7);
-    const monthAgo = subDays(now, 30);
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayReadings = recoveryHistory.filter(d => new Date(d.time) >= todayStart);
+    if (todayReadings.length === 0) return recovery;
+    return todayReadings.reduce((sum, d) => sum + d.value, 0) / todayReadings.length;
+  }, [recoveryHistory, recovery]);
 
-    const todayData = permeateHistory.filter(d => new Date(d.time) >= new Date(now.setHours(0,0,0,0)));
-    const dailyTotal = todayData.reduce((sum, d) => sum + d.value, 0);
-    
-    const weekData = permeateHistory.filter(d => new Date(d.time) >= weekAgo);
-    const weeklyTotal = weekData.reduce((sum, d) => sum + d.value, 0);
-    
-    const monthData = permeateHistory.filter(d => new Date(d.time) >= monthAgo);
-    const monthlyTotal = monthData.reduce((sum, d) => sum + d.value, 0);
+  // Chemical consumption derived from real accumulated volume, not from
+  // extrapolating the current flow reading across a fixed time window.
+  const chemicalDaily = (dailyVolume * DOSING_RATE) / 1000;   // kg
+  const chemicalWeekly = (weeklyVolume * DOSING_RATE) / 1000; // kg
+  const chemicalMonthly = (monthlyVolume * DOSING_RATE) / 1000; // kg
 
-    const recoveryToday = recoveryHistory.filter(d => new Date(d.time) >= new Date(now.setHours(0,0,0,0)));
-    const recoveryAvg = recoveryToday.length > 0 
-      ? recoveryToday.reduce((sum, d) => sum + d.value, 0) / recoveryToday.length 
-      : recovery;
-
-    const dailyTotals = {};
-    permeateHistory.forEach(d => {
-      const date = format(new Date(d.time), 'yyyy-MM-dd');
-      if (!dailyTotals[date]) dailyTotals[date] = 0;
-      dailyTotals[date] += d.value;
-    });
-    const peakDay = Object.values(dailyTotals).length > 0 ? Math.max(...Object.values(dailyTotals)) : 0;
-
-    return {
-      dailyTotal: dailyTotal,
-      weeklyTotal: weeklyTotal,
-      monthlyTotal: monthlyTotal,
-      dailyAvg: dailyTotal / (todayData.length || 1),
-      recoveryAvg: recoveryAvg,
-      peakDay: peakDay,
-      feedFlow: feedFlow,
-      permeateFlow: permeateFlow,
-      concentrateFlow: concentrateFlow,
-      recovery: recovery,
-      roPressure: roPressure,
-      pureWaterEC: pureWaterEC,
-      stage1Delta: stage1Delta,
-      stage2Delta: stage2Delta,
-      filterDeltaP: filterDeltaP,
-    };
-  }, [permeateHistory, recoveryHistory, feedFlow, permeateFlow, concentrateFlow, recovery, roPressure, pureWaterEC, stage1Delta, stage2Delta, filterDeltaP]);
-
-  const kpis = [
-    { label: "System Recovery", value: metrics.recovery, color: metrics.recovery >= RECOVERY_TARGET ? COLORS.success : COLORS.warning },
-    { label: "System Runtime", value: 98, color: COLORS.success },
-    { label: "Sensor Accuracy", value: 95, color: COLORS.primary },
-    { label: "Water Quality", value: 95, color: COLORS.success },
-  ];
-
-  // Generate monthly production data for chart
-  const monthlyProduction = useMemo(() => {
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
-    const currentMonth = new Date().getMonth();
-    
-    return months.slice(0, 6).map((month, i) => {
-      const monthIndex = (currentMonth - 5 + i + 12) % 12;
-      const monthName = months[monthIndex];
-      
-      let actual = metrics.monthlyTotal * (0.85 + Math.random() * 0.3);
-      if (permeateHistory.length > 0) {
-        const monthData = permeateHistory.filter(d => {
-          const date = new Date(d.time);
-          return date.getMonth() === monthIndex;
-        });
-        if (monthData.length > 0) {
-          actual = monthData.reduce((sum, d) => sum + d.value, 0);
-        }
-      }
-      
-      return {
-        month: monthName,
-        actual: actual,
-        target: 130200
-      };
-    });
-  }, [metrics.monthlyTotal, permeateHistory]);
-
-  // Generate recovery trend for chart
-  const recoveryTrend = useMemo(() => {
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
-    const currentMonth = new Date().getMonth();
-    
-    return months.slice(0, 6).map((month, i) => {
-      const monthIndex = (currentMonth - 5 + i + 12) % 12;
-      const monthName = months[monthIndex];
-      
-      let recoveryVal = metrics.recoveryAvg * (0.97 + Math.random() * 0.06);
-      if (recoveryHistory.length > 0) {
-        const monthData = recoveryHistory.filter(d => {
-          const date = new Date(d.time);
-          return date.getMonth() === monthIndex;
-        });
-        if (monthData.length > 0) {
-          recoveryVal = monthData.reduce((sum, d) => sum + d.value, 0) / monthData.length;
-        }
-      }
-      
-      return {
-        month: monthName,
-        recovery: recoveryVal,
-        target: RECOVERY_TARGET
-      };
-    });
-  }, [metrics.recoveryAvg, recoveryHistory]);
-
-  // Chemical data with fixed dosing rate
-  const chemicalData = useMemo(() => {
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
-    return months.slice(0, 6).map((month, i) => ({
-      month: month,
-      consumption: (metrics.permeateFlow * 24 * 30 * DOSING_RATE) / 1000 + Math.random() * 30
-    }));
-  }, [metrics.permeateFlow]);
-
-  // Operating distribution
-  const operatingDistribution = useMemo(() => {
+  // Live flow-share snapshot — this is a real "right now" distribution
+  // (feed vs permeate vs concentrate), so fluctuating with the live
+  // reading is correct here.
+  const operatingDistribution = React.useMemo(() => {
     const total = feedFlow + permeateFlow + concentrateFlow || 1;
     return [
       { name: "Feed Flow", value: (feedFlow / total * 100), color: "#0ea5e9" },
@@ -291,22 +247,47 @@ export function Analytics() {
     ];
   }, [feedFlow, permeateFlow, concentrateFlow]);
 
+  const kpis = [
+    { label: "System Recovery", value: recovery, color: recovery >= RECOVERY_TARGET ? COLORS.success : COLORS.warning },
+    { label: "System Runtime", value: 98, color: COLORS.success },
+    { label: "Sensor Accuracy", value: 95, color: COLORS.primary },
+    { label: "Water Quality", value: 95, color: COLORS.success },
+  ];
+
+  // Real accumulated-volume bar chart: Daily / Weekly / Monthly, straight
+  // from productionSummary — replaces the old 6-month trend chart that
+  // filled unknown months with random numbers. Per client: skip 6-month
+  // history for now rather than fabricate it.
+  const productionByPeriod = [
+    { period: 'Daily', volume: dailyVolume },
+    { period: 'Weekly', volume: weeklyVolume },
+    { period: 'Monthly', volume: monthlyVolume },
+  ];
+
+  const chemicalByPeriod = [
+    { period: 'Daily', consumption: chemicalDaily },
+    { period: 'Weekly', consumption: chemicalWeekly },
+    { period: 'Monthly', consumption: chemicalMonthly },
+  ];
+
   // Export handlers
   function handleExport(label, filename, data) {
     const exportData = data || [
-      { Metric: 'Value', Unit: '' },
-      { Metric: 'Current Flow', Value: metrics.feedFlow.toFixed(1), Unit: 'm³/h' },
-      { Metric: 'Permeate Flow', Value: metrics.permeateFlow.toFixed(1), Unit: 'm³/h' },
-      { Metric: 'Recovery', Value: metrics.recovery.toFixed(1), Unit: '%' },
-      { Metric: 'RO Pressure', Value: metrics.roPressure.toFixed(1), Unit: 'bar' },
+      { Metric: 'Daily Production', Value: dailyVolume.toFixed(1), Unit: 'm³' },
+      { Metric: 'Weekly Production', Value: weeklyVolume.toFixed(1), Unit: 'm³' },
+      { Metric: 'Monthly Production', Value: monthlyVolume.toFixed(1), Unit: 'm³' },
+      { Metric: 'Current Feed Flow', Value: feedFlow.toFixed(1), Unit: 'm³/h' },
+      { Metric: 'Current Permeate Flow', Value: permeateFlow.toFixed(1), Unit: 'm³/h' },
+      { Metric: 'Recovery', Value: recovery.toFixed(1), Unit: '%' },
+      { Metric: 'RO Pressure', Value: roPressure.toFixed(1), Unit: 'bar' },
     ];
-    
+
     showToast(`Exporting ${label}…`, "Preparing CSV", "#0ea5e9", () => {
       const content = `Report: ${label}\nGenerated: ${new Date().toISOString()}\n\n`;
       const headers = Object.keys(exportData[0] || {}).join(',');
       const rows = exportData.map(row => Object.values(row).join(',')).join('\n');
       const finalContent = content + headers + '\n' + rows;
-      
+
       const blob = new Blob([finalContent], { type: "text/csv" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -327,41 +308,8 @@ export function Analytics() {
             Analytics & Reports
           </h2>
           <p style={{ fontSize: isMobile ? 10 : 11, color: "var(--muted-foreground)", marginTop: 2 }}>
-            Real-time analytics • Last updated: {lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--'}
+            {summaryLoading ? 'Loading accumulated totals…' : 'Real-time analytics'} • Last updated: {lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--'}
           </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <span style={{ fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)" }}>
-            {permeateHistory.length} data points
-          </span>
-        </div>
-      </div>
-
-      {/* Period selector */}
-      <div className="flex flex-wrap items-center gap-2">
-        <span style={{ fontSize: isMobile ? 10 : 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
-          Analytics & Reports
-        </span>
-        <div className="flex-1" />
-        <div className="flex rounded overflow-hidden" style={{ border: "1px solid var(--border)" }}>
-          {periods.map(p => (
-            <button
-              key={p}
-              onClick={() => setPeriod(p)}
-              style={{
-                padding: isMobile ? "4px 10px" : "5px 12px", 
-                fontSize: isMobile ? 9 : 10, 
-                cursor: "pointer",
-                fontWeight: period === p ? 600 : 400,
-                color: period === p ? "#020810" : "var(--muted-foreground)",
-                background: period === p ? "#0ea5e9" : "var(--card)",
-                borderRight: "1px solid var(--border)", 
-                border: "none",
-              }}
-            >
-              {isMobile && p !== "Monthly" ? p.charAt(0) : p}
-            </button>
-          ))}
         </div>
       </div>
 
@@ -372,10 +320,10 @@ export function Analytics() {
           icon={Droplet}
           isMobile={isMobile}
           items={[
-            { label: "Total Output", value: Math.round(totalOutput).toLocaleString(), unit: "m³", color: "#06b6d4" },
-            { label: "Avg Daily", value: Math.round(metrics.dailyAvg).toLocaleString(), unit: "m³/day", color: "#0ea5e9" },
-            { label: "Peak Day", value: Math.round(metrics.peakDay).toLocaleString(), unit: "m³", color: "#22c55e" },
-            { label: "Current Flow", value: metrics.permeateFlow.toFixed(1), unit: "m³/h", color: "#f59e0b" },
+            { label: "Today", value: summaryLoading ? '…' : Math.round(dailyVolume).toLocaleString(), unit: "m³", color: "#0ea5e9" },
+            { label: "This Week", value: summaryLoading ? '…' : Math.round(weeklyVolume).toLocaleString(), unit: "m³", color: "#06b6d4" },
+            { label: "This Month", value: summaryLoading ? '…' : Math.round(monthlyVolume).toLocaleString(), unit: "m³", color: "#22c55e" },
+            { label: "Current Flow", value: permeateFlow.toFixed(1), unit: "m³/h", color: "#f59e0b" },
           ]}
           onExport={() => handleExport("Production Summary", "production_summary.csv")}
         />
@@ -384,10 +332,10 @@ export function Analytics() {
           icon={Activity}
           isMobile={isMobile}
           items={[
-            { label: "Current", value: metrics.recovery.toFixed(1), unit: "%", color: metrics.recovery >= RECOVERY_TARGET ? "#22c55e" : "#eab308" },
-            { label: "Daily Avg", value: metrics.recoveryAvg.toFixed(1), unit: "%", color: "#0ea5e9" },
+            { label: "Current", value: recovery.toFixed(1), unit: "%", color: recovery >= RECOVERY_TARGET ? "#22c55e" : "#eab308" },
+            { label: "Daily Avg", value: recoveryAvg.toFixed(1), unit: "%", color: "#0ea5e9" },
             { label: "Target", value: RECOVERY_TARGET.toFixed(1), unit: "%", color: "#eab308" },
-            { label: "Status", value: metrics.recovery >= RECOVERY_TARGET ? "ON TARGET" : "BELOW", unit: "", color: metrics.recovery >= RECOVERY_TARGET ? "#22c55e" : "#ef4444" },
+            { label: "Status", value: recovery >= RECOVERY_TARGET ? "ON TARGET" : "BELOW", unit: "", color: recovery >= RECOVERY_TARGET ? "#22c55e" : "#ef4444" },
           ]}
           onExport={() => handleExport("Recovery Summary", "recovery_summary.csv")}
         />
@@ -396,9 +344,9 @@ export function Analytics() {
           icon={Filter}
           isMobile={isMobile}
           items={[
-            { label: "Daily", value: ((metrics.permeateFlow * 24 * DOSING_RATE) / 1000).toFixed(1), unit: "kg", color: "#a78bfa" },
-            { label: "Weekly", value: ((metrics.permeateFlow * 24 * 7 * DOSING_RATE) / 1000).toFixed(1), unit: "kg", color: "#8b5cf6" },
-            { label: "Monthly", value: ((metrics.permeateFlow * 24 * 30 * DOSING_RATE) / 1000).toFixed(0), unit: "kg", color: "#7c3aed" },
+            { label: "Daily", value: summaryLoading ? '…' : chemicalDaily.toFixed(1), unit: "kg", color: "#a78bfa" },
+            { label: "Weekly", value: summaryLoading ? '…' : chemicalWeekly.toFixed(1), unit: "kg", color: "#8b5cf6" },
+            { label: "Monthly", value: summaryLoading ? '…' : chemicalMonthly.toFixed(0), unit: "kg", color: "#7c3aed" },
             { label: "Dosing Rate", value: DOSING_RATE.toFixed(2), unit: "mg/L", color: "#a78bfa" },
           ]}
           onExport={() => handleExport("Chemical Usage", "chemical_usage.csv")}
@@ -408,9 +356,9 @@ export function Analytics() {
           icon={Wrench}
           isMobile={isMobile}
           items={[
-            { label: "Stage 1 ΔP", value: metrics.stage1Delta.toFixed(2), unit: "bar", color: metrics.stage1Delta > 0.5 ? "#ef4444" : "#22c55e" },
-            { label: "Stage 2 ΔP", value: metrics.stage2Delta.toFixed(2), unit: "bar", color: metrics.stage2Delta > 0.5 ? "#eab308" : "#22c55e" },
-            { label: "RO Pressure", value: metrics.roPressure.toFixed(1), unit: "bar", color: metrics.roPressure > 13 && metrics.roPressure < 17 ? "#22c55e" : "#eab308" },
+            { label: "Stage 1 ΔP", value: stage1Delta.toFixed(2), unit: "bar", color: stage1Delta > 2.0 ? "#ef4444" : "#22c55e" },
+            { label: "Stage 2 ΔP", value: stage2Delta.toFixed(2), unit: "bar", color: stage2Delta > 2.0 ? "#ef4444" : "#22c55e" },
+            { label: "RO Pressure", value: roPressure.toFixed(1), unit: "bar", color: roPressure > 10 && roPressure < 16 ? "#22c55e" : "#eab308" },
           ]}
           onExport={() => handleExport("Maintenance Summary", "maintenance_summary.csv")}
         />
@@ -421,24 +369,18 @@ export function Analytics() {
         <div className="rounded p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
           <div className="flex items-center justify-between mb-2 sm:mb-3">
             <span style={{ fontSize: isMobile ? 10 : 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
-              Production & Recovery — {period} Trend
+              Accumulated Production
             </span>
+            <span style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>m³</span>
           </div>
           <ResponsiveContainer width="100%" height={isMobile ? 150 : 190}>
-            <AreaChart data={monthlyProduction} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
-              <defs>
-                <linearGradient id="aGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.2} />
-                  <stop offset="95%" stopColor="#06b6d4" stopOpacity={0.02} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" />
-              <XAxis dataKey="month" tick={{ fontSize: isMobile ? 7 : 9, fill: "#4d7a9e" }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: isMobile ? 7 : 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} axisLine={false} tickLine={false} tickFormatter={v => (v / 1000).toFixed(0) + "k"} />
+            <BarChart data={productionByPeriod} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" vertical={false} />
+              <XAxis dataKey="period" tick={{ fontSize: isMobile ? 8 : 10, fill: "#4d7a9e" }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: isMobile ? 7 : 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} axisLine={false} tickLine={false} />
               <Tooltip content={<CustomTooltip />} />
-              <Area type="monotone" dataKey="actual" stroke="#06b6d4" strokeWidth={2} fill="url(#aGrad)" name="Actual (m³)" />
-              <Line type="monotone" dataKey="target" stroke="#4d7a9e" strokeWidth={1.5} strokeDasharray="4 3" dot={false} name="Target (m³)" />
-            </AreaChart>
+              <Bar dataKey="volume" fill="#06b6d4" radius={[4, 4, 0, 0]} name="Volume (m³)" />
+            </BarChart>
           </ResponsiveContainer>
         </div>
 
@@ -480,9 +422,9 @@ export function Analytics() {
             <span style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>kg</span>
           </div>
           <ResponsiveContainer width="100%" height={isMobile ? 120 : 150}>
-            <BarChart data={chemicalData} margin={{ top: 4, right: 4, left: -15, bottom: 0 }}>
+            <BarChart data={chemicalByPeriod} margin={{ top: 4, right: 4, left: -15, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" vertical={false} />
-              <XAxis dataKey="month" tick={{ fontSize: isMobile ? 7 : 9, fill: "#4d7a9e" }} axisLine={false} tickLine={false} />
+              <XAxis dataKey="period" tick={{ fontSize: isMobile ? 7 : 9, fill: "#4d7a9e" }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: isMobile ? 7 : 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} axisLine={false} tickLine={false} />
               <Tooltip content={<CustomTooltip />} />
               <Bar dataKey="consumption" fill="#a78bfa" radius={[3, 3, 0, 0]} name="Consumption (kg)" />
