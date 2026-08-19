@@ -1,25 +1,4 @@
-// components/AlertsCenter.jsx
-// REFACTORED: reads from the shared AlertsContext (utils/alertEngine.js +
-// contexts/AlertsContext.jsx) instead of recomputing its own alert list
-// with its own threshold table. Fixes:
-//   - Acknowledge no longer gets wiped out by the next sensor update
-//   - "System Offline" false-positives (root cause was in DataContext's
-//     key mapping, fixed there — this file just displays whatever the
-//     shared engine says, so it's now consistent with Dashboard too)
-//   - Adds a real "Clear" (dismiss) action for stale/handled alerts,
-//     plus "Clear All Acknowledged" for bulk admin cleanup
-//   - Adds a History log so cleared/acknowledged/dismissed events aren't
-//     just lost on refresh
-//   - MQTT alarm support: displays PLC bit alarms with descriptions
-//   - Removed Interstage Pressure and Concentrate Pressure alerts
-//
-// ✅ 2026-08-19: ALERT_REFERENCE below updated to match the live
-// THRESHOLDS/BIT_ALARMS tables in utils/alertEngine.js exactly, per the
-// client's request to simplify Stage 1/2 Delta P and Recovery to single
-// trigger points (2.0 bar and 70% respectively) instead of two-tier
-// warning/critical bands. This list is just a static reference display —
-// if you change a threshold in alertEngine.js, update the matching row
-// here too or the two will drift out of sync again.
+
 
 import React, { useState } from "react";
 import { AlertTriangle, CheckCircle, Bell, Filter, ChevronRight, X, Trash2, Power, History } from "lucide-react";
@@ -36,13 +15,11 @@ const severityColors = {
   Info: { bg: "rgba(34,197,94,0.08)", border: "rgba(34,197,94,0.3)", text: "#22c55e", dot: "#22c55e" },
 };
 
-// ✅ UPDATED: matches THRESHOLDS / BIT_ALARMS in utils/alertEngine.js
-// exactly as of the client's latest threshold-simplification request.
 const ALERT_REFERENCE = [
   // Sensor threshold alerts
   { type: "High RO Pressure", threshold: "> 16 bar", severity: "Critical", source: "Sensor" },
   { type: "Low RO Pressure", threshold: "< 10 bar", severity: "High", source: "Sensor" },
-  // { type: "High Differential Pressure - Stage 1", threshold: "> 2.0 bar", severity: "Critical", source: "Sensor" },
+  { type: "High Differential Pressure - Stage 1", threshold: "> 2.0 bar", severity: "Critical", source: "Sensor" },
   { type: "High Differential Pressure - Stage 2", threshold: "> 2.0 bar", severity: "Critical", source: "Sensor" },
   { type: "High Filter Delta P", threshold: "> 0.40 bar", severity: "Critical", source: "Sensor" },
   { type: "High Filter Delta P", threshold: "> 0.30 bar", severity: "Medium", source: "Sensor" },
@@ -53,19 +30,15 @@ const ALERT_REFERENCE = [
   { type: "High Product Water EC", threshold: "> 50 µS/cm", severity: "Medium", source: "Sensor" },
   { type: "Low Concentrate Flow", threshold: "< 10 m³/h", severity: "Medium", source: "Sensor" },
 
-  // ❌ REMOVED per client request: Interstage and Concentrate Pressure alerts
-
   // PLC Bit Alarms (digital)
   { type: "High Prefilter Delta P", threshold: "PLC Bit = ON", severity: "High", source: "PLC" },
   { type: "High Media Filter Delta P", threshold: "PLC Bit = ON", severity: "High", source: "PLC" },
-  { type: "High Differential Pressure - Stage 1", threshold: "PLC Bit = ON", severity: "Critical", source: "PLC" },
-  { type: "High Differential Pressure - Stage 2", threshold: "PLC Bit = ON", severity: "High", source: "PLC" },
   { type: "High RO Pressure", threshold: "PLC Bit = ON", severity: "Critical", source: "PLC" },
+  { type: "Low RO Pressure", threshold: "PLC Bit = ON", severity: "High", source: "PLC" },
   { type: "Low Feed Tank Level", threshold: "PLC Bit = ON", severity: "Critical", source: "PLC" },
   { type: "Power Problem", threshold: "PLC Bit = ON", severity: "Critical", source: "PLC" },
 
   // Status alerts
-  { type: "System in Manual Mode", threshold: "Auto mode required", severity: "High", source: "Status" },
   { type: "Antiscalant Dosing Stopped", threshold: "Running required", severity: "High", source: "Status" },
   { type: "Low Permeate Production", threshold: "< 20 m³/h", severity: "Medium", source: "Status" },
   { type: "Mass Balance Error", threshold: "> 5 m³/h", severity: "Medium", source: "Status" },

@@ -195,16 +195,18 @@ export function evaluateSensorAlerts(getValue, previousActiveIds = new Set()) {
   //   isPowerProblem: true,
   // });
 
-  const systemMode = getValue('RO5-SystemMode');
-  const isAutoMode = isActive(systemMode);
-  push('RO5-SystemMode:manual', isSystemOn && !isAutoMode, {
-    sensorKey: 'RO5-SystemMode',
-    severity: 'High',
-    message: 'System in Manual Mode',
-    equipment: 'RO5 - SystemMode',
-    value: toDisplayString(systemMode),
-    threshold: 'Auto mode required',
-  });
+  // ❌ REMOVED per client request: System in Manual Mode alert
+  // The following block has been removed:
+  // const systemMode = getValue('RO5-SystemMode');
+  // const isAutoMode = isActive(systemMode);
+  // push('RO5-SystemMode:manual', isSystemOn && !isAutoMode, {
+  //   sensorKey: 'RO5-SystemMode',
+  //   severity: 'High',
+  //   message: 'System in Manual Mode',
+  //   equipment: 'RO5 - SystemMode',
+  //   value: toDisplayString(systemMode),
+  //   threshold: 'Auto mode required',
+  // });
 
   const dosingActive = getValue('RO5-AntiscalantDosingActive');
   const isDosingActive = isActive(dosingActive);

@@ -182,7 +182,8 @@ export function SystemRecovery() {
       ? monthData.reduce((sum, d) => sum + d.value, 0) / monthData.length 
       : recovery;
 
-    const target = 75;
+    // TARGET SET TO 70%
+    const target = 70;
 
     const tdsRejection = Math.min(99, 95 + (100 - pureWaterEC / 10) / 10);
     const chlorideRejection = Math.min(99, tdsRejection + 0.4);
