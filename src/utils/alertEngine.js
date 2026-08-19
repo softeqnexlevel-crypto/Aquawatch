@@ -4,12 +4,6 @@
 // no React, no state of its own. Callers (AlertsContext) own the state
 // and pass in whatever "previous" info the engine needs (previous active
 // rule IDs for hysteresis, previous alert list for merge/acknowledgment).
-//
-// Why this exists: Dashboard.jsx, AntiscalantDosing.jsx, and
-// AlertsCenter.jsx each used to define their own threshold numbers and
-// their own alert-generation logic. They drifted (e.g. RO pressure
-// critical at >16 bar in one place, >15 bar in another) and every
-// re-render threw away acknowledgment state. This file fixes both.
 
 // ==================== VALUE NORMALIZATION ====================
 
@@ -48,12 +42,6 @@ export const toDisplayString = (value, decimals = 1) => {
 };
 
 // ==================== CANONICAL THRESHOLD TABLE ====================
-// `value`  = trigger point
-// `clear`  = the point it must cross back past before the alert clears
-//            (the hysteresis buffer — prevents flicker when a reading
-//            sits right on the trigger line)
-// direction 'high'  -> alert fires when value > trigger, clears when value <= clear (clear < trigger)
-// direction 'low'   -> alert fires when value < trigger, clears when value >= clear (clear > trigger)
 
 export const THRESHOLDS = {
   'RO5-ROPressure': {
@@ -129,6 +117,71 @@ export const THRESHOLDS = {
   },
 };
 
+// ==================== MQTT ALARM DEFINITIONS ====================
+// These correspond to the PLC bits from your MQTT data:
+// HighPrefilterDeltaP, PowerProblem, HighMediaDeltaP, S2DeltaHigh,
+// S1DeltaHigh, HighROPressure, FeedTankLow
+
+export const MQTT_ALARMS = [
+  {
+    id: 'RO5-HighPrefilterDeltaP',
+    sensorKey: 'RO5-HighPrefilterDeltaP',
+    equipment: 'RO5 - Prefilter',
+    severity: 'Critical',
+    message: 'High Prefilter Delta P - Prefilter Blocked',
+    description: 'Prefilter is blocked and needs immediate cleaning or replacement',
+  },
+  {
+    id: 'RO5-PowerProblem',
+    sensorKey: 'RO5-PowerProblem',
+    equipment: 'RO5 - Power System',
+    severity: 'Critical',
+    message: 'Power Problem - System Offline',
+    description: 'Power supply issue detected. System may be offline.',
+    isPowerProblem: true,
+  },
+  {
+    id: 'RO5-HighMediaDeltaP',
+    sensorKey: 'RO5-HighMediaDeltaP',
+    equipment: 'RO5 - Media Filter',
+    severity: 'Critical',
+    message: 'High Media Filter Delta P',
+    description: 'Media filter differential pressure is too high. Filter may be clogged.',
+  },
+  {
+    id: 'RO5-S2DeltaHigh',
+    sensorKey: 'RO5-S2DeltaHigh',
+    equipment: 'RO5 - Stage 2',
+    severity: 'High',
+    message: 'Stage 2 Delta P High',
+    description: 'Stage 2 differential pressure has exceeded the acceptable limit.',
+  },
+  {
+    id: 'RO5-S1DeltaHigh',
+    sensorKey: 'RO5-S1DeltaHigh',
+    equipment: 'RO5 - Stage 1',
+    severity: 'High',
+    message: 'Stage 1 Delta P High',
+    description: 'Stage 1 differential pressure has exceeded the acceptable limit.',
+  },
+  {
+    id: 'RO5-HighROPressure',
+    sensorKey: 'RO5-HighROPressure',
+    equipment: 'RO5 - RO System',
+    severity: 'Critical',
+    message: 'High RO Pressure',
+    description: 'RO system pressure is dangerously high. Immediate action required.',
+  },
+  {
+    id: 'RO5-FeedTankLow',
+    sensorKey: 'RO5-FeedTankLow',
+    equipment: 'RO5 - Feed Tank',
+    severity: 'Critical',
+    message: 'Feed Tank Low Level',
+    description: 'Feed tank level is critically low. Refill required immediately.',
+  },
+];
+
 // ==================== CORE EVALUATION ====================
 
 /**
@@ -146,27 +199,29 @@ export function evaluateSensorAlerts(getValue, previousActiveIds = new Set()) {
 
   const push = (id, active, meta) => candidates.push({ id, active, source: 'sensor', ...meta });
 
+  // -------------------- MQTT Alarm Rules --------------------
+  // Evaluate each MQTT alarm bit. When the bit is ON (active), trigger the alert.
+  // When OFF, the alert clears automatically.
+  
+  MQTT_ALARMS.forEach((alarm) => {
+    const value = getValue(alarm.sensorKey);
+    const isAlarmActive = isActive(value);
+    
+    push(alarm.id, isAlarmActive, {
+      sensorKey: alarm.sensorKey,
+      severity: alarm.severity,
+      message: alarm.message,
+      equipment: alarm.equipment,
+      value: isAlarmActive ? 'ON' : 'OFF',
+      threshold: 'ON',
+      isPowerProblem: alarm.isPowerProblem || false,
+      description: alarm.description,
+    });
+  });
+
   // -------------------- Binary / status rules --------------------
   const systemOperation = getValue('RO5-SystemOperation');
   const isSystemOn = isActive(systemOperation);
-
-  // ⚠️ TEMPORARILY DISABLED — this rule was firing "Power Problem - System
-  // Offline" permanently because the raw backend key for system status
-  // isn't matching any alias in DataContext.jsx's KEY_MAPPING, so
-  // getValue('RO5-SystemOperation') always falls back to 0/false
-  // regardless of the real system state. Re-enable this block once the
-  // correct raw key is confirmed (check the '📊 Raw keys list:' console
-  // log from DataContext.jsx) and added to KEY_MAPPING.
-  //
-  // push('RO5-SystemOperation:offline', !isSystemOn, {
-  //   sensorKey: 'RO5-SystemOperation',
-  //   severity: 'Critical',
-  //   message: 'Power Problem - System Offline',
-  //   equipment: 'RO5 - SystemOperation',
-  //   value: toDisplayString(systemOperation),
-  //   threshold: 'ON required',
-  //   isPowerProblem: true,
-  // });
 
   const systemMode = getValue('RO5-SystemMode');
   const isAutoMode = isActive(systemMode);
@@ -202,8 +257,8 @@ export function evaluateSensorAlerts(getValue, previousActiveIds = new Set()) {
       const isHigh = rule.direction === 'high';
 
       const nowActive = wasActive
-        ? (isHigh ? value > rule.clear : value < rule.clear)   // needs to cross the buffer to clear
-        : (isHigh ? value > rule.value : value < rule.value);  // needs to cross the trigger to fire
+        ? (isHigh ? value > rule.clear : value < rule.clear)
+        : (isHigh ? value > rule.value : value < rule.value);
 
       push(id, nowActive, {
         sensorKey,
@@ -216,7 +271,7 @@ export function evaluateSensorAlerts(getValue, previousActiveIds = new Set()) {
     });
   });
 
-  // -------------------- Calculated rules (combine multiple sensors) --------------------
+  // -------------------- Calculated rules --------------------
   const feedFlow = toNumber(getValue('RO5-FEEDFlow'));
   const permeateFlow = toNumber(getValue('RO5-Permeateflow'));
   const concentrateFlow = toNumber(getValue('RO5-ConcetrateFlow'));
@@ -246,16 +301,6 @@ export function evaluateSensorAlerts(getValue, previousActiveIds = new Set()) {
 
 /**
  * Merge freshly-evaluated candidates against the previous alert list.
- * - A candidate that's newly active becomes a new 'Active' alert.
- * - A candidate that's still active and already existed keeps whatever
- *   status it had (so 'Acknowledged' survives re-evaluation instead of
- *   getting stomped back to 'Active' every tick).
- * - A candidate that's no longer active is dropped from the live list,
- *   and a 'cleared' event is recorded if it had been active before.
- *
- * @param {Array<Candidate>} candidates
- * @param {Array<Alert>} previousAlerts
- * @returns {{ alerts: Array<Alert>, events: Array<HistoryEvent> }}
  */
 export function mergeAlerts(candidates, previousAlerts = []) {
   const prevById = new Map(previousAlerts.map((a) => [a.id, a]));
@@ -268,10 +313,17 @@ export function mergeAlerts(candidates, previousAlerts = []) {
 
     if (c.active) {
       if (prev) {
-        // Still firing — keep its status (Active or Acknowledged) intact.
-        merged.push({ ...prev, value: c.value, threshold: c.threshold, lastSeen: nowIso });
+        // Still firing — keep its status
+        merged.push({ 
+          ...prev, 
+          value: c.value, 
+          threshold: c.threshold, 
+          lastSeen: nowIso,
+          // Update description if it exists
+          description: c.description || prev.description,
+        });
       } else {
-        // Brand new trigger (first time, or re-triggered after clearing).
+        // Brand new trigger
         const alert = {
           id: c.id,
           type: c.message,
@@ -282,19 +334,43 @@ export function mergeAlerts(candidates, previousAlerts = []) {
           threshold: c.threshold,
           source: c.source,
           isPowerProblem: !!c.isPowerProblem,
+          description: c.description || '',
           firstTriggered: nowIso,
           lastSeen: nowIso,
           date: new Date().toLocaleDateString(),
           time: new Date().toLocaleTimeString(),
         };
         merged.push(alert);
-        events.push({ id: `${c.id}-trig-${Date.now()}`, alertId: c.id, kind: 'triggered', type: c.message, severity: c.severity, time: nowIso });
+        events.push({ 
+          id: `${c.id}-trig-${Date.now()}`, 
+          alertId: c.id, 
+          kind: 'triggered', 
+          type: c.message, 
+          severity: c.severity, 
+          time: nowIso,
+          description: c.description || '',
+        });
       }
     } else if (prev) {
-      // Was active, now cleared — drop from the live list, log it.
-      events.push({ id: `${c.id}-clear-${Date.now()}`, alertId: c.id, kind: 'cleared', type: c.message, severity: c.severity, time: nowIso });
+      // Was active, now cleared
+      events.push({ 
+        id: `${c.id}-clear-${Date.now()}`, 
+        alertId: c.id, 
+        kind: 'cleared', 
+        type: c.message, 
+        severity: c.severity, 
+        time: nowIso 
+      });
     }
   });
 
   return { alerts: merged, events };
 }
+
+// Export MQTT_ALARMS for use in other components
+export const getMQTTAlarmDescriptions = () => {
+  return MQTT_ALARMS.reduce((acc, alarm) => {
+    acc[alarm.id] = alarm.description;
+    return acc;
+  }, {});
+};

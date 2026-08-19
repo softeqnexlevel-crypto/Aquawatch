@@ -22,15 +22,17 @@ const KEY_MAPPING = {
   'siemens200smart-RO5-PureWaterEc': 'RO5-PureWaterEc',
   'siemens200smart-RO5-FeedTankLevel': 'RO5-FeedTankLevel',
 
-  // ✅ SYSTEM OPERATION MAPPINGS — widened the same way AntiscalantDoser
-  // was, since a single-alias mapping is exactly what caused the
-  // "Power Problem - System Offline" alert to fire permanently: if the
-  // backend's real key doesn't match the one alias below, the value
-  // never lands in sensorData, getValue() falls back to 0, and
-  // isActive(0) is always false — i.e. "OFF" no matter what the plant
-  // is actually doing. Check the '📊 Fetched readings' console log
-  // below to see the *actual* raw key your backend sends, and if it's
-  // still not in this list, add it.
+  
+'RO5-Feedpump': 'RO5-Feedpump',
+'siemens200smart-RO5-Feedpump': 'RO5-Feedpump',
+
+'RO5-PrefilterBackwash': 'RO5-PrefilterBackwash',
+'siemens200smart-RO5-PrefilterBackwash': 'RO5-PrefilterBackwash',
+
+'RO5-PrefilterBackwashing': 'RO5-PrefilterBackwashing',
+'siemens200smart-RO5-PrefilterBackwashing': 'RO5-PrefilterBackwashing',
+
+
   'siemens200smart-RO5-SystemOperation': 'RO5-SystemOperation',
   'RO5-SystemOperation': 'RO5-SystemOperation',
   'RO5-SystemOn': 'RO5-SystemOperation',
