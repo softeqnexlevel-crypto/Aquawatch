@@ -176,11 +176,11 @@ export function ProductionMonitoring() {
   // ===================== PRODUCTION TARGETS =====================
   const productionTargets = useMemo(() => {
     const dailyTarget = 4200;
-    const weeklyTarget = dailyTarget * 7;      // 29,400 — matches current value
-    const monthlyTarget = dailyTarget * 30;    // 126,000 — was 130,200 (4200×31), see note below
+    const weeklyTarget = dailyTarget * 7;      
+    const monthlyTarget = dailyTarget * 30;    
     const yearlyTarget = dailyTarget * 365; 
 
-    
+
     const dailyEff = dailyTarget > 0 ? (dailyTotal / dailyTarget) * 100 : 0;
     const weeklyEff = weeklyTarget > 0 ? (weeklyTotal / weeklyTarget) * 100 : 0;
     const monthlyEff = monthlyTarget > 0 ? (monthlyTotal / monthlyTarget) * 100 : 0;

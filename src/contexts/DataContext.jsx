@@ -49,6 +49,24 @@ const KEY_MAPPING = {
   'AntiscalantDoser': 'RO5-AntiscalantDosingActive',
   'AntiscalantDosingActive': 'RO5-AntiscalantDosingActive',
   'RO5/AntiscalantDoser': 'RO5-AntiscalantDosingActive',
+
+
+  'RO5-SystemActive': 'RO5-SystemOperation',
+'siemens200smart-RO5-SystemActive': 'RO5-SystemOperation',
+
+'RO5-Feedpump': 'RO5-Feedpump',
+'siemens200smart-RO5-Feedpump': 'RO5-Feedpump',
+'RO5-PrefilterBackwash': 'RO5-PrefilterBackwash',
+'siemens200smart-RO5-PrefilterBackwash': 'RO5-PrefilterBackwash',
+'RO5-PrefilterBackwashing': 'RO5-PrefilterBackwashing',
+
+'RO5-HighPrefilterDeltaP': 'RO5-HighPrefilterDeltaP',
+'RO5-PowerProblem': 'RO5-PowerProblem',
+'RO5-HighMediaDeltaP': 'RO5-HighMediaDeltaP',
+'RO5-S2DeltaHigh': 'RO5-S2DeltaHigh',
+'RO5-S1DeltaHigh': 'RO5-S1DeltaHigh',
+'RO5-HighROPressure': 'RO5-HighROPressure',
+'RO5-FeedTankLow': 'RO5-FeedTankLow',
 };
 
 const getUnitForParameter = (param) => {

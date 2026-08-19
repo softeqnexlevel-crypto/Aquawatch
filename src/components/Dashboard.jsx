@@ -371,24 +371,30 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     fetchProductionSummary();
   };
 
-  // ==================== VALUES ====================
-  const feedFlow = getNumber('RO5-FEEDFlow');
-  const permeateFlow = getNumber('RO5-Permeateflow');
-  const concentrateFlow = getNumber('RO5-ConcetrateFlow');
-  const roPressure = getNumber('RO5-ROPressure');
-  const systemRecovery = getNumber('RO5-SystemRecovery');
-  const pureWaterEC = getNumber('RO5-PureWaterEc');
-  const stage1Delta = getNumber('RO5-Stage1Delta');
-  const stage2Delta = getNumber('RO5-Stage2Delta');
-  const filterDeltaP = getNumber('RO5-MediaFilterDeltaP');
-  const feedTankLevel = getNumber('RO5-FeedTankLevel');
-  const systemOperation = getValue('RO5-SystemOperation');
-  const systemMode = getValue('RO5-SystemMode');
-  const dosingActive = getValue('RO5-AntiscalantDosingActive'); // now the same normalized 'ON'/'OFF' string AntiscalantDosing.jsx uses
+// ==================== VALUES ====================
+const feedFlow = getNumber('RO5-FEEDFlow');
+const permeateFlow = getNumber('RO5-Permeateflow');
+const concentrateFlow = getNumber('RO5-ConcetrateFlow');
+const roPressure = getNumber('RO5-ROPressure');
+const systemRecovery = getNumber('RO5-SystemRecovery');
+const pureWaterEC = getNumber('RO5-PureWaterEc');
+const stage1Delta = getNumber('RO5-Stage1Delta');
+const stage2Delta = getNumber('RO5-Stage2Delta');
+const filterDeltaP = getNumber('RO5-MediaFilterDeltaP');
+const feedTankLevel = getNumber('RO5-FeedTankLevel');
+const systemOperation = getValue('RO5-SystemOperation');
+const systemMode = getValue('RO5-SystemMode');
+const dosingActive = getValue('RO5-AntiscalantDosingActive');
 
-  const isSystemOn = isActive(systemOperation) || feedFlow > 5 || permeateFlow > 5;
-  const isAutoMode = isActive(systemMode);
-  const isDosingOn = isActive(dosingActive);
+
+const isAutoMode = typeof systemMode === 'string' && systemMode.toLowerCase().trim() === 'auto';
+const isDosingOn = dosingActive === 'ON' || isActive(dosingActive);
+
+const feedPumpOn = isActive(getValue('RO5-Feedpump'));
+const backwashOn = isActive(getValue('RO5-PrefilterBackwash'));
+const operationMode = !feedPumpOn ? 'OFF' : backwashOn ? 'BACKWASH' : 'FILTER';
+const isSystemOn = feedPumpOn;
+const isHighPressurePumpOn = operationMode === 'FILTER' && isDosingOn;
 
   const dailyProdDisplay = summaryLoading ? '...' : Math.round(dailyProduction).toLocaleString();
   const activeSensors = Object.keys(sensorData).filter(key => sensorData[key]?.value !== undefined && sensorData[key]?.value !== null).length;
@@ -489,10 +495,17 @@ export function Dashboard({ onViewAllAlerts } = {}) {
         {/* ── Top status cards ── */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-3 sm:mb-4">
           <TopStatusCard
-            icon={Settings} iconBg="rgba(34,197,94,0.12)" iconColor={COLORS.success}
-            title="System Operation" value={isSystemOn ? "ON" : "OFF"} valueColor={isSystemOn ? COLORS.success : COLORS.danger}
-            sub={isSystemOn ? "All systems normal" : "System offline"} subColor="var(--muted-foreground)"
-          />
+  icon={Settings} iconBg="rgba(34,197,94,0.12)" iconColor={COLORS.success}
+  title="System Operation"
+  value={operationMode === 'OFF' ? 'OFF' : operationMode === 'BACKWASH' ? 'BACKWASH' : 'FILTER'}
+  valueColor={operationMode === 'OFF' ? COLORS.danger : operationMode === 'BACKWASH' ? COLORS.warning : COLORS.success}
+  sub={
+    operationMode === 'OFF' ? 'System offline'
+      : operationMode === 'BACKWASH' ? 'Backwashing prefilter — feed pump only'
+      : 'Filtering — all systems normal'
+  }
+  subColor="var(--muted-foreground)"
+/>
           <TopStatusCard
             icon={Settings} iconBg="rgba(14,165,233,0.12)" iconColor={COLORS.primary}
             title="System Mode" value={isAutoMode ? "AUTO" : "ON"} valueColor={isAutoMode ? COLORS.warning : COLORS.success}
@@ -569,8 +582,8 @@ export function Dashboard({ onViewAllAlerts } = {}) {
               <div style={{ marginTop: 12 }}>
                 <SectionTitle>Equipment Status</SectionTitle>
                 <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
-                  <EquipmentStatusItem icon={Wrench} label="High Pressure Pump" state={isSystemOn ? 'on' : 'off'} />
-                  <EquipmentStatusItem icon={Wrench} label="Booster Pump" state={isSystemOn ? 'on' : 'off'} />
+                <EquipmentStatusItem icon={Wrench} label="High Pressure Pump" state={isHighPressurePumpOn ? 'on' : 'off'} />
+<EquipmentStatusItem icon={Wrench} label="Feed Pump" state={feedPumpOn ? 'on' : 'off'} />
                   <EquipmentStatusItem icon={FlaskConical} label="Dosing Pump" state={isDosingOn ? 'on' : 'off'} />
                   {/* <EquipmentStatusItem icon={Sun} label="UV System" state="unknown" /> */}
                 </div>
