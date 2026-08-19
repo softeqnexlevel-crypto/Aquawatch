@@ -303,11 +303,6 @@ const api = {
   ============================================================ */
 
 export function Dashboard({ onViewAllAlerts } = {}) {
-  // ✅ Single source of truth for all live sensor data, history, and
-  // connection status — shared with every other component (e.g.
-  // AntiscalantDosing) via the same DataProvider/socket connection.
-  // This is what fixes the dosing-status mismatch: Dashboard no longer
-  // runs its own separate socket + its own separate key-mapping table.
   const {
     sensorData,
     history,
@@ -357,44 +352,66 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const dailyProduction = productionSummary?.permeate?.daily ?? 0;
 
   // ==================== ALARMS ====================
-  // ✅ Now reads from the shared AlertsContext (utils/alertEngine.js)
-  // instead of recomputing its own alert list with its own threshold
-  // numbers. This is what fixes: (1) Dashboard and AlertsCenter showing
-  // different verdicts for the same sensor at the same instant, and
-  // (2) acknowledging an alert in one place actually sticking everywhere,
-  // since there's now exactly one ledger instead of three independent ones.
   const { activeAlerts: activeAlarmsList, counts: alertCounts } = useAlerts();
-  const { isExpired } = useAuth(); // ✅ view-only guard — trial expired means no new-data pulls
+  const { isExpired } = useAuth();
 
   const handleRefresh = () => {
     refresh();
     fetchProductionSummary();
   };
 
-// ==================== VALUES ====================
-const feedFlow = getNumber('RO5-FEEDFlow');
-const permeateFlow = getNumber('RO5-Permeateflow');
-const concentrateFlow = getNumber('RO5-ConcetrateFlow');
-const roPressure = getNumber('RO5-ROPressure');
-const systemRecovery = getNumber('RO5-SystemRecovery');
-const pureWaterEC = getNumber('RO5-PureWaterEc');
-const stage1Delta = getNumber('RO5-Stage1Delta');
-const stage2Delta = getNumber('RO5-Stage2Delta');
-const filterDeltaP = getNumber('RO5-MediaFilterDeltaP');
-const feedTankLevel = getNumber('RO5-FeedTankLevel');
-const systemOperation = getValue('RO5-SystemOperation');
-const systemMode = getValue('RO5-SystemMode');
-const dosingActive = getValue('RO5-AntiscalantDosingActive');
+  // ==================== VALUES ====================
+  const feedFlow = getNumber('RO5-FEEDFlow');
+  const permeateFlow = getNumber('RO5-Permeateflow');
+  const concentrateFlow = getNumber('RO5-ConcetrateFlow');
+  const roPressure = getNumber('RO5-ROPressure');
+  const systemRecovery = getNumber('RO5-SystemRecovery');
+  const pureWaterEC = getNumber('RO5-PureWaterEc');
+  const stage1Delta = getNumber('RO5-Stage1Delta');
+  const stage2Delta = getNumber('RO5-Stage2Delta');
+  const filterDeltaP = getNumber('RO5-MediaFilterDeltaP');
+  const feedTankLevel = getNumber('RO5-FeedTankLevel');
+  const systemOperation = getValue('RO5-SystemOperation');
+  const systemMode = getValue('RO5-SystemMode');
+  const dosingActive = getValue('RO5-AntiscalantDosingActive');
 
+  // ✅ FIX: Properly define all status variables
+  const feedPumpOn = isActive(getValue('RO5-Feedpump'));
+  const backwashOn = isActive(getValue('RO5-PrefilterBackwash'));
+  
+  // ✅ FIX: System operation - ON when feed pump is running, OFF when not
+  const isSystemOn = feedPumpOn;
+  
+  // ✅ FIX: Dosing is ON when antiscalant is active AND system is in FILTER mode
+  const isDosingOn = dosingActive === 'ON' || isActive(dosingActive);
+  
+  // ✅ FIX: Determine operation mode based on feed pump and backwash status
+  // When feed pump is OFF → System is OFF
+  // When feed pump is ON and backwash is ON → BACKWASH mode
+  // When feed pump is ON and backwash is OFF → FILTER mode
+  const operationMode = !feedPumpOn ? 'OFF' : backwashOn ? 'BACKWASH' : 'FILTER';
+  
+  // ✅ FIX: System mode (AUTO/MANUAL)
+  const isAutoMode = typeof systemMode === 'string' && systemMode.toLowerCase().trim() === 'auto';
+  const isManualMode = typeof systemMode === 'string' && systemMode.toLowerCase().trim() === 'manual';
+  const systemModeDisplay = isAutoMode ? 'AUTO' : isManualMode ? 'MANUAL' : 'MANUAL';
 
-const isAutoMode = typeof systemMode === 'string' && systemMode.toLowerCase().trim() === 'auto';
-const isDosingOn = dosingActive === 'ON' || isActive(dosingActive);
+  // ✅ FIX: Operation mode display text and status
+  const getOperationDisplay = () => {
+    if (operationMode === 'OFF') {
+      return { label: 'OFF', color: COLORS.danger, sub: 'System offline - Feed pump stopped' };
+    } else if (operationMode === 'BACKWASH') {
+      return { label: 'BACKWASH', color: COLORS.warning, sub: 'Prefilter backwash in progress' };
+    } else { // FILTER
+      return { label: 'FILTER', color: COLORS.success, sub: 'Filtering — all systems normal' };
+    }
+  };
+  
+  const opStatus = getOperationDisplay();
 
-const feedPumpOn = isActive(getValue('RO5-Feedpump'));
-const backwashOn = isActive(getValue('RO5-PrefilterBackwash'));
-const operationMode = !feedPumpOn ? 'OFF' : backwashOn ? 'BACKWASH' : 'FILTER';
-const isSystemOn = feedPumpOn;
-const isHighPressurePumpOn = operationMode === 'FILTER' && isDosingOn;
+  // ✅ FIX: Equipment statuses
+  const highPressurePumpOn = operationMode === 'FILTER' && isSystemOn;
+  const boosterPumpOn = operationMode === 'FILTER' && isSystemOn;
 
   const dailyProdDisplay = summaryLoading ? '...' : Math.round(dailyProduction).toLocaleString();
   const activeSensors = Object.keys(sensorData).filter(key => sensorData[key]?.value !== undefined && sensorData[key]?.value !== null).length;
@@ -494,22 +511,23 @@ const isHighPressurePumpOn = operationMode === 'FILTER' && isDosingOn;
 
         {/* ── Top status cards ── */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-3 sm:mb-4">
+          {/* ✅ FIX: System Operation shows ON when feed pump is running, OFF when not */}
           <TopStatusCard
-  icon={Settings} iconBg="rgba(34,197,94,0.12)" iconColor={COLORS.success}
-  title="System Operation"
-  value={operationMode === 'OFF' ? 'OFF' : operationMode === 'BACKWASH' ? 'BACKWASH' : 'FILTER'}
-  valueColor={operationMode === 'OFF' ? COLORS.danger : operationMode === 'BACKWASH' ? COLORS.warning : COLORS.success}
-  sub={
-    operationMode === 'OFF' ? 'System offline'
-      : operationMode === 'BACKWASH' ? 'Backwashing prefilter — feed pump only'
-      : 'Filtering — all systems normal'
-  }
-  subColor="var(--muted-foreground)"
-/>
+            icon={Settings} iconBg="rgba(34,197,94,0.12)" iconColor={isSystemOn ? COLORS.success : COLORS.danger}
+            title="System Operation"
+            value={isSystemOn ? "ON" : "OFF"}
+            valueColor={isSystemOn ? COLORS.success : COLORS.danger}
+            sub={isSystemOn ? "All systems running" : "System offline - Feed pump stopped"}
+            subColor={isSystemOn ? COLORS.success : COLORS.danger}
+          />
+          {/* ✅ FIX: System Mode shows FILTER/BACKWASH/OFF */}
           <TopStatusCard
-            icon={Settings} iconBg="rgba(14,165,233,0.12)" iconColor={COLORS.primary}
-            title="System Mode" value={isAutoMode ? "AUTO" : "ON"} valueColor={isAutoMode ? COLORS.warning : COLORS.success}
-            sub={isAutoMode ? "Automatic control" : "Standby Mode"} subColor="var(--muted-foreground)"
+            icon={Settings} iconBg="rgba(14,165,233,0.12)" iconColor={opStatus.color}
+            title="System Mode"
+            value={opStatus.label}
+            valueColor={opStatus.color}
+            sub={opStatus.sub}
+            subColor="var(--muted-foreground)"
           />
           <TopStatusCard
             icon={Droplets} iconBg="rgba(14,165,233,0.12)" iconColor={COLORS.primary}
@@ -582,10 +600,12 @@ const isHighPressurePumpOn = operationMode === 'FILTER' && isDosingOn;
               <div style={{ marginTop: 12 }}>
                 <SectionTitle>Equipment Status</SectionTitle>
                 <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
-                <EquipmentStatusItem icon={Wrench} label="High Pressure Pump" state={isHighPressurePumpOn ? 'on' : 'off'} />
-<EquipmentStatusItem icon={Wrench} label="Feed Pump" state={feedPumpOn ? 'on' : 'off'} />
-                  <EquipmentStatusItem icon={FlaskConical} label="Dosing Pump" state={isDosingOn ? 'on' : 'off'} />
-                  {/* <EquipmentStatusItem icon={Sun} label="UV System" state="unknown" /> */}
+                  {/* ✅ FIX: High Pressure Pump only runs in FILTER mode */}
+                  <EquipmentStatusItem icon={Wrench} label="High Pressure Pump" state={highPressurePumpOn ? 'on' : 'off'} />
+                  {/* ✅ FIX: Feed Pump runs in both FILTER and BACKWASH modes */}
+                  <EquipmentStatusItem icon={Wrench} label="Feed Pump" state={feedPumpOn ? 'on' : 'off'} />
+                  {/* ✅ FIX: Dosing Pump only runs in FILTER mode when dosing is active */}
+                  <EquipmentStatusItem icon={FlaskConical} label="Dosing Pump" state={(operationMode === 'FILTER' && isDosingOn) ? 'on' : 'off'} />
                 </div>
               </div>
             </div>
