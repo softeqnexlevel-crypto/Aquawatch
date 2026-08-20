@@ -7,6 +7,7 @@ import { AlertsProvider, useAlerts } from "./contexts/AlertsContext";
 import { useAuth } from "./contexts/AuthContext";
 import { ScrollContainer } from "./components/ScrollContainer";
 import { TrialBanner } from "./components/TrialBanner";
+import { AIAssistant } from "./components/ai/AIAssistant"; // ✅ ADDED — Aqua AI floating chat widget
 
 // Components
 import { Sidebar } from "./components/Sidebar";
@@ -199,6 +200,14 @@ function DashboardLayoutInner() {
           </div>
         </ScrollContainer>
       </div>
+
+      {/* ✅ ADDED — Aqua AI floating chat widget. Rendered as a sibling of
+          the Sidebar/main-content flex row (not nested inside either),
+          so its `position: fixed` button/panel floats over the whole
+          layout regardless of which page is active. Appears on every
+          authenticated page since it lives in this shared layout, not
+          inside any individual page component. */}
+      <AIAssistant />
     </div>
   );
 }
