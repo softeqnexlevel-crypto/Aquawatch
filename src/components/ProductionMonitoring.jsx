@@ -175,7 +175,7 @@ export function ProductionMonitoring() {
 
   // ===================== PRODUCTION TARGETS =====================
   const productionTargets = useMemo(() => {
-    const dailyTarget = 4200;
+    const dailyTarget =  1569.6;
     const weeklyTarget = dailyTarget * 7;      
     const monthlyTarget = dailyTarget * 30;    
     const yearlyTarget = dailyTarget * 365; 
