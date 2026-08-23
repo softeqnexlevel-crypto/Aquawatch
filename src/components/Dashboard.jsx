@@ -1,5 +1,22 @@
 // components/Dashboard.jsx - WITH LIVETRENDCHART & NO TOPNAV
 // REFACTORED: now consumes the shared DataContext instead of its own socket connection
+//
+// FIX LOG (see inline comments marked "FIX:"):
+// 1. "LIVE DATA / All systems online" banner previously only reflected the
+//    frontend<->backend socket/API connection (`connected`), NOT whether the
+//    PLC/device was actually producing sensor data. A dashboard could show
+//    "All systems online" while every sensor read 0 and the system was OFF.
+//    Now it also checks `hasFreshData` (active sensor count + recency of
+//    lastUpdate) and shows a distinct "No sensor data" state when the
+//    transport is up but no real data is flowing.
+// 2. `computeHealthScore()` started from a hardcoded `score = 100` and only
+//    ever subtracted points for currently-active alarms. With zero alarms
+//    (which is also true when the system is simply OFF/disconnected and
+//    nothing is being monitored), it always returned 100 — a "100%
+//    Excellent" RO Health reading that had nothing to do with actual RO
+//    performance. It now requires `hasFreshData` to produce a real score,
+//    and returns `null` ("No Data") otherwise, which the gauge renders
+//    distinctly (gray, "No Data") instead of a misleading green 100%.
 
 import React, { useState, useEffect } from 'react';
 import {
@@ -98,6 +115,10 @@ export const SENSOR_MAP = {
 
 const MAX_HISTORY_POINTS = 500;
 
+// FIX: how stale lastUpdate can be before we no longer trust "sensors are active".
+// Tune this to your polling interval (e.g. PLC scan rate / MQTT publish rate).
+const DATA_FRESHNESS_WINDOW_MS = 60 * 1000; // 60 seconds
+
 /* ============================================================
   Derived metrics
   ============================================================ */
@@ -118,7 +139,13 @@ function getTrend(history, key, windowMs = 5 * 60 * 1000) {
   return { pct, direction: pct > 0.5 ? 'up' : pct < -0.5 ? 'down' : 'flat' };
 }
 
-function computeHealthScore(alarms) {
+// FIX: computeHealthScore now requires `hasFreshData`. Without live,
+// recent sensor data there is nothing to actually score — returning a
+// hardcoded 100 in that case was misleading (it made "system offline"
+// and "system running perfectly" look identical). Returns null when
+// health cannot be determined; callers must handle null explicitly.
+function computeHealthScore(alarms, hasFreshData) {
+  if (!hasFreshData) return null;
   let score = 100;
   alarms.filter(a => a.status === 'Active').forEach(a => {
     if (a.severity === 'Critical') score -= 15;
@@ -148,13 +175,17 @@ function SectionTitle({ children }) {
   );
 }
 
-function CircularGauge({ value, size = 88, strokeWidth = 7, color, label, statusLabel }) {
+function CircularGauge({ value, size = 88, strokeWidth = 7, color, label, statusLabel, noData = false }) {
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
-  const clamped = Math.max(0, Math.min(100, value));
+  // FIX: when noData is true, force the ring to render empty (0%) instead
+  // of whatever numeric value was passed in, so an unmeasured metric never
+  // visually looks like a full/healthy reading.
+  const clamped = noData ? 0 : Math.max(0, Math.min(100, value));
   const offset = circumference * (1 - clamped / 100);
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
   const actualSize = isMobile ? 64 : size;
+  const displayColor = noData ? COLORS.muted : color;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: isMobile ? 4 : 6 }}>
@@ -163,18 +194,20 @@ function CircularGauge({ value, size = 88, strokeWidth = 7, color, label, status
           <circle cx={actualSize / 2} cy={actualSize / 2} r={(actualSize - strokeWidth) / 2} stroke="var(--border)" strokeWidth={strokeWidth * (isMobile ? 0.7 : 1)} fill="none" />
           <circle
             cx={actualSize / 2} cy={actualSize / 2} r={(actualSize - strokeWidth) / 2}
-            stroke={color} strokeWidth={strokeWidth * (isMobile ? 0.7 : 1)} fill="none"
+            stroke={displayColor} strokeWidth={strokeWidth * (isMobile ? 0.7 : 1)} fill="none"
             strokeDasharray={circumference} strokeDashoffset={offset} strokeLinecap="round"
             transform={`rotate(-90 ${actualSize / 2} ${actualSize / 2})`}
             style={{ transition: "stroke-dashoffset 0.6s ease" }}
           />
         </svg>
         <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <span style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: actualSize * 0.22, color }}>{Math.round(clamped)}%</span>
+          <span style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: actualSize * 0.22, color: displayColor }}>
+            {noData ? '—' : `${Math.round(clamped)}%`}
+          </span>
         </div>
       </div>
       <div style={{ fontSize: isMobile ? 8 : 10, color: "var(--muted-foreground)", textAlign: "center" }}>{label}</div>
-      {statusLabel && <div style={{ fontSize: isMobile ? 8 : 10, fontWeight: 700, color }}>{statusLabel}</div>}
+      {statusLabel && <div style={{ fontSize: isMobile ? 8 : 10, fontWeight: 700, color: displayColor }}>{statusLabel}</div>}
     </div>
   );
 }
@@ -503,8 +536,18 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const activeSensors = Object.keys(sensorData).filter(key => sensorData[key]?.value !== undefined && sensorData[key]?.value !== null).length;
   const totalSensors = 15;
 
+  // FIX: distinguish "socket/API connected" from "sensors actually
+  // reporting fresh data". `connected` alone was being used to claim
+  // "All systems online" even when 0/15 sensors had data.
+  const isDataFresh = Boolean(
+    lastUpdate && (Date.now() - new Date(lastUpdate).getTime()) < DATA_FRESHNESS_WINDOW_MS
+  );
+  const hasFreshData = connected && activeSensors > 0 && isDataFresh;
+
   const criticalAlarmsCount = alertCounts.Critical;
-  const roHealthScore = computeHealthScore(activeAlarmsList);
+  // FIX: pass hasFreshData in; score is null (not 100) when there's
+  // nothing real to measure.
+  const roHealthScore = computeHealthScore(activeAlarmsList, hasFreshData);
 
   const dataInitialized = Object.keys(sensorData).length > 0;
 
@@ -549,22 +592,27 @@ export function Dashboard({ onViewAllAlerts } = {}) {
       <div className="flex-1 overflow-auto p-3 sm:p-4">
 
         {/* Status Bar */}
+        {/* FIX: banner background/border/text now key off hasFreshData too,
+            so "connected but no real data" no longer looks identical to
+            "connected and everything is reporting fine". */}
         <div className="flex items-center justify-between flex-wrap gap-2 mb-3 sm:mb-4 p-2 sm:p-3 rounded" style={{
-          background: connected ? 'rgba(34,197,94,0.05)' : 'rgba(239,68,68,0.05)',
-          border: `1px solid ${connected ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)'}`
+          background: !connected ? 'rgba(239,68,68,0.05)' : hasFreshData ? 'rgba(34,197,94,0.05)' : 'rgba(245,158,11,0.05)',
+          border: `1px solid ${!connected ? 'rgba(239,68,68,0.15)' : hasFreshData ? 'rgba(34,197,94,0.15)' : 'rgba(245,158,11,0.15)'}`
         }}>
           <div className="flex items-center gap-3 flex-wrap">
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <div style={{
                 width: 8, height: 8, borderRadius: '50%',
-                background: connected ? COLORS.success : COLORS.danger,
-                boxShadow: connected ? `0 0 8px #22c55e80` : 'none'
+                background: !connected ? COLORS.danger : hasFreshData ? COLORS.success : COLORS.warning,
+                boxShadow: connected ? (hasFreshData ? `0 0 8px #22c55e80` : `0 0 8px #f59e0b80`) : 'none'
               }} />
-              <span style={{ fontSize: 10, fontWeight: 600, color: connected ? COLORS.success : COLORS.danger }}>
-                {connected ? 'LIVE DATA' : 'DISCONNECTED'}
+              <span style={{ fontSize: 10, fontWeight: 600, color: !connected ? COLORS.danger : hasFreshData ? COLORS.success : COLORS.warning }}>
+                {!connected ? 'DISCONNECTED' : hasFreshData ? 'LIVE DATA' : 'NO SENSOR DATA'}
               </span>
               {connected && (
-                <span style={{ fontSize: 9, color: 'var(--muted-foreground)' }}>· All systems online</span>
+                <span style={{ fontSize: 9, color: 'var(--muted-foreground)' }}>
+                  · {hasFreshData ? 'All systems online' : `${activeSensors}/${totalSensors} sensors reporting`}
+                </span>
               )}
             </div>
           </div>
@@ -617,7 +665,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           />
           <TopStatusCard
             icon={Droplets} iconBg="rgba(14,165,233,0.12)" iconColor={COLORS.primary}
-            title="Feed Tank Level" value="" gauge={<CircularGauge value={feedTankLevel} size={isMobile ? 56 : 64} strokeWidth={5} color={feedTankLevel > 30 ? COLORS.success : feedTankLevel > 0 ? COLORS.warning : COLORS.danger} label="" />}
+            title="Feed Tank Level" value="" gauge={<CircularGauge value={feedTankLevel} size={isMobile ? 56 : 64} strokeWidth={5} color={feedTankLevel > 30 ? COLORS.success : feedTankLevel > 0 ? COLORS.warning : COLORS.danger} label="" noData={!hasFreshData} />}
           />
           <TopStatusCard
             icon={AlertTriangle} iconBg="rgba(239,68,68,0.12)" iconColor={COLORS.danger}
@@ -736,9 +784,31 @@ export function Dashboard({ onViewAllAlerts } = {}) {
 
               {/* Gauges */}
               <div className="flex justify-around" style={{ marginTop: 8 }}>
-                <CircularGauge value={feedTankLevel} color={feedTankLevel > 30 ? COLORS.success : COLORS.warning} label="Feed Tank" statusLabel={feedTankLevel > 30 ? "Normal" : "Low"} />
-                <CircularGauge value={systemRecovery} color={systemRecovery > 75 ? COLORS.success : COLORS.warning} label="Recovery" statusLabel={systemRecovery > 75 ? "Good" : "Check"} />
-                <CircularGauge value={roHealthScore} color={roHealthScore > 80 ? COLORS.success : roHealthScore > 50 ? COLORS.warning : COLORS.danger} label="RO Health" statusLabel={roHealthScore > 80 ? "Excellent" : roHealthScore > 50 ? "Fair" : "Poor"} />
+                <CircularGauge
+                  value={feedTankLevel}
+                  color={feedTankLevel > 30 ? COLORS.success : COLORS.warning}
+                  label="Feed Tank"
+                  statusLabel={!hasFreshData ? "No Data" : feedTankLevel > 30 ? "Normal" : "Low"}
+                  noData={!hasFreshData}
+                />
+                <CircularGauge
+                  value={systemRecovery}
+                  color={systemRecovery > 75 ? COLORS.success : COLORS.warning}
+                  label="Recovery"
+                  statusLabel={!hasFreshData ? "No Data" : systemRecovery > 75 ? "Good" : "Check"}
+                  noData={!hasFreshData}
+                />
+                {/* FIX: RO Health now uses roHealthScore, which is null
+                    (rendered as "No Data", empty gray ring) whenever the
+                    system has no fresh sensor data — instead of always
+                    showing a hardcoded 100% "Excellent". */}
+                <CircularGauge
+                  value={roHealthScore ?? 0}
+                  color={roHealthScore === null ? COLORS.muted : roHealthScore > 80 ? COLORS.success : roHealthScore > 50 ? COLORS.warning : COLORS.danger}
+                  label="RO Health"
+                  statusLabel={roHealthScore === null ? "No Data" : roHealthScore > 80 ? "Excellent" : roHealthScore > 50 ? "Fair" : "Poor"}
+                  noData={roHealthScore === null}
+                />
               </div>
 
               {/* Equipment Status with flow values */}
