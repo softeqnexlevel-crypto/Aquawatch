@@ -160,7 +160,7 @@ const api = {
 };
 
 const DOSING_RATE = 2.66; // mg/L — fixed dosing rate used to derive chemical consumption from real accumulated volume
-const RECOVERY_TARGET = 75;
+const RECOVERY_TARGET = 70;
 
 export function Analytics() {
   const { sensorData, getValue, getHistory, lastUpdate } = useData();
