@@ -62,6 +62,11 @@ export const toDisplayString = (value, decimals = 1) => {
 //   - Interstage Pressure alarm -> removed entirely (client asked to drop it)
 //   - Concentrate Pressure alarm -> removed entirely (client asked to drop it)
 //
+// ✅ UPDATED again per client request (2026-08-29):
+//   - System Recovery critical trigger moved from < 70% to < 50%. Clear
+//     point moved from 71.5% to 51.5% to keep the same ~1.5-point
+//     hysteresis buffer above the new trigger.
+//
 // Note: RO5-S1DeltaHigh / RO5-S2DeltaHigh PLC bits are also evaluated
 // separately below in BIT_ALARMS. If the PLC's own internal threshold for
 // those bits differs from 2.0 bar, both this numeric rule and the PLC bit
@@ -98,7 +103,10 @@ export const THRESHOLDS = {
   'RO5-SystemRecovery': {
     equipment: 'RO5 - SystemRecovery',
     rules: [
-      { type: 'critical', direction: 'low', value: 70, clear: 71.5, severity: 'Critical', message: 'Low System Recovery' },
+      // FIX: critical trigger moved from < 70% to < 50% per client
+      // request (2026-08-29). Clear point kept at ~1.5 points above the
+      // trigger to preserve the same hysteresis behavior.
+      { type: 'critical', direction: 'low', value: 50, clear: 51.5, severity: 'Critical', message: 'Low System Recovery' },
     ],
   },
   'RO5-FeedTankLevel': {

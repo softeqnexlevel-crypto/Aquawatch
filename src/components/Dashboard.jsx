@@ -1,22 +1,4 @@
-// components/Dashboard.jsx - WITH LIVETRENDCHART & NO TOPNAV
-// REFACTORED: now consumes the shared DataContext instead of its own socket connection
-//
-// FIX LOG (see inline comments marked "FIX:"):
-// 1. "LIVE DATA / All systems online" banner previously only reflected the
-//    frontend<->backend socket/API connection (`connected`), NOT whether the
-//    PLC/device was actually producing sensor data. A dashboard could show
-//    "All systems online" while every sensor read 0 and the system was OFF.
-//    Now it also checks `hasFreshData` (active sensor count + recency of
-//    lastUpdate) and shows a distinct "No sensor data" state when the
-//    transport is up but no real data is flowing.
-// 2. `computeHealthScore()` started from a hardcoded `score = 100` and only
-//    ever subtracted points for currently-active alarms. With zero alarms
-//    (which is also true when the system is simply OFF/disconnected and
-//    nothing is being monitored), it always returned 100 — a "100%
-//    Excellent" RO Health reading that had nothing to do with actual RO
-//    performance. It now requires `hasFreshData` to produce a real score,
-//    and returns `null` ("No Data") otherwise, which the gauge renders
-//    distinctly (gray, "No Data") instead of a misleading green 100%.
+
 
 import React, { useState, useEffect } from 'react';
 import {
@@ -118,6 +100,29 @@ const MAX_HISTORY_POINTS = 500;
 // FIX: how stale lastUpdate can be before we no longer trust "sensors are active".
 // Tune this to your polling interval (e.g. PLC scan rate / MQTT publish rate).
 const DATA_FRESHNESS_WINDOW_MS = 60 * 1000; // 60 seconds
+
+// FIX: differential-pressure ("Delta P") critical thresholds, kept in
+// sync with the canonical values in utils/alertEngine.js's THRESHOLDS
+// table (the actual source of truth for alerting).
+//
+// Per client spec (2026-08-19 forwarded message, see alertEngine.js):
+//   - Stage 1 / Stage 2 Delta P (membrane differential pressure): a single
+//     shared trigger at 2.0 bar — below is normal, at/above is Critical.
+//   - Filter (media filter) Delta P is a DIFFERENT physical quantity on a
+//     much smaller scale (filter fouling, not membrane fouling) and keeps
+//     its own, separate threshold — it does NOT use the 2.0 bar figure.
+//     alertEngine.js has this at 0.40 bar critical / 0.30 bar warning; we
+//     mirror the critical value here.
+const MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR = 2.0; // Stage 1 & Stage 2 Delta P
+const FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR = 0.40;  // Filter (Media Filter) Delta P
+
+// FIX: System Recovery critical threshold, kept in sync with
+// alertEngine.js's THRESHOLDS['RO5-SystemRecovery'] (critical below 50%,
+// updated per client request 2026-08-29 — previously below 70%). This
+// dashboard KPI previously had no "Critical" state at all, just
+// Good(>75%)/Check(>0%), which meant a badly low recovery reading still
+// only showed as an amber "Check" instead of a red "Critical".
+const SYSTEM_RECOVERY_CRITICAL_PCT = 50;
 
 /* ============================================================
   Derived metrics
@@ -684,24 +689,37 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             <KPICardV2 label="Permeate Flow" unit="m³/h" icon={Droplets} value={safeFormat(permeateFlow, 1)}
               color={permeateFlow > 30 ? COLORS.success : permeateFlow > 0 ? COLORS.warning : COLORS.danger}
               trend={getTrend(history, 'RO5-Permeateflow')} statusText={permeateFlow > 30 ? "Normal" : permeateFlow > 0 ? "Low" : "No flow"} statusOk={permeateFlow > 30} />
+            {/* FIX: added a Critical tier below SYSTEM_RECOVERY_CRITICAL_PCT
+                (50%), matching alertEngine.js's Low System Recovery alert.
+                Previously this card only ever showed Good/Check/—, so a
+                dangerously low recovery reading looked the same amber
+                "Check" as a merely below-target one. */}
             <KPICardV2 label="System Recovery" unit="%" icon={Activity} value={safeFormat(systemRecovery, 1)}
-              color={systemRecovery > 75 ? COLORS.success : systemRecovery > 0 ? COLORS.warning : COLORS.primary}
-              trend={getTrend(history, 'RO5-SystemRecovery')} statusText={systemRecovery > 75 ? "Good" : systemRecovery > 0 ? "Check" : "—"} statusOk={systemRecovery > 75} />
+              color={systemRecovery > 0 && systemRecovery < SYSTEM_RECOVERY_CRITICAL_PCT ? COLORS.danger : systemRecovery > 75 ? COLORS.success : systemRecovery > 0 ? COLORS.warning : COLORS.primary}
+              trend={getTrend(history, 'RO5-SystemRecovery')} statusText={systemRecovery > 0 && systemRecovery < SYSTEM_RECOVERY_CRITICAL_PCT ? "Critical" : systemRecovery > 75 ? "Good" : systemRecovery > 0 ? "Check" : "—"} statusOk={systemRecovery > 75} />
             <KPICardV2 label="RO Pressure" unit="bar" icon={Gauge} value={safeFormat(roPressure, 1)}
               color={roPressure >= 8 && roPressure <= 16 ? COLORS.success : roPressure > 16 ? COLORS.danger : roPressure > 0 ? COLORS.warning : COLORS.primary}
               trend={getTrend(history, 'RO5-ROPressure')} statusText={roPressure >= 8 && roPressure <= 16 ? "Normal" : roPressure > 0 ? "Check" : "—"} statusOk={roPressure >= 8 && roPressure <= 16} />
             <KPICardV2 label="Concentrate Flow" unit="m³/h" icon={Activity} value={safeFormat(concentrateFlow, 1)}
               color={concentrateFlow > 15 ? COLORS.success : COLORS.warning}
               trend={getTrend(history, 'RO5-ConcetrateFlow')} statusText={concentrateFlow > 15 ? "Normal" : "Low"} statusOk={concentrateFlow > 15} />
+            {/* FIX: Filter Delta P uses its own threshold (0.40 bar
+                critical), matching alertEngine.js's THRESHOLDS table for
+                RO5-MediaFilterDeltaP — NOT the 2.0 bar membrane threshold. */}
             <KPICardV2 label="Filter Delta P" unit="bar" icon={Filter} value={safeFormat(filterDeltaP, 2)}
-              color={filterDeltaP > 0.4 ? COLORS.danger : filterDeltaP > 0 ? COLORS.success : COLORS.primary}
-              trend={getTrend(history, 'RO5-MediaFilterDeltaP')} statusText={filterDeltaP > 0.4 ? "Check" : filterDeltaP > 0 ? "Normal" : "—"} statusOk={filterDeltaP <= 0.4 && filterDeltaP > 0} />
+              color={filterDeltaP >= FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? COLORS.danger : filterDeltaP > 0 ? COLORS.success : COLORS.primary}
+              trend={getTrend(history, 'RO5-MediaFilterDeltaP')} statusText={filterDeltaP >= FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? "Critical" : filterDeltaP > 0 ? "Normal" : "—"} statusOk={filterDeltaP < FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR && filterDeltaP > 0} />
+            {/* FIX: Stage 1 Delta P — membrane differential pressure,
+                critical at/above 2.0 bar per client spec, matching
+                alertEngine.js's THRESHOLDS['RO5-Stage1Delta']. */}
             <KPICardV2 label="Stage 1 Delta P" unit="bar" icon={Zap} value={safeFormat(stage1Delta, 2)}
-              color={stage1Delta > 0.55 ? COLORS.danger : stage1Delta > 0 ? COLORS.success : COLORS.primary}
-              trend={getTrend(history, 'RO5-Stage1Delta')} statusText={stage1Delta > 0.55 ? "Check" : stage1Delta > 0 ? "Normal" : "—"} statusOk={stage1Delta <= 0.55 && stage1Delta > 0} />
+              color={stage1Delta >= MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? COLORS.danger : stage1Delta > 0 ? COLORS.success : COLORS.primary}
+              trend={getTrend(history, 'RO5-Stage1Delta')} statusText={stage1Delta >= MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? "Critical" : stage1Delta > 0 ? "Normal" : "—"} statusOk={stage1Delta < MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR && stage1Delta > 0} />
+            {/* FIX: Stage 2 Delta P — same membrane differential-pressure
+                rule, matching alertEngine.js's THRESHOLDS['RO5-Stage2Delta']. */}
             <KPICardV2 label="Stage 2 Delta P" unit="bar" icon={Zap} value={safeFormat(stage2Delta, 2)}
-              color={stage2Delta > 0.50 ? COLORS.warning : stage2Delta > 0 ? COLORS.success : COLORS.primary}
-              trend={getTrend(history, 'RO5-Stage2Delta')} statusText={stage2Delta > 0.50 ? "Check" : stage2Delta > 0 ? "Normal" : "—"} statusOk={stage2Delta <= 0.50 && stage2Delta > 0} />
+              color={stage2Delta >= MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? COLORS.danger : stage2Delta > 0 ? COLORS.success : COLORS.primary}
+              trend={getTrend(history, 'RO5-Stage2Delta')} statusText={stage2Delta >= MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? "Critical" : stage2Delta > 0 ? "Normal" : "—"} statusOk={stage2Delta < MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR && stage2Delta > 0} />
             <KPICardV2 label="Product Water EC" unit="µS/cm" icon={FlaskConical} value={safeFormat(pureWaterEC, 0)}
               color={pureWaterEC > 150 ? COLORS.danger : pureWaterEC > 0 ? COLORS.success : COLORS.primary}
               trend={getTrend(history, 'RO5-PureWaterEc')} statusText={pureWaterEC > 150 ? "High" : pureWaterEC > 0 ? "Within limits" : "—"} statusOk={pureWaterEC <= 150 && pureWaterEC > 0} />
@@ -791,11 +809,17 @@ export function Dashboard({ onViewAllAlerts } = {}) {
                   statusLabel={!hasFreshData ? "No Data" : feedTankLevel > 30 ? "Normal" : "Low"}
                   noData={!hasFreshData}
                 />
+                {/* FIX: added a Critical (danger, red) state below
+                    SYSTEM_RECOVERY_CRITICAL_PCT (50%), matching
+                    alertEngine.js's Low System Recovery alert. Previously
+                    this gauge only ever showed green "Good" or amber
+                    "Check", with no way to visually distinguish "slightly
+                    under target" from "critically low". */}
                 <CircularGauge
                   value={systemRecovery}
-                  color={systemRecovery > 75 ? COLORS.success : COLORS.warning}
+                  color={systemRecovery > 0 && systemRecovery < SYSTEM_RECOVERY_CRITICAL_PCT ? COLORS.danger : systemRecovery > 75 ? COLORS.success : COLORS.warning}
                   label="Recovery"
-                  statusLabel={!hasFreshData ? "No Data" : systemRecovery > 75 ? "Good" : "Check"}
+                  statusLabel={!hasFreshData ? "No Data" : systemRecovery > 0 && systemRecovery < SYSTEM_RECOVERY_CRITICAL_PCT ? "Critical" : systemRecovery > 75 ? "Good" : "Check"}
                   noData={!hasFreshData}
                 />
                 {/* FIX: RO Health now uses roHealthScore, which is null

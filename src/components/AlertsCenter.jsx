@@ -1,5 +1,3 @@
-
-
 import React, { useState } from "react";
 import { AlertTriangle, CheckCircle, Bell, Filter, ChevronRight, X, Trash2, Power, History } from "lucide-react";
 import { useData } from "../contexts/DataContext";
@@ -23,7 +21,10 @@ const ALERT_REFERENCE = [
   { type: "High Differential Pressure - Stage 2", threshold: "> 2.0 bar", severity: "Critical", source: "Sensor" },
   { type: "High Filter Delta P", threshold: "> 0.40 bar", severity: "Critical", source: "Sensor" },
   { type: "High Filter Delta P", threshold: "> 0.30 bar", severity: "Medium", source: "Sensor" },
-  { type: "Low System Recovery", threshold: "< 70%", severity: "Critical", source: "Sensor" },
+  // FIX: Low System Recovery critical trigger moved from < 70% to < 50%
+  // per client request (2026-08-29), matching alertEngine.js's
+  // THRESHOLDS['RO5-SystemRecovery'].
+  { type: "Low System Recovery", threshold: "< 50%", severity: "Critical", source: "Sensor" },
   { type: "Low Feed Tank Level", threshold: "< 20%", severity: "Critical", source: "Sensor" },
   { type: "Low Feed Tank Level", threshold: "< 30%", severity: "Medium", source: "Sensor" },
   { type: "Low Feed Flow", threshold: "< 50 m³/h", severity: "High", source: "Sensor" },
