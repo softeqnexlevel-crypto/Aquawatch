@@ -96,8 +96,8 @@ export const THRESHOLDS = {
   'RO5-MediaFilterDeltaP': {
     equipment: 'RO5 - MediaFilterDeltaP',
     rules: [
-      { type: 'critical', direction: 'high', value: 0.40, clear: 0.35, severity: 'Critical', message: 'High Filter Delta P' },
-      { type: 'warning', direction: 'high', value: 0.30, clear: 0.26, severity: 'Medium', message: 'High Filter Delta P' },
+      { type: 'critical', direction: 'high', value: 2.0, clear: 0.35, severity: 'Critical', message: 'High Filter Delta P' },
+      // { type: 'critical', direction: 'high', value: 2.0, clear: 0.26, severity: 'Critical', message: 'High Filter Delta P' },
     ],
   },
   'RO5-SystemRecovery': {

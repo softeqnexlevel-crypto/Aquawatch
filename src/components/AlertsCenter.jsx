@@ -19,8 +19,8 @@ const ALERT_REFERENCE = [
   { type: "Low RO Pressure", threshold: "< 10 bar", severity: "High", source: "Sensor" },
   { type: "High Differential Pressure - Stage 1", threshold: "> 2.0 bar", severity: "Critical", source: "Sensor" },
   { type: "High Differential Pressure - Stage 2", threshold: "> 2.0 bar", severity: "Critical", source: "Sensor" },
-  { type: "High Filter Delta P", threshold: "> 0.40 bar", severity: "Critical", source: "Sensor" },
-  { type: "High Filter Delta P", threshold: "> 0.30 bar", severity: "Good", source: "Sensor" },
+  { type: "High Filter Delta P", threshold: "> 2.0 bar", severity: "Critical", source: "Sensor" },
+  { type: "High Filter Delta P", threshold: "> 2.0 bar", severity: "Critical", source: "Sensor" },
   // FIX: Low System Recovery critical trigger moved from < 70% to < 50%
   // per client request (2026-08-29), matching alertEngine.js's
   // THRESHOLDS['RO5-SystemRecovery'].
