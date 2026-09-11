@@ -55,10 +55,23 @@ const CustomTooltip = ({ active, payload, label }) => {
 };
 
 // ===================== SCALE HELPER =====================
-const scaleTankLevel = (rawValue) => {
-  if (rawValue === undefined || rawValue === null) return 0;
-  const clamped = Math.min(Math.max(rawValue, 5), 10);
-  return ((clamped - 5) / (10 - 5)) * 95 + 5;
+// ✅ FIX: removed the old scaleTankLevel() clamp/rescale function.
+//
+// RO5-FeedTankLevel coming out of plcService.js is ALREADY a scaled
+// 0-100% value (rawValue * 7.83 is applied server-side). The old
+// function here clamped its input to [5, 10] before rescaling to
+// [5, 95]+5, which — applied to an already-percentage value — meant:
+//   - any real level <= 5% got floored up to a minimum displayed 5%,
+//     so this screen could NEVER show a genuinely empty (0%) tank
+//   - any real level >= 10% got clamped to exactly 100%, so e.g. a
+//     tank actually at 43% rendered as 100% here, while the Executive
+//     Dashboard (reading the same tag directly) correctly showed 43%
+// The two screens disagreeing on the same sensor tag was a direct
+// symptom of this bug. Simply clamp to a sane 0-100 display range
+// without altering the value.
+const normalizeTankLevelPct = (rawValue) => {
+  if (rawValue === undefined || rawValue === null || Number.isNaN(rawValue)) return 0;
+  return Math.min(100, Math.max(0, rawValue));
 };
 
 // ===================== MAIN COMPONENT =====================
@@ -82,13 +95,16 @@ export function FeedTankManagement() {
   const recovery = getValue('RO5-SystemRecovery') || 0;
   const stage1Delta = getValue('RO5-Stage1Delta') || 0;
   const rawTankLevel = getValue('RO5-FeedTankLevel');
-  const scaledTankLevel = scaleTankLevel(rawTankLevel);
+  // ✅ FIX: use the already-scaled percentage directly instead of
+  // running it back through a rescaling function meant for raw sensor
+  // units. See normalizeTankLevelPct() comment above.
+  const scaledTankLevel = normalizeTankLevelPct(rawTankLevel);
   const tankHistory = getHistory('RO5-FeedTankLevel');
 
   // ===================== GENERATE FEED TANKS =====================
   const feedTanks = useMemo(() => {
     const now = new Date();
-    
+
     const tankALevel = Math.min(100, Math.max(0, scaledTankLevel));
     const tankBLevel = Math.min(100, Math.max(0, Math.min(100, scaledTankLevel * 0.85 + 2)));
     const tankCLevel = Math.min(100, Math.max(0, Math.min(100, scaledTankLevel * 0.65 + 1)));
@@ -188,17 +204,17 @@ export function FeedTankManagement() {
   const tankHistoryData = useMemo(() => {
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const currentMonth = new Date().getMonth();
-    
+
     return months.slice(0, 6).map((month, i) => {
       const monthIndex = (currentMonth - 5 + i + 12) % 12;
       const monthName = months[monthIndex];
-      
+
       let consumption = 30000 + Math.random() * 5000;
       if (tankHistory && tankHistory.length > 0) {
         const avgLevel = tankHistory.reduce((sum, d) => sum + d.value, 0) / tankHistory.length;
         consumption = avgLevel * 100 * (0.8 + Math.random() * 0.4);
       }
-      
+
       return { month: monthName, consumption: Math.round(consumption) };
     });
   }, [tankHistory]);
@@ -226,10 +242,10 @@ export function FeedTankManagement() {
 
   return (
     <div className="flex h-full overflow-hidden flex-col md:flex-row">
-      
+
       {/* Table panel */}
       <div className={`flex flex-col flex-1 min-w-0 overflow-auto p-2 sm:p-4 ${isMobile && showDetail ? 'hidden' : 'flex'}`} style={{ scrollbarWidth: "none" }}>
-        
+
         {/* Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-2 sm:mb-3 gap-2">
           <div>
@@ -238,13 +254,13 @@ export function FeedTankManagement() {
               Feed Tank Overview · {feedTanks.length} Tanks
             </h2>
             <div style={{ fontSize: isMobile ? 8 : 10, color: "var(--muted-foreground)", marginTop: 2 }}>
-              Total Capacity: {totalCapacity.toLocaleString()} m³ · Current Volume: {totalVolume.toFixed(0)} m³ · 
+              Total Capacity: {totalCapacity.toLocaleString()} m³ · Current Volume: {totalVolume.toFixed(0)} m³ ·
               Overall Level: <span style={{ color: overallLevel > 50 ? '#22c55e' : overallLevel > 25 ? '#eab308' : '#ef4444', fontWeight: 600 }}>
                 {overallLevel.toFixed(0)}%
               </span>
               {!isMobile && (
                 <span style={{ fontSize: 9, color: "var(--muted-foreground)", marginLeft: 8 }}>
-                  (PLC Raw: {typeof rawTankLevel === 'number' ? rawTankLevel.toFixed(2) : '--'} → Scaled: {scaledTankLevel.toFixed(1)}%)
+                  (PLC Value: {typeof rawTankLevel === 'number' ? rawTankLevel.toFixed(2) : '--'}%)
                 </span>
               )}
             </div>
@@ -252,14 +268,14 @@ export function FeedTankManagement() {
           <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
             <Filter size={isMobile ? 10 : 12} style={{ color: "var(--muted-foreground)" }} />
             {statusFilters.map(f => (
-              <button 
-                key={f} 
+              <button
+                key={f}
                 onClick={() => setFilterStatus(f)}
-                className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded text-xs transition-colors" 
-                style={{ 
-                  background: filterStatus === f ? "#0ea5e9" : "var(--secondary)", 
-                  color: filterStatus === f ? "white" : "var(--muted-foreground)", 
-                  border: "1px solid var(--border)", 
+                className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded text-xs transition-colors"
+                style={{
+                  background: filterStatus === f ? "#0ea5e9" : "var(--secondary)",
+                  color: filterStatus === f ? "white" : "var(--muted-foreground)",
+                  border: "1px solid var(--border)",
                   fontSize: isMobile ? 7 : 9,
                   cursor: "pointer",
                   whiteSpace: "nowrap"
@@ -405,11 +421,11 @@ export function FeedTankManagement() {
             <BarChart data={filteredTanks.filter(t => t.dailyConsumption > 0)} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" vertical={false} />
               <XAxis dataKey="id" tick={{ fontSize: isMobile ? 8 : 9, fill: "#4d7a9e" }} axisLine={false} tickLine={false} />
-              <YAxis 
-                tick={{ fontSize: isMobile ? 8 : 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} 
-                axisLine={false} 
-                tickLine={false} 
-                tickFormatter={v => v + " m³"} 
+              <YAxis
+                tick={{ fontSize: isMobile ? 8 : 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }}
+                axisLine={false}
+                tickLine={false}
+                tickFormatter={v => v + " m³"}
               />
               <Tooltip content={<CustomTooltip />} />
               <Bar dataKey="dailyConsumption" fill="#06b6d4" radius={[3, 3, 0, 0]} name="Daily Consumption (m³)" />
@@ -420,19 +436,19 @@ export function FeedTankManagement() {
 
       {/* Detail panel */}
       {selected && (
-        <div 
+        <div
           className={`flex flex-col overflow-auto p-3 sm:p-4 gap-3 sm:gap-4 ${isMobile ? 'fixed inset-0 z-50' : ''}`}
-          style={{ 
-            width: isMobile ? '100%' : 280, 
-            background: "var(--muted)", 
-            borderLeft: isMobile ? 'none' : "1px solid var(--border)", 
+          style={{
+            width: isMobile ? '100%' : 280,
+            background: "var(--muted)",
+            borderLeft: isMobile ? 'none' : "1px solid var(--border)",
             flexShrink: 0,
             display: isMobile && !showDetail ? 'none' : 'flex'
           }}
         >
           {/* Mobile back button */}
           {isMobile && (
-            <button 
+            <button
               onClick={handleBack}
               style={{
                 display: 'flex',
@@ -476,9 +492,9 @@ export function FeedTankManagement() {
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <div style={{ flex: 1, height: 8, background: "var(--secondary)", borderRadius: 4, overflow: "hidden" }}>
-                <div style={{ 
-                  width: `${Math.min(selected.level, 100)}%`, 
-                  height: "100%", 
+                <div style={{
+                  width: `${Math.min(selected.level, 100)}%`,
+                  height: "100%",
                   background: selected.level > 50 ? "#22c55e" : selected.level > 25 ? "#eab308" : "#ef4444",
                   borderRadius: 4,
                   transition: "width 0.5s ease"
@@ -521,20 +537,20 @@ export function FeedTankManagement() {
             <ResponsiveContainer width="100%" height={isMobile ? 100 : 90}>
               <LineChart data={tankHistoryData} margin={{ top: 4, right: 4, left: -28, bottom: 0 }}>
                 <XAxis dataKey="month" tick={{ fontSize: 8, fill: "#4d7a9e" }} axisLine={false} tickLine={false} />
-                <YAxis 
-                  tick={{ fontSize: 8, fill: "#4d7a9e" }} 
-                  axisLine={false} 
-                  tickLine={false} 
-                  tickFormatter={v => (v / 1000).toFixed(0) + "k"} 
+                <YAxis
+                  tick={{ fontSize: 8, fill: "#4d7a9e" }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={v => (v / 1000).toFixed(0) + "k"}
                 />
                 <Tooltip content={<CustomTooltip />} />
-                <Line 
-                  type="monotone" 
-                  dataKey="consumption" 
-                  stroke="#06b6d4" 
-                  strokeWidth={1.5} 
-                  dot={{ r: 2, fill: "#06b6d4" }} 
-                  name="Consumption" 
+                <Line
+                  type="monotone"
+                  dataKey="consumption"
+                  stroke="#06b6d4"
+                  strokeWidth={1.5}
+                  dot={{ r: 2, fill: "#06b6d4" }}
+                  name="Consumption"
                 />
               </LineChart>
             </ResponsiveContainer>
