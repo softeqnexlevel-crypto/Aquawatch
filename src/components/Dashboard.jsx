@@ -119,12 +119,7 @@ const FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR = 0.40;  // Filter (Media Filter
 // updated per client request 2026-08-29 — previously below 70%).
 const SYSTEM_RECOVERY_CRITICAL_PCT = 50;
 
-// ✅ NEW (fix): feed tank level at/below this percentage is treated as
-// physically empty. This is a UI-side safety net only — it stops the
-// dashboard from showing "System Operation: ON / FILTER" when the tank
-// is empty, even if the RO5-Feedpump status tag hasn't (yet) reflected
-// that the pump was cut. The real interlock belongs in the PLC ladder
-// logic; this just keeps the dashboard from contradicting reality.
+
 const TANK_EMPTY_THRESHOLD_PCT = 2;
 
 /* ============================================================
@@ -475,13 +470,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const feedPumpOn = isActive(getValue('RO5-Feedpump'));
   const backwashOn = isActive(getValue('RO5-PrefilterBackwash'));
 
-  // ✅ NEW (fix): tank-empty is an independent, higher-priority signal.
-  // Previously `isSystemOn` was derived only from the RO5-Feedpump status
-  // tag, so the dashboard could show "System Operation: ON" and
-  // "FILTER — all pumps running" even when the feed tank was physically
-  // at 0%, as long as that pump status tag hadn't been (or wasn't)
-  // updated to reflect it. This is a UI-side safety net; the actual pump
-  // cutoff still needs to happen in the PLC ladder logic.
+
   const tankEmpty = feedTankLevel <= TANK_EMPTY_THRESHOLD_PCT;
 
   // System operation - ON only when feed pump is running AND tank isn't empty
