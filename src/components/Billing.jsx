@@ -50,6 +50,22 @@ function normalizeMsisdn(raw) {
   return null;
 }
 
+// Strips any non-digit characters (including a leading "+") and then removes
+// a leading "254" country code, leaving just the local subscriber number
+// that belongs after the "+254" prefix already shown in the input UI.
+function toLocalMsisdnDisplay(raw) {
+  const digitsOnly = String(raw || '').replace(/\D/g, '');
+  return digitsOnly.replace(/^254/, '');
+}
+
+// Guards against a mis-typed plan name ("AguaWatch") coming from the API/DB
+// without needing a backend fix first. Once the source data is corrected,
+// this is a harmless no-op.
+function displayPlanName(name) {
+  if (!name) return 'AquaWatch Subscription';
+  return name.replace(/Agua/gi, (match) => (match[0] === 'A' ? 'Aqua' : 'aqua'));
+}
+
 export default function Billing() {
   const { user, subscriptionStatus, daysRemaining } = useAuth();
 
@@ -120,9 +136,10 @@ export default function Billing() {
     setPhoneError(null);
     setStkStage('idle');
     setStkMessage('');
-    // Strip 254 prefix for display
-    const userPhone = user?.phone || '';
-    setPhoneInput(userPhone.replace(/^254/, ''));
+    // Normalize whatever format user.phone is stored in (e.g. "+254712345678",
+    // "254712345678", "0712345678") down to just the local part that goes
+    // after the "+254" label already rendered in the input.
+    setPhoneInput(toLocalMsisdnDisplay(user?.phone));
     setShowModal(true);
   }
 
@@ -297,7 +314,7 @@ export default function Billing() {
               Popular
             </span>
           </div>
-          
+
           <div className="mb-4">
             <h3 className="text-lg font-semibold text-white">Express</h3>
             <p className="text-neutral-400 text-xs mt-1">For small organizations with simple email infrastructure</p>
@@ -460,7 +477,7 @@ export default function Billing() {
             <div className="mb-6">
               <h2 className="text-xl font-semibold text-white mb-1">Pay with M-Pesa</h2>
               <p className="text-neutral-400 text-sm">
-                {plan?.name || 'AquaWatch Subscription'} — {formatKes(displayAmount || 25000)}
+                {displayPlanName(plan?.name)} — {formatKes(displayAmount || 25000)}
                 /{billingCycle === 'yearly' ? 'year' : 'month'}
               </p>
             </div>
