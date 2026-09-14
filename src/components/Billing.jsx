@@ -62,7 +62,7 @@ function toLocalMsisdnDisplay(raw) {
 // without needing a backend fix first. Once the source data is corrected,
 // this is a harmless no-op.
 function displayPlanName(name) {
-  if (!name) return 'AquaWatch Subscription';
+  if (!name) return 'AquaSystem Subscription';
   return name.replace(/Agua/gi, (match) => (match[0] === 'A' ? 'Aqua' : 'aqua'));
 }
 
