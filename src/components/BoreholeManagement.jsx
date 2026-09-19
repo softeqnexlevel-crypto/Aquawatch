@@ -1,12 +1,12 @@
-// components/FeedTankManagement.jsx - FULLY RESPONSIVE WITH ALL FEATURES
-
+// components/FeedTankManagement.jsx
 import React, { useState, useMemo, useEffect } from "react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from "recharts";
 import { MapPin, ChevronRight, Activity, Clock, Wrench, Droplet, Filter, AlertCircle, ChevronLeft } from "lucide-react";
 import { useData } from "../contexts/DataContext";
 import { format, subDays } from 'date-fns';
+import { getDisplayedTankLevelPct, DATA_FRESHNESS_WINDOW_MS } from './dashboardComponents/instrumentUtils';
+import { isActive } from './Dashboard';
 
-// ===================== STATUS BADGE =====================
 const StatusBadge = ({ status }) => {
   const cfg = {
     Active: { bg: "rgba(34,197,94,0.1)", color: "#22c55e", dot: "#22c55e" },
@@ -26,7 +26,6 @@ const StatusBadge = ({ status }) => {
   );
 };
 
-// ===================== HEALTH BAR =====================
 const HealthBar = ({ value }) => {
   const color = value >= 80 ? "#22c55e" : value >= 60 ? "#eab308" : "#ef4444";
   return (
@@ -39,7 +38,6 @@ const HealthBar = ({ value }) => {
   );
 };
 
-// ===================== TOOLTIP =====================
 const CustomTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
   return (
@@ -54,27 +52,6 @@ const CustomTooltip = ({ active, payload, label }) => {
   );
 };
 
-// ===================== SCALE HELPER =====================
-// ✅ FIX: removed the old scaleTankLevel() clamp/rescale function.
-//
-// RO5-FeedTankLevel coming out of plcService.js is ALREADY a scaled
-// 0-100% value (rawValue * 7.83 is applied server-side). The old
-// function here clamped its input to [5, 10] before rescaling to
-// [5, 95]+5, which — applied to an already-percentage value — meant:
-//   - any real level <= 5% got floored up to a minimum displayed 5%,
-//     so this screen could NEVER show a genuinely empty (0%) tank
-//   - any real level >= 10% got clamped to exactly 100%, so e.g. a
-//     tank actually at 43% rendered as 100% here, while the Executive
-//     Dashboard (reading the same tag directly) correctly showed 43%
-// The two screens disagreeing on the same sensor tag was a direct
-// symptom of this bug. Simply clamp to a sane 0-100 display range
-// without altering the value.
-const normalizeTankLevelPct = (rawValue) => {
-  if (rawValue === undefined || rawValue === null || Number.isNaN(rawValue)) return 0;
-  return Math.min(100, Math.max(0, rawValue));
-};
-
-// ===================== MAIN COMPONENT =====================
 export function FeedTankManagement() {
   const { sensorData, getValue, getHistory, lastUpdate } = useData();
   const [selected, setSelected] = useState(null);
@@ -82,7 +59,6 @@ export function FeedTankManagement() {
   const [isMobile, setIsMobile] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
 
-  // Mobile detection
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
     checkMobile();
@@ -90,34 +66,53 @@ export function FeedTankManagement() {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Get real data from sensors
   const feedFlow = getValue('RO5-FEEDFlow') || 0;
   const recovery = getValue('RO5-SystemRecovery') || 0;
   const stage1Delta = getValue('RO5-Stage1Delta') || 0;
-  const rawTankLevel = getValue('RO5-FeedTankLevel');
-  // ✅ FIX: use the already-scaled percentage directly instead of
-  // running it back through a rescaling function meant for raw sensor
-  // units. See normalizeTankLevelPct() comment above.
-  const scaledTankLevel = normalizeTankLevelPct(rawTankLevel);
+
+  // ---------------------------------------------------------------
+  // DECISION: client rule. System OFF => tank 0%. Stale tag with
+  // system ON => No Data. Falls back to null, and the UI must render
+  // "No Data" for null — never a phantom percentage.
+  // ---------------------------------------------------------------
+  const systemOperation = getValue('RO5-SystemOperation');
+  const feedPumpRaw = getValue('RO5-Feedpump');
+
+  const displayLevel = getDisplayedTankLevelPct({
+    rawTankLevel: getValue('RO5-FeedTankLevel'),
+    lastUpdate,
+    systemOperationRaw: systemOperation,
+    feedPumpRaw,
+    freshnessWindowMs: DATA_FRESHNESS_WINDOW_MS,
+  });
+
+  const tankHasData = displayLevel !== null;
+  const scaledTankLevel = tankHasData ? displayLevel : 0;
+
   const tankHistory = getHistory('RO5-FeedTankLevel');
 
-  // ===================== GENERATE FEED TANKS =====================
   const feedTanks = useMemo(() => {
     const now = new Date();
 
-    const tankALevel = Math.min(100, Math.max(0, scaledTankLevel));
-    const tankBLevel = Math.min(100, Math.max(0, Math.min(100, scaledTankLevel * 0.85 + 2)));
-    const tankCLevel = Math.min(100, Math.max(0, Math.min(100, scaledTankLevel * 0.65 + 1)));
-    const tankDLevel = Math.min(100, Math.max(0, Math.min(100, scaledTankLevel * 0.45 + 0.5)));
+    // Only Tank A is a real sensor. B/C/D are derived placeholders.
+    // When system is OFF (scaledTankLevel === 0), ALL derived tanks are
+    // also 0 — no offsets, no cosmetic filler.
+    const tankALevel = scaledTankLevel;
+    const tankBLevel = scaledTankLevel === 0 ? 0 : Math.min(100, Math.max(0, scaledTankLevel * 0.85 + 2));
+    const tankCLevel = scaledTankLevel === 0 ? 0 : Math.min(100, Math.max(0, scaledTankLevel * 0.65 + 1));
+    const tankDLevel = scaledTankLevel === 0 ? 0 : Math.min(100, Math.max(0, scaledTankLevel * 0.45 + 0.5));
 
-    const getStatus = (level) => {
+    const getStatus = (level, hasData) => {
+      if (!hasData) return "Offline";
+      if (level <= 0) return "Empty";
       if (level > 70) return "Active";
       if (level > 40) return "Standby";
       if (level > 15) return "Warning";
       return "Empty";
     };
 
-    const getHealth = (level) => {
+    const getHealth = (level, hasData) => {
+      if (!hasData) return 0;
       const baseHealth = (level / 100) * 70 + 30;
       const recoveryBonus = Math.min(20, (recovery / 100) * 20);
       return Math.min(100, baseHealth + recoveryBonus - (stage1Delta > 0.5 ? 10 : 0));
@@ -128,14 +123,14 @@ export function FeedTankManagement() {
         id: "FT-A",
         name: "Main Feed Tank A",
         location: "North Plant",
-        status: getStatus(tankALevel),
+        status: getStatus(tankALevel, tankHasData),
         level: tankALevel,
         capacity: 500,
         volume: (tankALevel / 100) * 500,
-        dailyConsumption: feedFlow * 24 * 0.4,
-        monthlyConsumption: feedFlow * 24 * 30 * 0.4,
+        dailyConsumption: tankHasData ? feedFlow * 24 * 0.4 : 0,
+        monthlyConsumption: tankHasData ? feedFlow * 24 * 30 * 0.4 : 0,
         runtimeHours: 22.5,
-        health: getHealth(tankALevel),
+        health: getHealth(tankALevel, tankHasData),
         lastMaintenance: format(subDays(now, 45), 'yyyy-MM-dd'),
         nextMaintenance: format(subDays(now, -15), 'yyyy-MM-dd'),
       },
@@ -143,14 +138,14 @@ export function FeedTankManagement() {
         id: "FT-B",
         name: "Secondary Feed Tank B",
         location: "East Plant",
-        status: getStatus(tankBLevel),
+        status: getStatus(tankBLevel, tankHasData),
         level: tankBLevel,
         capacity: 400,
         volume: (tankBLevel / 100) * 400,
-        dailyConsumption: feedFlow * 24 * 0.35,
-        monthlyConsumption: feedFlow * 24 * 30 * 0.35,
+        dailyConsumption: tankHasData ? feedFlow * 24 * 0.35 : 0,
+        monthlyConsumption: tankHasData ? feedFlow * 24 * 30 * 0.35 : 0,
         runtimeHours: 18.2,
-        health: getHealth(tankBLevel),
+        health: getHealth(tankBLevel, tankHasData),
         lastMaintenance: format(subDays(now, 30), 'yyyy-MM-dd'),
         nextMaintenance: format(subDays(now, -20), 'yyyy-MM-dd'),
       },
@@ -158,14 +153,14 @@ export function FeedTankManagement() {
         id: "FT-C",
         name: "Reserve Feed Tank C",
         location: "South Plant",
-        status: getStatus(tankCLevel),
+        status: getStatus(tankCLevel, tankHasData),
         level: tankCLevel,
         capacity: 300,
         volume: (tankCLevel / 100) * 300,
-        dailyConsumption: feedFlow * 24 * 0.25,
-        monthlyConsumption: feedFlow * 24 * 30 * 0.25,
+        dailyConsumption: tankHasData ? feedFlow * 24 * 0.25 : 0,
+        monthlyConsumption: tankHasData ? feedFlow * 24 * 30 * 0.25 : 0,
         runtimeHours: 14.8,
-        health: getHealth(tankCLevel),
+        health: getHealth(tankCLevel, tankHasData),
         lastMaintenance: format(subDays(now, 25), 'yyyy-MM-dd'),
         nextMaintenance: format(subDays(now, -10), 'yyyy-MM-dd'),
       },
@@ -173,34 +168,38 @@ export function FeedTankManagement() {
         id: "FT-D",
         name: "Emergency Feed Tank D",
         location: "West Plant",
-        status: getStatus(tankDLevel),
+        status: getStatus(tankDLevel, tankHasData),
         level: tankDLevel,
         capacity: 200,
         volume: (tankDLevel / 100) * 200,
-        dailyConsumption: feedFlow * 24 * 0.15,
-        monthlyConsumption: feedFlow * 24 * 30 * 0.15,
+        dailyConsumption: tankHasData ? feedFlow * 24 * 0.15 : 0,
+        monthlyConsumption: tankHasData ? feedFlow * 24 * 30 * 0.15 : 0,
         runtimeHours: 12.5,
-        health: getHealth(tankDLevel),
+        health: getHealth(tankDLevel, tankHasData),
         lastMaintenance: format(subDays(now, 50), 'yyyy-MM-dd'),
         nextMaintenance: format(subDays(now, -5), 'yyyy-MM-dd'),
       }
     ];
-  }, [scaledTankLevel, feedFlow, recovery, stage1Delta]);
+  }, [scaledTankLevel, tankHasData, feedFlow, recovery, stage1Delta]);
 
-  // ===================== SET INITIAL SELECTION =====================
   useEffect(() => {
     if (feedTanks.length > 0 && !selected) {
       setSelected(feedTanks[0]);
     }
   }, [feedTanks]);
 
-  // ===================== FILTER TANKS =====================
+  // Keep `selected` in sync when the tanks are recomputed.
+  useEffect(() => {
+    if (!selected) return;
+    const updated = feedTanks.find(t => t.id === selected.id);
+    if (updated && updated !== selected) setSelected(updated);
+  }, [feedTanks]);
+
   const filteredTanks = useMemo(() => {
     if (filterStatus === 'All') return feedTanks;
     return feedTanks.filter(t => t.status === filterStatus);
   }, [feedTanks, filterStatus]);
 
-  // ===================== GENERATE HISTORY =====================
   const tankHistoryData = useMemo(() => {
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const currentMonth = new Date().getMonth();
@@ -219,15 +218,12 @@ export function FeedTankManagement() {
     });
   }, [tankHistory]);
 
-  // ===================== STATUS FILTERS =====================
   const statusFilters = ['All', 'Active', 'Standby', 'Warning', 'Empty', 'Maintenance'];
 
-  // Calculate totals
   const totalCapacity = feedTanks.reduce((sum, t) => sum + t.capacity, 0);
   const totalVolume = feedTanks.reduce((sum, t) => sum + t.volume, 0);
   const overallLevel = totalCapacity > 0 ? (totalVolume / totalCapacity) * 100 : 0;
 
-  // Handle tank selection
   const handleTankSelect = (tank) => {
     setSelected(tank);
     if (isMobile) {
@@ -235,7 +231,6 @@ export function FeedTankManagement() {
     }
   };
 
-  // Handle back from detail
   const handleBack = () => {
     setShowDetail(false);
   };
@@ -243,10 +238,8 @@ export function FeedTankManagement() {
   return (
     <div className="flex h-full overflow-hidden flex-col md:flex-row">
 
-      {/* Table panel */}
       <div className={`flex flex-col flex-1 min-w-0 overflow-auto p-2 sm:p-4 ${isMobile && showDetail ? 'hidden' : 'flex'}`} style={{ scrollbarWidth: "none" }}>
 
-        {/* Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-2 sm:mb-3 gap-2">
           <div>
             <h2 style={{ fontSize: isMobile ? 10 : 11, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.1em", textTransform: "uppercase" }}>
@@ -255,12 +248,12 @@ export function FeedTankManagement() {
             </h2>
             <div style={{ fontSize: isMobile ? 8 : 10, color: "var(--muted-foreground)", marginTop: 2 }}>
               Total Capacity: {totalCapacity.toLocaleString()} m³ · Current Volume: {totalVolume.toFixed(0)} m³ ·
-              Overall Level: <span style={{ color: overallLevel > 50 ? '#22c55e' : overallLevel > 25 ? '#eab308' : '#ef4444', fontWeight: 600 }}>
-                {overallLevel.toFixed(0)}%
+              Overall Level: <span style={{ color: !tankHasData ? '#64748b' : overallLevel > 50 ? '#22c55e' : overallLevel > 25 ? '#eab308' : '#ef4444', fontWeight: 600 }}>
+                {tankHasData ? `${overallLevel.toFixed(0)}%` : 'No Data'}
               </span>
               {!isMobile && (
                 <span style={{ fontSize: 9, color: "var(--muted-foreground)", marginLeft: 8 }}>
-                  (PLC Value: {typeof rawTankLevel === 'number' ? rawTankLevel.toFixed(2) : '--'}%)
+                  (PLC Value: {typeof getValue('RO5-FeedTankLevel') === 'number' ? getValue('RO5-FeedTankLevel').toFixed(2) : '--'}%)
                 </span>
               )}
             </div>
@@ -290,7 +283,6 @@ export function FeedTankManagement() {
           </div>
         </div>
 
-        {/* Table */}
         <div className="rounded overflow-hidden" style={{ border: "1px solid var(--border)", flex: 1 }}>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: isMobile ? 500 : 'auto' }}>
@@ -341,14 +333,14 @@ export function FeedTankManagement() {
                         <td style={{ padding: "5px 8px", borderBottom: "1px solid var(--border)" }}>
                           <StatusBadge status={t.status} />
                         </td>
-                        <td style={{ padding: "5px 8px", fontSize: 10, fontFamily: "var(--font-mono)", fontWeight: 600, textAlign: "right", color: t.level > 50 ? "#22c55e" : t.level > 25 ? "#eab308" : "#ef4444", borderBottom: "1px solid var(--border)" }}>
-                          {t.level.toFixed(0)}%
+                        <td style={{ padding: "5px 8px", fontSize: 10, fontFamily: "var(--font-mono)", fontWeight: 600, textAlign: "right", color: !tankHasData ? '#64748b' : t.level > 50 ? "#22c55e" : t.level > 25 ? "#eab308" : "#ef4444", borderBottom: "1px solid var(--border)" }}>
+                          {tankHasData ? `${t.level.toFixed(0)}%` : '--'}
                         </td>
                         <td style={{ padding: "5px 8px", fontSize: 10, fontFamily: "var(--font-mono)", textAlign: "right", color: "var(--foreground)", borderBottom: "1px solid var(--border)" }}>
-                          {t.volume.toFixed(0)}
+                          {tankHasData ? t.volume.toFixed(0) : '--'}
                         </td>
                         <td style={{ padding: "5px 8px", fontSize: 10, fontFamily: "var(--font-mono)", textAlign: "right", color: "var(--foreground)", borderBottom: "1px solid var(--border)" }}>
-                          {t.dailyConsumption.toFixed(0)}
+                          {tankHasData ? t.dailyConsumption.toFixed(0) : '--'}
                         </td>
                         <td style={{ padding: "5px 8px", textAlign: "center", borderBottom: "1px solid var(--border)" }}>
                           <HealthBar value={t.health} />
@@ -373,17 +365,17 @@ export function FeedTankManagement() {
                         <td style={{ padding: "7px 10px", borderBottom: "1px solid var(--border)" }}>
                           <StatusBadge status={t.status} />
                         </td>
-                        <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", fontWeight: 600, color: t.level > 50 ? "#22c55e" : t.level > 25 ? "#eab308" : "#ef4444", borderBottom: "1px solid var(--border)" }}>
-                          {t.level.toFixed(1)}%
+                        <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", fontWeight: 600, color: !tankHasData ? '#64748b' : t.level > 50 ? "#22c55e" : t.level > 25 ? "#eab308" : "#ef4444", borderBottom: "1px solid var(--border)" }}>
+                          {tankHasData ? `${t.level.toFixed(1)}%` : '--'}
                         </td>
                         <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--foreground)", borderBottom: "1px solid var(--border)" }}>
-                          {t.volume.toFixed(0)}
+                          {tankHasData ? t.volume.toFixed(0) : '--'}
                         </td>
                         <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>
                           {t.capacity}
                         </td>
                         <td style={{ padding: "7px 10px", fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--foreground)", borderBottom: "1px solid var(--border)" }}>
-                          {t.dailyConsumption.toFixed(0)} m³/day
+                          {tankHasData ? `${t.dailyConsumption.toFixed(0)} m³/day` : '--'}
                         </td>
                         <td style={{ padding: "7px 10px", borderBottom: "1px solid var(--border)" }}>
                           <HealthBar value={t.health} />
@@ -407,7 +399,6 @@ export function FeedTankManagement() {
           </div>
         </div>
 
-        {/* Consumption comparison chart */}
         <div className="rounded p-3 mt-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
           <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
             <h3 style={{ fontSize: isMobile ? 10 : 11, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.1em", textTransform: "uppercase" }}>
@@ -434,7 +425,6 @@ export function FeedTankManagement() {
         </div>
       </div>
 
-      {/* Detail panel */}
       {selected && (
         <div
           className={`flex flex-col overflow-auto p-3 sm:p-4 gap-3 sm:gap-4 ${isMobile ? 'fixed inset-0 z-50' : ''}`}
@@ -446,7 +436,6 @@ export function FeedTankManagement() {
             display: isMobile && !showDetail ? 'none' : 'flex'
           }}
         >
-          {/* Mobile back button */}
           {isMobile && (
             <button
               onClick={handleBack}
@@ -485,7 +474,6 @@ export function FeedTankManagement() {
             </div>
           </div>
 
-          {/* Level gauge */}
           <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
             <div style={{ fontSize: 9, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 6 }}>
               Tank Level
@@ -493,30 +481,29 @@ export function FeedTankManagement() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
               <div style={{ flex: 1, height: 8, background: "var(--secondary)", borderRadius: 4, overflow: "hidden" }}>
                 <div style={{
-                  width: `${Math.min(selected.level, 100)}%`,
+                  width: `${tankHasData ? Math.min(selected.level, 100) : 0}%`,
                   height: "100%",
-                  background: selected.level > 50 ? "#22c55e" : selected.level > 25 ? "#eab308" : "#ef4444",
+                  background: !tankHasData ? '#64748b' : selected.level > 50 ? "#22c55e" : selected.level > 25 ? "#eab308" : "#ef4444",
                   borderRadius: 4,
                   transition: "width 0.5s ease"
                 }} />
               </div>
-              <span style={{ fontSize: isMobile ? 18 : 16, fontFamily: "var(--font-mono)", fontWeight: 700, color: selected.level > 50 ? "#22c55e" : selected.level > 25 ? "#eab308" : "#ef4444" }}>
-                {selected.level.toFixed(0)}%
+              <span style={{ fontSize: isMobile ? 18 : 16, fontFamily: "var(--font-mono)", fontWeight: 700, color: !tankHasData ? '#64748b' : selected.level > 50 ? "#22c55e" : selected.level > 25 ? "#eab308" : "#ef4444" }}>
+                {tankHasData ? `${selected.level.toFixed(0)}%` : '--'}
               </span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
-              <span style={{ fontSize: 8, color: "var(--muted-foreground)" }}>{selected.volume.toFixed(0)} m³</span>
+              <span style={{ fontSize: 8, color: "var(--muted-foreground)" }}>{tankHasData ? `${selected.volume.toFixed(0)} m³` : '--'}</span>
               <span style={{ fontSize: 8, color: "var(--muted-foreground)" }}>Capacity: {selected.capacity} m³</span>
             </div>
           </div>
 
-          {/* Metrics grid */}
           <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
             {[
-              { label: "Daily Consumption", value: `${selected.dailyConsumption.toFixed(0)} m³`, icon: Droplet },
-              { label: "Runtime", value: `${selected.runtimeHours}h`, icon: Clock },
-              { label: "Monthly Usage", value: `${Math.round(selected.monthlyConsumption).toLocaleString()} m³`, icon: Activity },
-              { label: "Health Score", value: `${Math.round(selected.health)}%`, icon: Activity },
+              { label: "Daily Consumption", value: tankHasData ? `${selected.dailyConsumption.toFixed(0)} m³` : '--' },
+              { label: "Runtime", value: `${selected.runtimeHours}h` },
+              { label: "Monthly Usage", value: tankHasData ? `${Math.round(selected.monthlyConsumption).toLocaleString()} m³` : '--' },
+              { label: "Health Score", value: tankHasData ? `${Math.round(selected.health)}%` : '--' },
             ].map(m => (
               <div key={m.label} className="rounded p-2" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
                 <div style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)", marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>
@@ -529,7 +516,6 @@ export function FeedTankManagement() {
             ))}
           </div>
 
-          {/* Consumption history mini chart */}
           <div className="rounded p-2" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
             <div style={{ fontSize: 10, fontWeight: 600, color: "var(--muted-foreground)", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.08em" }}>
               Consumption History
@@ -556,7 +542,6 @@ export function FeedTankManagement() {
             </ResponsiveContainer>
           </div>
 
-          {/* Maintenance info */}
           <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
             <div style={{ fontSize: 10, fontWeight: 600, color: "var(--muted-foreground)", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.08em" }}>
               <Wrench size={12} style={{ display: 'inline', marginRight: 4 }} />

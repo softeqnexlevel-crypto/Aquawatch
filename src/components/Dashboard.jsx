@@ -1,3 +1,4 @@
+// components/Dashboard.jsx
 import React, { useState, useEffect } from 'react';
 import {
   Droplets, Activity, FlaskConical, AlertTriangle,
@@ -14,15 +15,22 @@ import { useData } from '../contexts/DataContext';
 import { useAlerts } from '../contexts/AlertsContext';
 import { useAuth } from '../contexts/AuthContext';
 
-// Import custom chart components
 import { LiveTrendChart } from './dashboardComponents/LiveTrendChart';
 import { SystemHealthRadar } from './dashboardComponents/SystemHealthRadar';
 import { FlowBalanceChart } from './dashboardComponents/FlowBalanceChart';
 import { DistributionHistogram } from './dashboardComponents/DistributionHistogram';
+import { PressureGauge, PRESSURE_BANDS_BAR, classifyPressure, PRESSURE_UNIT_DISPLAY }
+  from './dashboardComponents/PressureGauge';
+import { TankLevelGauge, TANK_BANDS, classifyTankLevel }
+  from './dashboardComponents/TankLevelGauge';
+import { InstrumentCard } from './dashboardComponents/InstrumentCard';
+import {
+  getDisplayedTankLevelPct,
+  getDisplayedPressure,
+  DATA_FRESHNESS_WINDOW_MS,
+} from './dashboardComponents/instrumentUtils';
 
-/* ============================================================
-  Shared color palette
-  ============================================================ */
+
 
 export const COLORS = {
   primary: '#0ea5e9',
@@ -41,11 +49,7 @@ export const COLORS = {
   muted: '#64748b',
 };
 
-/* ============================================================
-  ROBUST TYPE NORMALIZATION
-  ============================================================ */
-
-const isActive = (value) => {
+export const isActive = (value) => {
   if (value === undefined || value === null) return false;
   if (typeof value === 'boolean') return value;
   if (typeof value === 'number') return value === 1;
@@ -69,10 +73,6 @@ const safeNumber = (value, fallback = 0) => {
   return (isNaN(num) || !isFinite(num)) ? fallback : num;
 };
 
-/* ============================================================
-  Sensor mapping
-  ============================================================ */
-
 export const SENSOR_MAP = {
   'RO5-FEEDFlow': { label: 'Feed Flow', unit: 'm³/h', icon: Droplets, color: COLORS.primary, shortName: 'FEEDFlow' },
   'RO5-Permeateflow': { label: 'Permeate Flow', unit: 'm³/h', icon: Droplets, color: COLORS.secondary, shortName: 'Permeateflow' },
@@ -95,36 +95,10 @@ export const SENSOR_MAP = {
 
 const MAX_HISTORY_POINTS = 500;
 
-// How stale lastUpdate can be before we no longer trust "sensors are active".
-// Tune this to your polling interval (e.g. PLC scan rate / MQTT publish rate).
-const DATA_FRESHNESS_WINDOW_MS = 60 * 1000; // 60 seconds
-
-// Differential-pressure ("Delta P") critical thresholds, kept in
-// sync with the canonical values in utils/alertEngine.js's THRESHOLDS
-// table (the actual source of truth for alerting).
-//
-// Per client spec (2026-08-19 forwarded message, see alertEngine.js):
-//   - Stage 1 / Stage 2 Delta P (membrane differential pressure): a single
-//     shared trigger at 2.0 bar — below is normal, at/above is Critical.
-//   - Filter (media filter) Delta P is a DIFFERENT physical quantity on a
-//     much smaller scale (filter fouling, not membrane fouling) and keeps
-//     its own, separate threshold — it does NOT use the 2.0 bar figure.
-//     alertEngine.js has this at 0.40 bar critical / 0.30 bar warning; we
-//     mirror the critical value here.
-const MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR = 2.0; // Stage 1 & Stage 2 Delta P
-const FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR = 0.40;  // Filter (Media Filter) Delta P
-
-// System Recovery critical threshold, kept in sync with
-// alertEngine.js's THRESHOLDS['RO5-SystemRecovery'] (critical below 50%,
-// updated per client request 2026-08-29 — previously below 70%).
+const MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR = 2.0;
+const FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR = 0.40;
 const SYSTEM_RECOVERY_CRITICAL_PCT = 50;
-
-
 const TANK_EMPTY_THRESHOLD_PCT = 2;
-
-/* ============================================================
-  Derived metrics
-  ============================================================ */
 
 function getTrend(history, key, windowMs = 5 * 60 * 1000) {
   const arr = history[key];
@@ -142,11 +116,6 @@ function getTrend(history, key, windowMs = 5 * 60 * 1000) {
   return { pct, direction: pct > 0.5 ? 'up' : pct < -0.5 ? 'down' : 'flat' };
 }
 
-// computeHealthScore requires `hasFreshData`. Without live, recent
-// sensor data there is nothing to actually score — returning a
-// hardcoded 100 in that case was misleading (it made "system offline"
-// and "system running perfectly" look identical). Returns null when
-// health cannot be determined; callers must handle null explicitly.
 function computeHealthScore(alarms, hasFreshData) {
   if (!hasFreshData) return null;
   let score = 100;
@@ -166,10 +135,6 @@ const RANGE_OPTIONS = [
   { key: '30D', ms: 30 * 24 * 60 * 60 * 1000 },
 ];
 
-/* ============================================================
-  UI Components
-  ============================================================ */
-
 function SectionTitle({ children }) {
   return (
     <h2 style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 8 }}>
@@ -181,9 +146,6 @@ function SectionTitle({ children }) {
 function CircularGauge({ value, size = 88, strokeWidth = 7, color, label, statusLabel, noData = false }) {
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
-  // When noData is true, force the ring to render empty (0%) instead
-  // of whatever numeric value was passed in, so an unmeasured metric never
-  // visually looks like a full/healthy reading.
   const clamped = noData ? 0 : Math.max(0, Math.min(100, value));
   const offset = circumference * (1 - clamped / 100);
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
@@ -372,12 +334,6 @@ function RecentAlarmItem({ alarm }) {
   );
 }
 
-/* ============================================================
-  Production summary API (separate from live sensor context —
-  this is a periodic aggregate pulled straight from the backend,
-  not part of the real-time PLC stream)
-  ============================================================ */
-
 const api = {
   getProductionSummary: async () => {
     const token = localStorage.getItem('accessToken');
@@ -386,10 +342,6 @@ const api = {
     return response.json();
   },
 };
-
-/* ============================================================
-  Dashboard Component
-  ============================================================ */
 
 export function Dashboard({ onViewAllAlerts } = {}) {
   const {
@@ -414,7 +366,6 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     previousState: null,
   });
 
-  // Mobile detection
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 640);
     checkMobile();
@@ -443,7 +394,6 @@ export function Dashboard({ onViewAllAlerts } = {}) {
 
   const dailyProduction = productionSummary?.permeate?.daily ?? 0;
 
-  // ==================== ALARMS ====================
   const { activeAlerts: activeAlarmsList, counts: alertCounts } = useAlerts();
   const { isExpired } = useAuth();
 
@@ -452,35 +402,50 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     fetchProductionSummary();
   };
 
-  // ==================== VALUES ====================
   const feedFlow = getNumber('RO5-FEEDFlow');
   const permeateFlow = getNumber('RO5-Permeateflow');
   const concentrateFlow = getNumber('RO5-ConcetrateFlow');
-  const roPressure = getNumber('RO5-ROPressure');
+  const roPressureRaw = getNumber('RO5-ROPressure');
   const systemRecovery = getNumber('RO5-SystemRecovery');
   const pureWaterEC = getNumber('RO5-PureWaterEc');
   const stage1Delta = getNumber('RO5-Stage1Delta');
   const stage2Delta = getNumber('RO5-Stage2Delta');
   const filterDeltaP = getNumber('RO5-MediaFilterDeltaP');
-  const feedTankLevel = getNumber('RO5-FeedTankLevel');
+
   const systemOperation = getValue('RO5-SystemOperation');
   const systemMode = getValue('RO5-SystemMode');
   const dosingActive = getValue('RO5-AntiscalantDosingActive');
+  const feedPumpRaw = getValue('RO5-Feedpump');
+  const backwashRaw = getValue('RO5-PrefilterBackwash');
 
-  const feedPumpOn = isActive(getValue('RO5-Feedpump'));
-  const backwashOn = isActive(getValue('RO5-PrefilterBackwash'));
+  const feedPumpOn = isActive(feedPumpRaw);
+  const backwashOn = isActive(backwashRaw);
 
+  const feedTankLevel = getDisplayedTankLevelPct({
+    rawTankLevel: getValue('RO5-FeedTankLevel'),
+    lastUpdate,
+    systemOperationRaw: systemOperation,
+    feedPumpRaw,
+    freshnessWindowMs: DATA_FRESHNESS_WINDOW_MS,
+  });
 
-  const tankEmpty = feedTankLevel <= TANK_EMPTY_THRESHOLD_PCT;
+  const roPressure = getDisplayedPressure({
+    rawPressure: roPressureRaw,
+    lastUpdate,
+    systemOperationRaw: systemOperation,
+    feedPumpRaw,
+    freshnessWindowMs: DATA_FRESHNESS_WINDOW_MS,
+  });
 
-  // System operation - ON only when feed pump is running AND tank isn't empty
+  const tankHasData = feedTankLevel !== null;
+  const pressureHasData = roPressure !== null;
+
+  const tankEmpty = tankHasData && feedTankLevel <= TANK_EMPTY_THRESHOLD_PCT;
+
   const isSystemOn = feedPumpOn && !tankEmpty;
 
-  // Dosing is ON when antiscalant is active AND system is in FILTER mode
   const isDosingOn = dosingActive === 'ON' || isActive(dosingActive);
 
-  // Determine operation mode: tank-empty always forces OFF, regardless
-  // of what the feed pump status tag currently reports.
   const operationMode = tankEmpty
     ? 'OFF'
     : !feedPumpOn
@@ -489,15 +454,12 @@ export function Dashboard({ onViewAllAlerts } = {}) {
         ? 'BACKWASH'
         : 'FILTER';
 
-  // System mode display
   const isAutoMode = typeof systemMode === 'string' && systemMode.toLowerCase().trim() === 'auto';
   const systemModeDisplay = isAutoMode ? 'AUTO' : 'MANUAL';
 
-  // Equipment statuses
   const highPressurePumpOn = operationMode === 'FILTER' && isSystemOn;
   const dosingPumpOn = operationMode === 'FILTER' && isDosingOn;
 
-  // Operation mode display text and status
   const getOperationDisplay = () => {
     if (tankEmpty) {
       return { label: 'OFF', color: COLORS.danger, sub: 'Feed tank empty - system stopped' };
@@ -506,14 +468,13 @@ export function Dashboard({ onViewAllAlerts } = {}) {
       return { label: 'OFF', color: COLORS.danger, sub: 'System offline - Feed pump stopped' };
     } else if (operationMode === 'BACKWASH') {
       return { label: 'BACKWASH', color: COLORS.warning, sub: 'Backwash in progress - Feed pump only' };
-    } else { // FILTER
+    } else {
       return { label: 'FILTER', color: COLORS.success, sub: 'Filtering — all pumps running' };
     }
   };
 
   const opStatus = getOperationDisplay();
 
-  // Startup sequence status
   const getStartupStatus = () => {
     if (tankEmpty) {
       return { stage: 'Stopped', color: COLORS.danger, message: 'Feed tank empty - system stopped' };
@@ -535,7 +496,6 @@ export function Dashboard({ onViewAllAlerts } = {}) {
 
   const startupStatus = getStartupStatus();
 
-  // Track system state changes
   useEffect(() => {
     const newState = operationMode;
     if (newState !== systemStateHistory.currentState) {
@@ -547,29 +507,27 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     }
   }, [operationMode]);
 
-  // Detect if system is starting up
   const isStartingUp = feedPumpOn && !highPressurePumpOn && operationMode === 'FILTER';
 
   const dailyProdDisplay = summaryLoading ? '...' : Math.round(dailyProduction).toLocaleString();
   const activeSensors = Object.keys(sensorData).filter(key => sensorData[key]?.value !== undefined && sensorData[key]?.value !== null).length;
   const totalSensors = 15;
 
-  // Distinguish "socket/API connected" from "sensors actually
-  // reporting fresh data". `connected` alone was being used to claim
-  // "All systems online" even when 0/15 sensors had data.
   const isDataFresh = Boolean(
     lastUpdate && (Date.now() - new Date(lastUpdate).getTime()) < DATA_FRESHNESS_WINDOW_MS
   );
   const hasFreshData = connected && activeSensors > 0 && isDataFresh;
 
   const criticalAlarmsCount = alertCounts.Critical;
-  // Pass hasFreshData in; score is null (not 100) when there's
-  // nothing real to measure.
   const roHealthScore = computeHealthScore(activeAlarmsList, hasFreshData);
 
   const dataInitialized = Object.keys(sensorData).length > 0;
 
-  // ==================== LOADING / ERROR STATES ====================
+  const pressureBand = pressureHasData ? classifyPressure(roPressure, PRESSURE_BANDS_BAR) : null;
+  const tankBand = tankHasData ? classifyTankLevel(feedTankLevel) : null;
+  const pressureStatusTone = !pressureHasData ? 'muted' : pressureBand?.key === 'normal' ? 'normal' : pressureBand?.key === 'warning' ? 'warning' : 'danger';
+  const tankStatusTone = !tankHasData ? 'muted' : tankBand?.key === 'top' ? 'normal' : tankBand?.key === 'mid' ? 'warning' : 'danger';
+
   if (contextLoading && !dataInitialized) {
     return (
       <div className="flex items-center justify-center h-full p-8">
@@ -605,14 +563,9 @@ export function Dashboard({ onViewAllAlerts } = {}) {
 
   return (
     <div className="flex flex-col h-full overflow-auto" style={{ background: 'var(--background)' }}>
-
-      {/* Dashboard Content */}
       <div className="flex-1 overflow-auto p-3 sm:p-4">
 
         {/* Status Bar */}
-        {/* Banner background/border/text keys off hasFreshData too,
-            so "connected but no real data" no longer looks identical to
-            "connected and everything is reporting fine". */}
         <div className="flex items-center justify-between flex-wrap gap-2 mb-3 sm:mb-4 p-2 sm:p-3 rounded" style={{
           background: !connected ? 'rgba(239,68,68,0.05)' : hasFreshData ? 'rgba(34,197,94,0.05)' : 'rgba(245,158,11,0.05)',
           border: `1px solid ${!connected ? 'rgba(239,68,68,0.15)' : hasFreshData ? 'rgba(34,197,94,0.15)' : 'rgba(245,158,11,0.15)'}`
@@ -661,9 +614,8 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           </div>
         </div>
 
-        {/* ── Top status cards ── */}
+        {/* Top status cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-3 sm:mb-4">
-          {/* System Operation - now factors in tank-empty state, not just feed pump status */}
           <TopStatusCard
             icon={Settings} iconBg="rgba(34,197,94,0.12)" iconColor={isSystemOn ? COLORS.success : COLORS.danger}
             title="System Operation"
@@ -672,7 +624,6 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             sub={tankEmpty ? "Feed tank empty - system stopped" : isSystemOn ? "All systems running" : "System offline - Feed pump stopped"}
             subColor="var(--muted-foreground)"
           />
-          {/* System Mode - Shows FILTER/BACKWASH/OFF */}
           <TopStatusCard
             icon={Settings} iconBg="rgba(14,165,233,0.12)" iconColor={opStatus.color}
             title="System Mode"
@@ -683,7 +634,16 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           />
           <TopStatusCard
             icon={Droplets} iconBg="rgba(14,165,233,0.12)" iconColor={COLORS.primary}
-            title="Feed Tank Level" value="" gauge={<CircularGauge value={feedTankLevel} size={isMobile ? 56 : 64} strokeWidth={5} color={feedTankLevel > 30 ? COLORS.success : feedTankLevel > 0 ? COLORS.warning : COLORS.danger} label="" noData={!hasFreshData} />}
+            title="Feed Tank Level" value=""
+            gauge={<CircularGauge
+              value={tankHasData ? feedTankLevel : 0}
+              size={isMobile ? 56 : 64} strokeWidth={5}
+              color={!tankHasData ? COLORS.muted
+                   : feedTankLevel === 0 ? COLORS.danger
+                   : feedTankLevel > 30 ? COLORS.success
+                   : COLORS.warning}
+              label="" noData={!tankHasData}
+            />}
           />
           <TopStatusCard
             icon={AlertTriangle} iconBg="rgba(239,68,68,0.12)" iconColor={COLORS.danger}
@@ -692,7 +652,50 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           />
         </div>
 
-        {/* ── KPI grid ── */}
+        {/* Live Instruments: Pressure + Feed Tank (mock layout) */}
+        <div className="mb-3 sm:mb-4">
+          <SectionTitle>Live Instruments</SectionTitle>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+            <InstrumentCard
+              title="Pressure"
+              subtitle="System Pressure Gauge"
+              status={!pressureHasData ? 'No Data' : pressureBand?.label}
+              statusTone={pressureStatusTone}
+              legend={PRESSURE_BANDS_BAR.map(b => ({
+                label: b.label,
+                range: `${b.min.toFixed(1)} – ${b.max.toFixed(1)}`,
+                color: b.color,
+              }))}
+            >
+              <PressureGauge
+                value={pressureHasData ? roPressure : undefined}
+                unit={PRESSURE_UNIT_DISPLAY}
+                size={isMobile ? 150 : 180}
+                bands={PRESSURE_BANDS_BAR}
+              />
+            </InstrumentCard>
+
+            <InstrumentCard
+              title="Feed Tank"
+              subtitle="Tank Level"
+              status={!tankHasData ? 'No Data' : tankBand?.statusLabel}
+              statusTone={tankStatusTone}
+              legend={TANK_BANDS.map(b => ({
+                label: b.label,
+                range: `${b.min} – ${b.max}%`,
+                color: b.color,
+              }))}
+            >
+              <TankLevelGauge
+                value={tankHasData ? feedTankLevel : undefined}
+                width={isMobile ? 100 : 120}
+                height={isMobile ? 160 : 200}
+              />
+            </InstrumentCard>
+          </div>
+        </div>
+
+        {/* KPI grid */}
         <div className="mb-3 sm:mb-4">
           <SectionTitle>Key Performance Indicators</SectionTitle>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1.5 sm:gap-3">
@@ -702,31 +705,21 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             <KPICardV2 label="Permeate Flow" unit="m³/h" icon={Droplets} value={safeFormat(permeateFlow, 1)}
               color={permeateFlow > 30 ? COLORS.success : permeateFlow > 0 ? COLORS.warning : COLORS.danger}
               trend={getTrend(history, 'RO5-Permeateflow')} statusText={permeateFlow > 30 ? "Normal" : permeateFlow > 0 ? "Low" : "No flow"} statusOk={permeateFlow > 30} />
-            {/* Critical tier below SYSTEM_RECOVERY_CRITICAL_PCT (50%),
-                matching alertEngine.js's Low System Recovery alert. */}
             <KPICardV2 label="System Recovery" unit="%" icon={Activity} value={safeFormat(systemRecovery, 1)}
               color={systemRecovery > 0 && systemRecovery < SYSTEM_RECOVERY_CRITICAL_PCT ? COLORS.danger : systemRecovery > 75 ? COLORS.success : systemRecovery > 0 ? COLORS.warning : COLORS.primary}
               trend={getTrend(history, 'RO5-SystemRecovery')} statusText={systemRecovery > 0 && systemRecovery < SYSTEM_RECOVERY_CRITICAL_PCT ? "Critical" : systemRecovery > 75 ? "Good" : systemRecovery > 0 ? "Check" : "—"} statusOk={systemRecovery > 75} />
-            <KPICardV2 label="RO Pressure" unit="bar" icon={Gauge} value={safeFormat(roPressure, 1)}
-              color={roPressure >= 8 && roPressure <= 16 ? COLORS.success : roPressure > 16 ? COLORS.danger : roPressure > 0 ? COLORS.warning : COLORS.primary}
-              trend={getTrend(history, 'RO5-ROPressure')} statusText={roPressure >= 8 && roPressure <= 16 ? "Normal" : roPressure > 0 ? "Check" : "—"} statusOk={roPressure >= 8 && roPressure <= 16} />
+            <KPICardV2 label="RO Pressure" unit="bar" icon={Gauge} value={pressureHasData ? safeFormat(roPressure, 1) : '--'}
+              color={!pressureHasData ? COLORS.muted : roPressure >= 8 && roPressure <= 16 ? COLORS.success : roPressure > 16 ? COLORS.danger : roPressure > 0 ? COLORS.warning : COLORS.primary}
+              trend={getTrend(history, 'RO5-ROPressure')} statusText={!pressureHasData ? 'No Data' : roPressure >= 8 && roPressure <= 16 ? "Normal" : roPressure > 0 ? "Check" : "—"} statusOk={pressureHasData && roPressure >= 8 && roPressure <= 16} />
             <KPICardV2 label="Concentrate Flow" unit="m³/h" icon={Activity} value={safeFormat(concentrateFlow, 1)}
               color={concentrateFlow > 15 ? COLORS.success : COLORS.warning}
               trend={getTrend(history, 'RO5-ConcetrateFlow')} statusText={concentrateFlow > 15 ? "Normal" : "Low"} statusOk={concentrateFlow > 15} />
-            {/* Filter Delta P uses its own threshold (0.40 bar
-                critical), matching alertEngine.js's THRESHOLDS table for
-                RO5-MediaFilterDeltaP — NOT the 2.0 bar membrane threshold. */}
             <KPICardV2 label="Filter Delta P" unit="bar" icon={Filter} value={safeFormat(filterDeltaP, 2)}
               color={filterDeltaP >= FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? COLORS.danger : filterDeltaP > 0 ? COLORS.success : COLORS.primary}
               trend={getTrend(history, 'RO5-MediaFilterDeltaP')} statusText={filterDeltaP >= FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? "Critical" : filterDeltaP > 0 ? "Normal" : "—"} statusOk={filterDeltaP < FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR && filterDeltaP > 0} />
-            {/* Stage 1 Delta P — membrane differential pressure,
-                critical at/above 2.0 bar per client spec, matching
-                alertEngine.js's THRESHOLDS['RO5-Stage1Delta']. */}
             <KPICardV2 label="Stage 1 Delta P" unit="bar" icon={Zap} value={safeFormat(stage1Delta, 2)}
               color={stage1Delta >= MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? COLORS.danger : stage1Delta > 0 ? COLORS.success : COLORS.primary}
               trend={getTrend(history, 'RO5-Stage1Delta')} statusText={stage1Delta >= MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? "Critical" : stage1Delta > 0 ? "Normal" : "—"} statusOk={stage1Delta < MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR && stage1Delta > 0} />
-            {/* Stage 2 Delta P — same membrane differential-pressure
-                rule, matching alertEngine.js's THRESHOLDS['RO5-Stage2Delta']. */}
             <KPICardV2 label="Stage 2 Delta P" unit="bar" icon={Zap} value={safeFormat(stage2Delta, 2)}
               color={stage2Delta >= MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? COLORS.danger : stage2Delta > 0 ? COLORS.success : COLORS.primary}
               trend={getTrend(history, 'RO5-Stage2Delta')} statusText={stage2Delta >= MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? "Critical" : stage2Delta > 0 ? "Normal" : "—"} statusOk={stage2Delta < MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR && stage2Delta > 0} />
@@ -739,7 +732,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           </div>
         </div>
 
-        {/* ── Performance Trends using LiveTrendChart ── */}
+        {/* Performance Trends + System Status */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4 mb-3 sm:mb-4">
           <div className="lg:col-span-2 rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
             <LiveTrendChart
@@ -749,19 +742,16 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             />
           </div>
 
-          {/* System Status panel - Enhanced */}
           <div className="flex flex-col gap-3">
             <div className="rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
               <SectionTitle>System Status</SectionTitle>
 
-              {/* Startup Sequence Timeline */}
               <PumpStartupSequence
                 feedPumpOn={feedPumpOn}
                 highPressurePumpOn={highPressurePumpOn}
                 dosingPumpOn={dosingPumpOn}
               />
 
-              {/* Startup Status Message */}
               <div style={{
                 marginTop: 8,
                 padding: '6px 12px',
@@ -776,7 +766,6 @@ export function Dashboard({ onViewAllAlerts } = {}) {
                 {startupStatus.message}
               </div>
 
-              {/* Startup Delay Indicator */}
               {isStartingUp && (
                 <div style={{
                   marginTop: 4,
@@ -796,7 +785,6 @@ export function Dashboard({ onViewAllAlerts } = {}) {
                 </div>
               )}
 
-              {/* State change timestamp */}
               {systemStateHistory.lastChanged && (
                 <div style={{
                   fontSize: 8,
@@ -810,18 +798,17 @@ export function Dashboard({ onViewAllAlerts } = {}) {
                 </div>
               )}
 
-              {/* Gauges */}
               <div className="flex justify-around" style={{ marginTop: 8 }}>
                 <CircularGauge
-                  value={feedTankLevel}
-                  color={feedTankLevel > 30 ? COLORS.success : COLORS.warning}
+                  value={tankHasData ? feedTankLevel : 0}
+                  color={!tankHasData ? COLORS.muted
+                       : feedTankLevel === 0 ? COLORS.danger
+                       : feedTankLevel > 30 ? COLORS.success
+                       : COLORS.warning}
                   label="Feed Tank"
-                  statusLabel={!hasFreshData ? "No Data" : tankEmpty ? "Empty" : feedTankLevel > 30 ? "Normal" : "Low"}
-                  noData={!hasFreshData}
+                  statusLabel={!tankHasData ? "No Data" : tankEmpty ? "Empty" : feedTankLevel > 30 ? "Normal" : "Low"}
+                  noData={!tankHasData}
                 />
-                {/* Critical (danger, red) state below
-                    SYSTEM_RECOVERY_CRITICAL_PCT (50%), matching
-                    alertEngine.js's Low System Recovery alert. */}
                 <CircularGauge
                   value={systemRecovery}
                   color={systemRecovery > 0 && systemRecovery < SYSTEM_RECOVERY_CRITICAL_PCT ? COLORS.danger : systemRecovery > 75 ? COLORS.success : COLORS.warning}
@@ -829,10 +816,6 @@ export function Dashboard({ onViewAllAlerts } = {}) {
                   statusLabel={!hasFreshData ? "No Data" : systemRecovery > 0 && systemRecovery < SYSTEM_RECOVERY_CRITICAL_PCT ? "Critical" : systemRecovery > 75 ? "Good" : "Check"}
                   noData={!hasFreshData}
                 />
-                {/* RO Health uses roHealthScore, which is null
-                    (rendered as "No Data", empty gray ring) whenever the
-                    system has no fresh sensor data — instead of always
-                    showing a hardcoded 100% "Excellent". */}
                 <CircularGauge
                   value={roHealthScore ?? 0}
                   color={roHealthScore === null ? COLORS.muted : roHealthScore > 80 ? COLORS.success : roHealthScore > 50 ? COLORS.warning : COLORS.danger}
@@ -842,7 +825,6 @@ export function Dashboard({ onViewAllAlerts } = {}) {
                 />
               </div>
 
-              {/* Equipment Status with flow values */}
               <div style={{ marginTop: 12 }}>
                 <SectionTitle>Equipment Status</SectionTitle>
                 <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
@@ -850,7 +832,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
                     icon={Wrench}
                     label="High Pressure Pump"
                     state={highPressurePumpOn ? 'on' : 'off'}
-                    value={roPressure}
+                    value={pressureHasData ? roPressure : 0}
                     unit="bar"
                   />
                   <EquipmentStatusItem
@@ -876,7 +858,6 @@ export function Dashboard({ onViewAllAlerts } = {}) {
               </div>
             </div>
 
-            {/* Alarms Panel */}
             <div id="alarms-panel" className="rounded-lg p-3 sm:p-4 flex flex-col gap-2" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
               <div className="flex items-center justify-between">
                 <SectionTitle>Recent Alarms</SectionTitle>
@@ -898,7 +879,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           </div>
         </div>
 
-        {/* ── Advanced Charts Row ── */}
+        {/* Sensor selection + radar */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 mb-3 sm:mb-4">
           <div className="mb-3 sm:mb-4">
             <div className="rounded-lg p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
@@ -936,14 +917,14 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           <SystemHealthRadar data={sensorData} />
         </div>
 
-        {/* ── Flow balance, distribution charts ── */}
+        {/* Flow balance + distributions */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-3 sm:mb-4">
           <FlowBalanceChart data={sensorData} />
           <DistributionHistogram data={{ ...sensorData, history }} sensorKey="RO5-ROPressure" />
           <DistributionHistogram data={{ ...sensorData, history }} sensorKey="RO5-FEEDFlow" />
         </div>
 
-        {/* ── Footer ── */}
+        {/* Footer */}
         <div style={{
           textAlign: "center",
           padding: "12px 0",

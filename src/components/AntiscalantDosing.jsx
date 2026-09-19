@@ -1,8 +1,4 @@
 // components/AntiscalantDosing.jsx - FULLY MOBILE RESPONSIVE
-// FIX: Dosing consumption is now calculated from actual pump ON-time at a
-// fixed volumetric rate (2.64 ml/min), not from permeate flow. Flow rate has
-// no bearing on how much a positive-displacement dosing pump discharges;
-// only "is it running" and "for how long" matter.
 
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import {
@@ -18,12 +14,9 @@ import {
 import { useData } from "../contexts/DataContext";
 import { format, subHours, subDays, startOfDay, subMonths } from 'date-fns';
 
-// ===================== CONSTANTS =====================
-const DOSING_RATE_ML_MIN = 2.64;         // pump output while ON, ml/min
-const ANTISCALANT_DENSITY_KG_PER_L = 1.0; // adjust to match product datasheet
+const DOSING_RATE_ML_MIN = 2.64;
 const STORAGE_KEY = 'antiscalant_dosing_totals_v1';
 
-// ===================== HELPERS =====================
 function toBool(raw) {
   if (raw === true || raw === false) return raw;
   if (raw === null || raw === undefined) return false;
@@ -57,11 +50,9 @@ function saveStoredTotals(data) {
   try {
     window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(data));
   } catch {
-    // storage unavailable — accumulator still works in-memory for this session
   }
 }
 
-// ===================== CUSTOM TOOLTIP =====================
 const CustomTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
   return (
@@ -96,7 +87,6 @@ const CustomTooltip = ({ active, payload, label }) => {
   );
 };
 
-// ===================== METRIC CARD =====================
 function MetricCard({ label, value, unit, color, sub, trend, icon: Icon, onClick, isMobile }) {
   const TrendIcon = trend > 0 ? TrendingUp : trend < 0 ? TrendingDown : null;
   const trendColor = trend > 0 ? "#22c55e" : trend < 0 ? "#ef4444" : "var(--muted-foreground)";
@@ -158,7 +148,6 @@ function MetricCard({ label, value, unit, color, sub, trend, icon: Icon, onClick
   );
 }
 
-// ===================== STATUS BADGE =====================
 function StatusBadge({ isActive, size = 'md', isMobile }) {
   const sizeMap = {
     sm: { dot: 5, text: 8, padding: '2px 6px' },
@@ -203,7 +192,6 @@ function StatusBadge({ isActive, size = 'md', isMobile }) {
   );
 }
 
-// ===================== MAIN COMPONENT =====================
 export function AntiscalantDosing() {
   const { sensorData, getValue, getHistory, lastUpdate, connected } = useData();
   const [timeRange, setTimeRange] = useState('24h');
@@ -211,7 +199,6 @@ export function AntiscalantDosing() {
   const [selectedMetric, setSelectedMetric] = useState(null);
   const [isMobile, setIsMobile] = useState(false);
 
-  // Mobile detection
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
     checkMobile();
@@ -219,7 +206,6 @@ export function AntiscalantDosing() {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // ===================== GET REAL DATA =====================
   const feedFlow = toNum(getValue('RO5-FEEDFlow'));
   const permeateFlow = toNum(getValue('RO5-Permeateflow'));
   const recovery = toNum(getValue('RO5-SystemRecovery'));
@@ -229,11 +215,6 @@ export function AntiscalantDosing() {
   const dosingStatusRaw = getValue('RO5-AntiscalantDosingActive');
   const isDosingActive = toBool(dosingStatusRaw);
 
-  // ===================== VOLUMETRIC DOSING ACCUMULATOR =====================
-  // Ticks every second in real time. As long as isDosingActive is true, it
-  // adds (rate_ml_per_min / 60) ml for each second elapsed — i.e. exactly
-  // 2.64 ml every 60 ticks, matching the pump's real discharge rate.
-  // Persisted to localStorage so a page refresh doesn't lose today's total.
   const [dosedTodayMl, setDosedTodayMl] = useState(() => {
     const stored = loadStoredTotals();
     const today = format(new Date(), 'yyyy-MM-dd');
@@ -249,7 +230,6 @@ export function AntiscalantDosing() {
 
       setCurrentDay(prevDay => {
         if (todayStr !== prevDay) {
-          // New day: reset the running total, don't carry it over
           setDosedTodayMl(0);
           saveStoredTotals({ day: todayStr, mlToday: 0 });
           return todayStr;
@@ -269,31 +249,24 @@ export function AntiscalantDosing() {
     return () => clearInterval(interval);
   }, []);
 
-  // Rate shown on the "Dosing Rate" card — the pump's instantaneous rate,
-  // zero when the pump is off, expressed in ml/min for clarity.
   const dosingRateMlMin = isDosingActive ? DOSING_RATE_ML_MIN : 0;
 
-  // ===================== CONSUMPTION FIGURES =====================
-  // dailyConsumption = the REAL accumulated total for today so far (kg)
   const dailyConsumptionL = dosedTodayMl / 1000;
-  const dailyConsumption = dailyConsumptionL * ANTISCALANT_DENSITY_KG_PER_L;
 
-  // Projected figures assume continuous 24/7 operation at the dosing rate —
-  // used only for forward-looking week/month/year estimates, not as a
-  // replacement for the actual running total above.
-  const projectedDailyConsumption = (DOSING_RATE_ML_MIN * 60 * 24 / 1000) * ANTISCALANT_DENSITY_KG_PER_L;
-  const weeklyConsumption = projectedDailyConsumption * 7;
-  const monthlyConsumption = projectedDailyConsumption * 30;
-  const yearlyConsumption = projectedDailyConsumption * 365;
+  const projectedDailyConsumptionL = (DOSING_RATE_ML_MIN * 60 * 24) / 1000;
+  const weeklyConsumptionL = projectedDailyConsumptionL * 7;
+  const monthlyConsumptionL = projectedDailyConsumptionL * 30;
+  const yearlyConsumptionL = projectedDailyConsumptionL * 365;
 
   const initialStock = 500;
   const daysSinceLastRefill = 15;
-  const currentStock = Math.max(0, initialStock - projectedDailyConsumption * daysSinceLastRefill);
-  const daysRemaining = projectedDailyConsumption > 0 ? Math.floor(currentStock / projectedDailyConsumption) : Infinity;
+  const currentStock = Math.max(0, initialStock - projectedDailyConsumptionL * daysSinceLastRefill);
+  const daysRemaining = projectedDailyConsumptionL > 0
+    ? Math.floor(currentStock / projectedDailyConsumptionL)
+    : Infinity;
 
   const efficiency = Math.min(100, 82 + (recovery / 100) * 18);
 
-  // ===================== HISTORY DATA =====================
   const feedHistory = getHistory('RO5-FEEDFlow');
 
   const hourlyDosingData = useMemo(() => {
@@ -336,24 +309,24 @@ export function AntiscalantDosing() {
     })).sort((a, b) => a.hour.localeCompare(b.hour));
   }, [feedHistory, timeRange, isDosingActive, feedFlow]);
 
-  // Monthly consumption data
   const monthlyConsumptionData = useMemo(() => {
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const currentMonth = new Date().getMonth();
     return Array.from({ length: 12 }, (_, i) => {
       const monthIndex = (currentMonth - 11 + i + 12) % 12;
       const isCurrentMonth = i === 11;
-      const baseConsumption = isCurrentMonth ? monthlyConsumption : monthlyConsumption * (0.7 + Math.random() * 0.6);
+      const baseConsumption = isCurrentMonth
+        ? monthlyConsumptionL
+        : monthlyConsumptionL * (0.7 + Math.random() * 0.6);
       return {
         month: months[monthIndex],
         consumption: baseConsumption,
-        target: monthlyConsumption * 1.1,
+        target: monthlyConsumptionL * 1.1,
         isCurrent: isCurrentMonth
       };
     });
-  }, [monthlyConsumption]);
+  }, [monthlyConsumptionL]);
 
-  // ===================== ALERTS =====================
   const alerts = useMemo(() => {
     const list = [];
 
@@ -402,8 +375,8 @@ export function AntiscalantDosing() {
         type: 'Low Chemical Stock',
         description: 'Chemical stock is critically low',
         equipment: 'Tank A',
-        value: `${Math.round(currentStock)} kg`,
-        threshold: '50 kg',
+        value: `${Math.round(currentStock)} L`,
+        threshold: '50 L',
         severity: 'critical',
         time: new Date().toISOString()
       });
@@ -431,7 +404,6 @@ export function AntiscalantDosing() {
   return (
     <div className="flex flex-col gap-3 sm:gap-4 p-2 sm:p-4 overflow-auto h-full" style={{ scrollbarWidth: "none" }}>
 
-      {/* ===================== HEADER ===================== */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
           <h2 style={{
@@ -483,7 +455,6 @@ export function AntiscalantDosing() {
         </div>
       </div>
 
-      {/* ===================== ALERTS BAR ===================== */}
       {alerts.length > 0 && showAlerts && (
         <div className="flex flex-col gap-2">
           {alerts.slice(0, isMobile ? 2 : 5).map((a) => (
@@ -547,7 +518,6 @@ export function AntiscalantDosing() {
         </div>
       )}
 
-      {/* ===================== METRICS GRID ===================== */}
       <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(auto-fit, minmax(180px, 1fr))" }}>
         <MetricCard
           label="Dosing Rate"
@@ -560,8 +530,8 @@ export function AntiscalantDosing() {
         />
         <MetricCard
           label="Dosed Today"
-          value={dailyConsumption.toFixed(3)}
-          unit="kg"
+          value={dailyConsumptionL.toFixed(3)}
+          unit="L"
           color="#0ea5e9"
           icon={Droplet}
           sub={`${dosedTodayMl.toFixed(0)} ml accumulated`}
@@ -570,7 +540,7 @@ export function AntiscalantDosing() {
         <MetricCard
           label="Chemical Stock"
           value={Math.round(currentStock)}
-          unit="kg"
+          unit="L"
           color={currentStock < 50 ? "#ef4444" : currentStock < 100 ? "#eab308" : "#22c55e"}
           icon={Info}
           sub={Number.isFinite(daysRemaining) ? `${daysRemaining} days` : 'Full'}
@@ -587,11 +557,11 @@ export function AntiscalantDosing() {
         />
         <MetricCard
           label="Monthly Usage (proj.)"
-          value={monthlyConsumption.toFixed(1)}
-          unit="kg"
+          value={monthlyConsumptionL.toFixed(1)}
+          unit="L"
           color="#06b6d4"
           icon={Calendar}
-          sub={`${yearlyConsumption.toFixed(0)} kg/year`}
+          sub={`${yearlyConsumptionL.toFixed(0)} L/year`}
           isMobile={isMobile}
         />
         <MetricCard
@@ -605,10 +575,8 @@ export function AntiscalantDosing() {
         />
       </div>
 
-      {/* ===================== CHARTS ROW ===================== */}
       <div className="grid gap-3 sm:gap-4" style={{ gridTemplateColumns: isMobile ? "1fr" : "1.5fr 1fr" }}>
 
-        {/* Dosing Rate Chart */}
         <div className="rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 gap-2">
             <span style={{
@@ -687,7 +655,6 @@ export function AntiscalantDosing() {
           </div>
         </div>
 
-        {/* Monthly Consumption Chart */}
         <div className="rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
           <div className="flex items-center justify-between mb-3">
             <span style={{
@@ -700,7 +667,7 @@ export function AntiscalantDosing() {
               Monthly Consumption (proj.)
             </span>
             <span style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>
-              kg
+              L
             </span>
           </div>
           <ResponsiveContainer width="100%" height={isMobile ? 160 : 200}>
@@ -725,10 +692,8 @@ export function AntiscalantDosing() {
         </div>
       </div>
 
-      {/* ===================== SECOND ROW CHARTS ===================== */}
       <div className="grid gap-3 sm:gap-4" style={{ gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr" }}>
 
-        {/* Feed Flow vs Permeate Flow */}
         <div className="rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
           <div className="flex items-center justify-between mb-3">
             <span style={{
@@ -766,7 +731,6 @@ export function AntiscalantDosing() {
           </div>
         </div>
 
-        {/* System Status */}
         <div className="rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
           <div className="flex items-center justify-between mb-3">
             <span style={{
@@ -849,7 +813,6 @@ export function AntiscalantDosing() {
         </div>
       </div>
 
-      {/* ===================== CONSUMPTION LOG TABLE ===================== */}
       <div className="rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
         <div style={{
           fontSize: isMobile ? 10 : 12,
@@ -890,13 +853,10 @@ export function AntiscalantDosing() {
                 for (let i = 0; i < count; i++) {
                   const date = subDays(now, i);
                   const isToday = i === 0;
-                  // For today, use the REAL accumulated total. For prior days
-                  // (no historical totalizer wired up yet), estimate from an
-                  // assumed run-time fraction so the table isn't empty.
-                  const assumedOnFractionOfDay = 0.9 + Math.random() * 0.1; // placeholder until historical totals are wired up
-                  const consumptionKg = isToday
-                    ? dailyConsumption
-                    : projectedDailyConsumption * assumedOnFractionOfDay;
+                  const assumedOnFractionOfDay = 0.9 + Math.random() * 0.1;
+                  const consumptionL = isToday
+                    ? dailyConsumptionL
+                    : projectedDailyConsumptionL * assumedOnFractionOfDay;
                   const onMinutes = isToday
                     ? dosedTodayMl / DOSING_RATE_ML_MIN
                     : 24 * 60 * assumedOnFractionOfDay;
@@ -905,7 +865,7 @@ export function AntiscalantDosing() {
                   records.push({
                     date: format(date, 'yyyy-MM-dd'),
                     rate: isToday ? dosingRateMlMin : DOSING_RATE_ML_MIN,
-                    consumption: consumptionKg,
+                    consumption: consumptionL,
                     onMinutes,
                     status: isToday ? (isDosingActive ? 'RUNNING' : 'STOPPED') : (isLow ? 'PARTIAL' : 'NORMAL'),
                     ok: isToday ? isDosingActive : !isLow
@@ -959,7 +919,7 @@ export function AntiscalantDosing() {
                         {r.rate.toFixed(2)} ml/min
                       </td>
                       <td style={{ padding: "8px 12px", fontFamily: "var(--font-mono)", color: "var(--foreground)", borderBottom: "1px solid var(--border)" }}>
-                        {r.consumption.toFixed(3)} kg
+                        {r.consumption.toFixed(3)} L
                       </td>
                       <td style={{ padding: "8px 12px", fontFamily: "var(--font-mono)", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>
                         {r.onMinutes.toFixed(0)} min
@@ -989,7 +949,6 @@ export function AntiscalantDosing() {
         </div>
       </div>
 
-      {/* ===================== SHOW ALERTS BUTTON ===================== */}
       {!showAlerts && alerts.length > 0 && (
         <button
           onClick={() => setShowAlerts(true)}
