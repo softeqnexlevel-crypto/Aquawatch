@@ -570,6 +570,45 @@ export function Dashboard({ onViewAllAlerts } = {}) {
 
   const renderOverviewTab = () => (
     <div className="flex flex-col gap-3 sm:gap-4">
+      
+      {/* Top Status Cards - RESTORED */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+        <TopStatusCard
+          icon={Settings} iconBg="rgba(34,197,94,0.12)" iconColor={isSystemOn ? COLORS.success : COLORS.danger}
+          title="System Operation"
+          value={isSystemOn ? "ON" : "OFF"}
+          valueColor={isSystemOn ? COLORS.success : COLORS.danger}
+          sub={tankEmpty ? "Feed tank empty - system stopped" : isSystemOn ? "All systems running" : "System offline - Feed pump stopped"}
+          subColor="var(--muted-foreground)"
+        />
+        <TopStatusCard
+          icon={Settings} iconBg="rgba(14,165,233,0.12)" iconColor={opStatus.color}
+          title="System Mode"
+          value={opStatus.label}
+          valueColor={opStatus.color}
+          sub={opStatus.sub}
+          subColor="var(--muted-foreground)"
+        />
+        <TopStatusCard
+          icon={Droplets} iconBg="rgba(14,165,233,0.12)" iconColor={COLORS.primary}
+          title="Feed Tank Level" value=""
+          gauge={<CircularGauge
+            value={tankHasData ? feedTankLevel : 0}
+            size={isMobile ? 56 : 64} strokeWidth={5}
+            color={!tankHasData ? COLORS.muted
+                 : feedTankLevel === 0 ? COLORS.danger
+                 : feedTankLevel > 30 ? COLORS.success
+                 : COLORS.warning}
+            label="" noData={!tankHasData}
+          />}
+        />
+        <TopStatusCard
+          icon={AlertTriangle} iconBg="rgba(239,68,68,0.12)" iconColor={COLORS.danger}
+          title="Active Alarms" value={activeAlarmsList.length} valueColor={activeAlarmsList.length > 0 ? COLORS.danger : COLORS.success}
+          sub={criticalAlarmsCount > 0 ? `${criticalAlarmsCount} Critical` : 'All clear'} subColor={criticalAlarmsCount > 0 ? COLORS.danger : COLORS.success}
+        />
+      </div>
+
       {/* Live Instruments: Pressure + Feed Tank */}
       <div>
         <SectionTitle>Live Instruments</SectionTitle>
