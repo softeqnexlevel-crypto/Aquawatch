@@ -4,6 +4,7 @@ import { useData } from "../contexts/DataContext";
 import { useAlerts } from "../contexts/AlertsContext";
 import { useAuth } from "../contexts/AuthContext";
 import { MQTT_ALARMS } from "../utils/alertEngine";
+import PowerProblemImpact from "./PowerProblemImpact";
 
 const severityColors = {
   Critical: { bg: "rgba(239,68,68,0.08)", border: "rgba(239,68,68,0.3)", text: "#ef4444", dot: "#ef4444" },
@@ -16,15 +17,15 @@ const severityColors = {
 const ALERT_REFERENCE = [
   // Sensor threshold alerts
   { type: "High RO Pressure", threshold: "> 16 bar", severity: "Critical", source: "Sensor" },
-  { type: "Low RO Pressure", threshold: "< 10 bar", severity: "High", source: "Sensor" },
+  // Only raised while the pumps are running (see GATED_ALERTS in AlertsContext.jsx)
+  { type: "Low RO Pressure", threshold: "< 10 bar, pumps running", severity: "High", source: "Sensor" },
   { type: "High Differential Pressure - Stage 1", threshold: "> 2.0 bar", severity: "Critical", source: "Sensor" },
   { type: "High Differential Pressure - Stage 2", threshold: "> 2.0 bar", severity: "Critical", source: "Sensor" },
   { type: "High Filter Delta P", threshold: "> 2.0 bar", severity: "Critical", source: "Sensor" },
-  { type: "High Filter Delta P", threshold: "> 2.0 bar", severity: "Critical", source: "Sensor" },
-  // FIX: Low System Recovery critical trigger moved from < 70% to < 50%
-  // per client request (2026-08-29), matching alertEngine.js's
-  // THRESHOLDS['RO5-SystemRecovery'].
-  { type: "Low System Recovery", threshold: "< 50%", severity: "Critical", source: "Sensor" },
+  // Low System Recovery critical trigger is < 50% per client request
+  // (2026-08-29), matching alertEngine.js's THRESHOLDS['RO5-SystemRecovery'].
+  // Now also needs the pumps running and 1 minute of continuous low reading.
+  { type: "Low System Recovery", threshold: "< 50% for 1 min, pumps running", severity: "Critical", source: "Sensor" },
   { type: "Low Feed Tank Level", threshold: "< 20%", severity: "Critical", source: "Sensor" },
   { type: "Low Feed Tank Level", threshold: "< 30%", severity: "Medium", source: "Sensor" },
   { type: "Low Feed Flow", threshold: "< 50 m³/h", severity: "High", source: "Sensor" },
@@ -40,10 +41,12 @@ const ALERT_REFERENCE = [
   { type: "Power Problem", threshold: "PLC Bit = ON", severity: "Critical", source: "PLC" },
 
   // Status alerts
-  { type: "Antiscalant Dosing Stopped", threshold: "Running required", severity: "High", source: "Status" },
   { type: "Low Permeate Production", threshold: "< 20 m³/h", severity: "Medium", source: "Status" },
   { type: "Mass Balance Error", threshold: "> 5 m³/h", severity: "Medium", source: "Status" },
 ];
+
+// How many history lines to draw at once (all events are still kept and saved)
+const HISTORY_VISIBLE = 200;
 
 // MQTT alarm icon mapping
 const getAlarmIcon = (alertId) => {
@@ -70,7 +73,7 @@ function formatHistoryLine(event) {
 
 export function AlertsCenter() {
   const { connected } = useData();
-  const { alerts, activeAlerts, acknowledgeAlert, clearAlert, clearAllAcknowledged, history } = useAlerts();
+  const { alerts, activeAlerts, acknowledgeAlert, clearAlert, clearAllAcknowledged, history, clearHistory } = useAlerts();
   const { isExpired } = useAuth();
 
   const [severityFilter, setSeverityFilter] = useState("All");
@@ -90,6 +93,12 @@ export function AlertsCenter() {
   };
 
   const acknowledgedCount = alerts.filter(a => a.status === 'Acknowledged').length;
+
+  function handleClearHistory() {
+    if (window.confirm(`Clear all ${history.length} saved alert history events? This also resets the Power Problem Impact graph and cannot be undone.`)) {
+      clearHistory();
+    }
+  }
 
   return (
     <div className="flex flex-col gap-4 p-4 overflow-auto h-full">
@@ -139,14 +148,33 @@ export function AlertsCenter() {
       {/* History panel */}
       {showHistory && (
         <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>
-            Alert History
+          <div className="flex items-center justify-between flex-wrap gap-2" style={{ marginBottom: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+              Alert History
+              <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, marginLeft: 8 }}>
+                {history.length > HISTORY_VISIBLE
+                  ? `showing latest ${HISTORY_VISIBLE} of ${history.length}`
+                  : `${history.length} event${history.length === 1 ? '' : 's'}`}
+                {' · '}saved until you clear it
+              </span>
+            </div>
+            {history.length > 0 && (
+              <button
+                onClick={handleClearHistory}
+                disabled={isExpired}
+                title={isExpired ? 'Upgrade your plan to clear history' : 'Permanently delete the saved alert history'}
+                className="flex items-center gap-1 px-2 py-1 rounded transition-colors"
+                style={{ fontSize: 9, fontWeight: 600, color: "#ef4444", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.25)", opacity: isExpired ? 0.5 : 1, cursor: isExpired ? 'not-allowed' : 'pointer' }}
+              >
+                <Trash2 size={10} /> Clear history
+              </button>
+            )}
           </div>
           {history.length === 0 ? (
-            <div style={{ fontSize: 11, color: "var(--muted-foreground)" }}>No events logged yet this session.</div>
+            <div style={{ fontSize: 11, color: "var(--muted-foreground)" }}>No events logged yet.</div>
           ) : (
             <div className="flex flex-col gap-1 max-h-[220px] overflow-auto">
-              {history.map(ev => (
+              {history.slice(0, HISTORY_VISIBLE).map(ev => (
                 <div key={ev.id} style={{ fontSize: 10.5, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>
                   {formatHistoryLine(ev)}
                 </div>
@@ -364,6 +392,9 @@ export function AlertsCenter() {
           </div>
         )}
       </div>
+
+      {/* Power problem impact graph (built from the saved alert history) */}
+      <PowerProblemImpact />
 
       {/* Alert types reference */}
       <div className="rounded p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
