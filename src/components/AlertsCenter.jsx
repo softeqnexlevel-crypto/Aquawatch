@@ -4,7 +4,7 @@ import { useData } from "../contexts/DataContext";
 import { useAlerts } from "../contexts/AlertsContext";
 import { useAuth } from "../contexts/AuthContext";
 import { MQTT_ALARMS } from "../utils/alertEngine";
-import PowerProblemImpact from "./PowerProblemImpact";
+import PowerProblemImpact from "../components/Powerproblemimpact";
 
 const severityColors = {
   Critical: { bg: "rgba(239,68,68,0.08)", border: "rgba(239,68,68,0.3)", text: "#ef4444", dot: "#ef4444" },
