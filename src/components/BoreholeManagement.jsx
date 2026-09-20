@@ -94,13 +94,10 @@ export function FeedTankManagement() {
   const feedTanks = useMemo(() => {
     const now = new Date();
 
-    // Only Tank A is a real sensor. B/C/D are derived placeholders.
-    // When system is OFF (scaledTankLevel === 0), ALL derived tanks are
-    // also 0 — no offsets, no cosmetic filler.
+    // Only Tank A is a real sensor. Flush Tank (B) is derived placeholder.
+    // When system is OFF (scaledTankLevel === 0), derived tank is also 0.
     const tankALevel = scaledTankLevel;
     const tankBLevel = scaledTankLevel === 0 ? 0 : Math.min(100, Math.max(0, scaledTankLevel * 0.85 + 2));
-    const tankCLevel = scaledTankLevel === 0 ? 0 : Math.min(100, Math.max(0, scaledTankLevel * 0.65 + 1));
-    const tankDLevel = scaledTankLevel === 0 ? 0 : Math.min(100, Math.max(0, scaledTankLevel * 0.45 + 0.5));
 
     const getStatus = (level, hasData) => {
       if (!hasData) return "Offline";
@@ -136,7 +133,7 @@ export function FeedTankManagement() {
       },
       {
         id: "FT-B",
-        name: "Secondary Feed Tank B",
+        name: "Flush Tank",
         location: "East Plant",
         status: getStatus(tankBLevel, tankHasData),
         level: tankBLevel,
@@ -148,36 +145,6 @@ export function FeedTankManagement() {
         health: getHealth(tankBLevel, tankHasData),
         lastMaintenance: format(subDays(now, 30), 'yyyy-MM-dd'),
         nextMaintenance: format(subDays(now, -20), 'yyyy-MM-dd'),
-      },
-      {
-        id: "FT-C",
-        name: "Reserve Feed Tank C",
-        location: "South Plant",
-        status: getStatus(tankCLevel, tankHasData),
-        level: tankCLevel,
-        capacity: 300,
-        volume: (tankCLevel / 100) * 300,
-        dailyConsumption: tankHasData ? feedFlow * 24 * 0.25 : 0,
-        monthlyConsumption: tankHasData ? feedFlow * 24 * 30 * 0.25 : 0,
-        runtimeHours: 14.8,
-        health: getHealth(tankCLevel, tankHasData),
-        lastMaintenance: format(subDays(now, 25), 'yyyy-MM-dd'),
-        nextMaintenance: format(subDays(now, -10), 'yyyy-MM-dd'),
-      },
-      {
-        id: "FT-D",
-        name: "Emergency Feed Tank D",
-        location: "West Plant",
-        status: getStatus(tankDLevel, tankHasData),
-        level: tankDLevel,
-        capacity: 200,
-        volume: (tankDLevel / 100) * 200,
-        dailyConsumption: tankHasData ? feedFlow * 24 * 0.15 : 0,
-        monthlyConsumption: tankHasData ? feedFlow * 24 * 30 * 0.15 : 0,
-        runtimeHours: 12.5,
-        health: getHealth(tankDLevel, tankHasData),
-        lastMaintenance: format(subDays(now, 50), 'yyyy-MM-dd'),
-        nextMaintenance: format(subDays(now, -5), 'yyyy-MM-dd'),
       }
     ];
   }, [scaledTankLevel, tankHasData, feedFlow, recovery, stage1Delta]);

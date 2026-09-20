@@ -3,8 +3,9 @@ import React, { useState, useEffect } from 'react';
 import {
   Droplets, Activity, FlaskConical, AlertTriangle,
   CheckCircle, Gauge, Zap, Filter, TrendingUp, TrendingDown,
-  Minus, RefreshCw, Power, Clock, AlertCircle, Settings,
-  User, ChevronDown, Wrench, Sun, ShieldCheck, Radio
+  Minus, RefreshCw, Power, AlertCircle, Settings,
+  Wrench, LayoutDashboard, LineChart as LineChartIcon, 
+  SlidersHorizontal, Bell
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
@@ -29,7 +30,6 @@ import {
   getDisplayedPressure,
   DATA_FRESHNESS_WINDOW_MS,
 } from './dashboardComponents/instrumentUtils';
-
 
 
 export const COLORS = {
@@ -134,6 +134,8 @@ const RANGE_OPTIONS = [
   { key: '7D', ms: 7 * 24 * 60 * 60 * 1000 },
   { key: '30D', ms: 30 * 24 * 60 * 60 * 1000 },
 ];
+
+// --- UI COMPONENTS ---
 
 function SectionTitle({ children }) {
   return (
@@ -334,6 +336,8 @@ function RecentAlarmItem({ alarm }) {
   );
 }
 
+// --- MAIN DASHBOARD ---
+
 const api = {
   getProductionSummary: async () => {
     const token = localStorage.getItem('accessToken');
@@ -356,6 +360,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     refresh,
   } = useData();
 
+  const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'system' | 'analytics'
   const [selectedSensors, setSelectedSensors] = useState(['RO5-Permeateflow']);
   const [isMobile, setIsMobile] = useState(false);
   const [productionSummary, setProductionSummary] = useState(null);
@@ -561,14 +566,300 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     );
   }
 
-  return (
-    <div className="flex flex-col h-full overflow-auto" style={{ background: 'var(--background)' }}>
-      <div className="flex-1 overflow-auto p-3 sm:p-4">
+  // --- RENDER TAB CONTENT ---
 
+  const renderOverviewTab = () => (
+    <div className="flex flex-col gap-3 sm:gap-4">
+      {/* Live Instruments: Pressure + Feed Tank */}
+      <div>
+        <SectionTitle>Live Instruments</SectionTitle>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+          <InstrumentCard
+            title="Pressure"
+            subtitle="System Pressure Gauge"
+            status={!pressureHasData ? 'No Data' : pressureBand?.label}
+            statusTone={pressureStatusTone}
+            legend={PRESSURE_BANDS_BAR.map(b => ({
+              label: b.label,
+              range: `${b.min.toFixed(1)} – ${b.max.toFixed(1)}`,
+              color: b.color,
+            }))}
+          >
+            <PressureGauge
+              value={pressureHasData ? roPressure : undefined}
+              unit={PRESSURE_UNIT_DISPLAY}
+              size={isMobile ? 150 : 180}
+              bands={PRESSURE_BANDS_BAR}
+            />
+          </InstrumentCard>
+
+          <InstrumentCard
+            title="Feed Tank"
+            subtitle="Tank Level"
+            status={!tankHasData ? 'No Data' : tankBand?.statusLabel}
+            statusTone={tankStatusTone}
+            legend={TANK_BANDS.map(b => ({
+              label: b.label,
+              range: `${b.min} – ${b.max}%`,
+              color: b.color,
+            }))}
+          >
+            <TankLevelGauge
+              value={tankHasData ? feedTankLevel : undefined}
+              width={isMobile ? 100 : 120}
+              height={isMobile ? 160 : 200}
+            />
+          </InstrumentCard>
+        </div>
+      </div>
+
+      {/* KPI grid */}
+      <div>
+        <SectionTitle>Key Performance Indicators</SectionTitle>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1.5 sm:gap-3">
+          <KPICardV2 label="Feed Flow" unit="m³/h" icon={Droplets} value={safeFormat(feedFlow, 1)}
+            color={feedFlow > 40 ? COLORS.success : feedFlow > 0 ? COLORS.warning : COLORS.danger}
+            trend={getTrend(history, 'RO5-FEEDFlow')} statusText={feedFlow > 40 ? "Normal" : feedFlow > 0 ? "Check" : "No flow"} statusOk={feedFlow > 40} />
+          <KPICardV2 label="Permeate Flow" unit="m³/h" icon={Droplets} value={safeFormat(permeateFlow, 1)}
+            color={permeateFlow > 30 ? COLORS.success : permeateFlow > 0 ? COLORS.warning : COLORS.danger}
+            trend={getTrend(history, 'RO5-Permeateflow')} statusText={permeateFlow > 30 ? "Normal" : permeateFlow > 0 ? "Low" : "No flow"} statusOk={permeateFlow > 30} />
+          <KPICardV2 label="System Recovery" unit="%" icon={Activity} value={safeFormat(systemRecovery, 1)}
+            color={systemRecovery > 0 && systemRecovery < SYSTEM_RECOVERY_CRITICAL_PCT ? COLORS.danger : systemRecovery > 75 ? COLORS.success : systemRecovery > 0 ? COLORS.warning : COLORS.primary}
+            trend={getTrend(history, 'RO5-SystemRecovery')} statusText={systemRecovery > 0 && systemRecovery < SYSTEM_RECOVERY_CRITICAL_PCT ? "Critical" : systemRecovery > 75 ? "Good" : systemRecovery > 0 ? "Check" : "—"} statusOk={systemRecovery > 75} />
+          <KPICardV2 label="RO Pressure" unit="bar" icon={Gauge} value={pressureHasData ? safeFormat(roPressure, 1) : '--'}
+            color={!pressureHasData ? COLORS.muted : roPressure >= 8 && roPressure <= 16 ? COLORS.success : roPressure > 16 ? COLORS.danger : roPressure > 0 ? COLORS.warning : COLORS.primary}
+            trend={getTrend(history, 'RO5-ROPressure')} statusText={!pressureHasData ? 'No Data' : roPressure >= 8 && roPressure <= 16 ? "Normal" : roPressure > 0 ? "Check" : "—"} statusOk={pressureHasData && roPressure >= 8 && roPressure <= 16} />
+          <KPICardV2 label="Concentrate Flow" unit="m³/h" icon={Activity} value={safeFormat(concentrateFlow, 1)}
+            color={concentrateFlow > 15 ? COLORS.success : COLORS.warning}
+            trend={getTrend(history, 'RO5-ConcetrateFlow')} statusText={concentrateFlow > 15 ? "Normal" : "Low"} statusOk={concentrateFlow > 15} />
+          <KPICardV2 label="Filter Delta P" unit="bar" icon={Filter} value={safeFormat(filterDeltaP, 2)}
+            color={filterDeltaP >= FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? COLORS.danger : filterDeltaP > 0 ? COLORS.success : COLORS.primary}
+            trend={getTrend(history, 'RO5-MediaFilterDeltaP')} statusText={filterDeltaP >= FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? "Critical" : filterDeltaP > 0 ? "Normal" : "—"} statusOk={filterDeltaP < FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR && filterDeltaP > 0} />
+          <KPICardV2 label="Stage 1 Delta P" unit="bar" icon={Zap} value={safeFormat(stage1Delta, 2)}
+            color={stage1Delta >= MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? COLORS.danger : stage1Delta > 0 ? COLORS.success : COLORS.primary}
+            trend={getTrend(history, 'RO5-Stage1Delta')} statusText={stage1Delta >= MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? "Critical" : stage1Delta > 0 ? "Normal" : "—"} statusOk={stage1Delta < MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR && stage1Delta > 0} />
+          <KPICardV2 label="Stage 2 Delta P" unit="bar" icon={Zap} value={safeFormat(stage2Delta, 2)}
+            color={stage2Delta >= MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? COLORS.danger : stage2Delta > 0 ? COLORS.success : COLORS.primary}
+            trend={getTrend(history, 'RO5-Stage2Delta')} statusText={stage2Delta >= MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? "Critical" : stage2Delta > 0 ? "Normal" : "—"} statusOk={stage2Delta < MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR && stage2Delta > 0} />
+          <KPICardV2 label="Product Water EC" unit="µS/cm" icon={FlaskConical} value={safeFormat(pureWaterEC, 0)}
+            color={pureWaterEC > 150 ? COLORS.danger : pureWaterEC > 0 ? COLORS.success : COLORS.primary}
+            trend={getTrend(history, 'RO5-PureWaterEc')} statusText={pureWaterEC > 150 ? "High" : pureWaterEC > 0 ? "Within limits" : "—"} statusOk={pureWaterEC <= 150 && pureWaterEC > 0} />
+          <KPICardV2 label="Daily Production" unit="m³" icon={TrendingUp} value={dailyProdDisplay}
+            color={dailyProduction > 0 ? COLORS.success : COLORS.primary}
+            trend={getTrend(history, 'RO5-Permeateflow', 60 * 60 * 1000)} statusText={summaryLoading ? "Loading" : `${safeFormat(permeateFlow, 1)} m³/h now`} statusOk={true} />
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderSystemTab = () => (
+    <div className="flex flex-col gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
+        {/* System Status */}
+        <div className="rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+          <SectionTitle>System Status</SectionTitle>
+
+          <PumpStartupSequence
+            feedPumpOn={feedPumpOn}
+            highPressurePumpOn={highPressurePumpOn}
+            dosingPumpOn={dosingPumpOn}
+          />
+
+          <div style={{
+            marginTop: 8,
+            padding: '6px 12px',
+            borderRadius: 4,
+            background: `${startupStatus.color}22`,
+            border: `1px solid ${startupStatus.color}40`,
+            fontSize: 10,
+            color: startupStatus.color,
+            fontWeight: 600,
+            textAlign: 'center'
+          }}>
+            {startupStatus.message}
+          </div>
+
+          {isStartingUp && (
+            <div style={{
+              marginTop: 4,
+              padding: '4px 12px',
+              borderRadius: 4,
+              background: 'rgba(245, 158, 11, 0.1)',
+              border: '1px solid rgba(245, 158, 11, 0.3)',
+              fontSize: 8,
+              color: COLORS.warning,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              justifyContent: 'center'
+            }}>
+              <RefreshCw size={10} className="animate-spin" />
+              Startup in progress... Waiting for pumps to come online
+            </div>
+          )}
+
+          {systemStateHistory.lastChanged && (
+            <div style={{
+              fontSize: 8,
+              color: 'var(--muted-foreground)',
+              marginTop: 6,
+              textAlign: 'center'
+            }}>
+              Last state change: {new Date(systemStateHistory.lastChanged).toLocaleTimeString()}
+              {systemStateHistory.previousState &&
+                ` (was ${systemStateHistory.previousState})`}
+            </div>
+          )}
+
+          <div className="flex justify-around" style={{ marginTop: 8 }}>
+            <CircularGauge
+              value={tankHasData ? feedTankLevel : 0}
+              color={!tankHasData ? COLORS.muted
+                   : feedTankLevel === 0 ? COLORS.danger
+                   : feedTankLevel > 30 ? COLORS.success
+                   : COLORS.warning}
+              label="Feed Tank"
+              statusLabel={!tankHasData ? "No Data" : tankEmpty ? "Empty" : feedTankLevel > 30 ? "Normal" : "Low"}
+              noData={!tankHasData}
+            />
+            <CircularGauge
+              value={systemRecovery}
+              color={systemRecovery > 0 && systemRecovery < SYSTEM_RECOVERY_CRITICAL_PCT ? COLORS.danger : systemRecovery > 75 ? COLORS.success : COLORS.warning}
+              label="Recovery"
+              statusLabel={!hasFreshData ? "No Data" : systemRecovery > 0 && systemRecovery < SYSTEM_RECOVERY_CRITICAL_PCT ? "Critical" : systemRecovery > 75 ? "Good" : "Check"}
+              noData={!hasFreshData}
+            />
+            <CircularGauge
+              value={roHealthScore ?? 0}
+              color={roHealthScore === null ? COLORS.muted : roHealthScore > 80 ? COLORS.success : roHealthScore > 50 ? COLORS.warning : COLORS.danger}
+              label="RO Health"
+              statusLabel={roHealthScore === null ? "No Data" : roHealthScore > 80 ? "Excellent" : roHealthScore > 50 ? "Fair" : "Poor"}
+              noData={roHealthScore === null}
+            />
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            <SectionTitle>Equipment Status</SectionTitle>
+            <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
+              <EquipmentStatusItem
+                icon={Wrench}
+                label="High Pressure Pump"
+                state={highPressurePumpOn ? 'on' : 'off'}
+                value={pressureHasData ? roPressure : 0}
+                unit="bar"
+              />
+              <EquipmentStatusItem
+                icon={Wrench}
+                label="Feed Pump"
+                state={feedPumpOn && !tankEmpty ? 'on' : 'off'}
+                value={feedFlow}
+                unit="m³/h"
+              />
+              <EquipmentStatusItem
+                icon={FlaskConical}
+                label="Dosing Pump"
+                state={dosingPumpOn ? 'on' : 'off'}
+              />
+              <EquipmentStatusItem
+                icon={Filter}
+                label="Prefilter"
+                state={backwashOn ? 'backwash' : 'filtering'}
+                value={filterDeltaP}
+                unit="bar"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Alarms */}
+        <div id="alarms-panel" className="rounded-lg p-3 sm:p-4 flex flex-col gap-2" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+          <div className="flex items-center justify-between">
+            <SectionTitle>Recent Alarms</SectionTitle>
+            <button
+              onClick={() => onViewAllAlerts ? onViewAllAlerts() : console.warn('Dashboard: no onViewAllAlerts handler was passed in')}
+              style={{ fontSize: 10.5, color: COLORS.primary, fontWeight: 600, cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}
+            >
+              View All →
+            </button>
+          </div>
+          <div className="flex flex-col gap-1.5 sm:gap-2 max-h-[300px] overflow-auto">
+            {activeAlarmsList.length > 0 ? activeAlarmsList.slice(0, isMobile ? 5 : 10).map(a => <RecentAlarmItem key={a.id} alarm={a} />) : (
+              <div className="flex items-center gap-2" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>
+                <CheckCircle size={13} style={{ color: COLORS.success }} /> All systems operating normally
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Sensor selection + radar */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
+        <div className="mb-3 sm:mb-4">
+          <div className="rounded-lg p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+            <span style={{ fontSize: isMobile ? 9 : 11, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 6, display: "block" }}>
+              Select Sensor for Comparison
+            </span>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? 4 : 8 }}>
+              {Object.keys(SENSOR_MAP).slice(0, isMobile ? 8 : 15).map(key => {
+                const sensor = SENSOR_MAP[key];
+                const isSelected = selectedSensors.includes(key);
+                return (
+                  <button
+                    key={key}
+                    onClick={() => setSelectedSensors([key])}
+                    style={{
+                      padding: isMobile ? '2px 8px' : '4px 12px',
+                      borderRadius: isMobile ? 8 : 12,
+                      background: isSelected ? sensor.color : 'var(--secondary)',
+                      color: isSelected ? 'white' : 'var(--muted-foreground)',
+                      border: isSelected ? `2px solid ${sensor.color}` : '1px solid var(--border)',
+                      fontSize: isMobile ? 8 : 10,
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                      fontWeight: isSelected ? 600 : 400,
+                      opacity: isSelected ? 1 : 0.7,
+                    }}
+                  >
+                    {isMobile ? sensor.shortName || sensor.label : sensor.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+        <SystemHealthRadar data={sensorData} />
+      </div>
+    </div>
+  );
+
+  const renderAnalyticsTab = () => (
+    <div className="flex flex-col gap-3 sm:gap-4">
+      {/* Live Trend Chart */}
+      <div className="rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+        <LiveTrendChart
+          data={{ ...sensorData, history }}
+          sensorKey={selectedSensors[0] || 'RO5-Permeateflow'}
+          height={isMobile ? 250 : 350}
+        />
+      </div>
+
+      {/* Flow balance + distributions */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+        <FlowBalanceChart data={sensorData} />
+        <DistributionHistogram data={{ ...sensorData, history }} sensorKey="RO5-ROPressure" />
+        <DistributionHistogram data={{ ...sensorData, history }} sensorKey="RO5-FEEDFlow" />
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--background)' }}>
+      {/* Sticky Header & Tabs */}
+      <div className="flex-shrink-0 sticky top-0 z-10" style={{ background: 'var(--background)', borderBottom: '1px solid var(--border)' }}>
         {/* Status Bar */}
-        <div className="flex items-center justify-between flex-wrap gap-2 mb-3 sm:mb-4 p-2 sm:p-3 rounded" style={{
+        <div className="flex items-center justify-between flex-wrap gap-2 p-2 sm:p-3" style={{
           background: !connected ? 'rgba(239,68,68,0.05)' : hasFreshData ? 'rgba(34,197,94,0.05)' : 'rgba(245,158,11,0.05)',
-          border: `1px solid ${!connected ? 'rgba(239,68,68,0.15)' : hasFreshData ? 'rgba(34,197,94,0.15)' : 'rgba(245,158,11,0.15)'}`
+          borderBottom: `1px solid ${!connected ? 'rgba(239,68,68,0.15)' : hasFreshData ? 'rgba(34,197,94,0.15)' : 'rgba(245,158,11,0.15)'}`
         }}>
           <div className="flex items-center gap-3 flex-wrap">
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -614,315 +905,57 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           </div>
         </div>
 
-        {/* Top status cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3 mb-3 sm:mb-4">
-          <TopStatusCard
-            icon={Settings} iconBg="rgba(34,197,94,0.12)" iconColor={isSystemOn ? COLORS.success : COLORS.danger}
-            title="System Operation"
-            value={isSystemOn ? "ON" : "OFF"}
-            valueColor={isSystemOn ? COLORS.success : COLORS.danger}
-            sub={tankEmpty ? "Feed tank empty - system stopped" : isSystemOn ? "All systems running" : "System offline - Feed pump stopped"}
-            subColor="var(--muted-foreground)"
-          />
-          <TopStatusCard
-            icon={Settings} iconBg="rgba(14,165,233,0.12)" iconColor={opStatus.color}
-            title="System Mode"
-            value={opStatus.label}
-            valueColor={opStatus.color}
-            sub={opStatus.sub}
-            subColor="var(--muted-foreground)"
-          />
-          <TopStatusCard
-            icon={Droplets} iconBg="rgba(14,165,233,0.12)" iconColor={COLORS.primary}
-            title="Feed Tank Level" value=""
-            gauge={<CircularGauge
-              value={tankHasData ? feedTankLevel : 0}
-              size={isMobile ? 56 : 64} strokeWidth={5}
-              color={!tankHasData ? COLORS.muted
-                   : feedTankLevel === 0 ? COLORS.danger
-                   : feedTankLevel > 30 ? COLORS.success
-                   : COLORS.warning}
-              label="" noData={!tankHasData}
-            />}
-          />
-          <TopStatusCard
-            icon={AlertTriangle} iconBg="rgba(239,68,68,0.12)" iconColor={COLORS.danger}
-            title="Active Alarms" value={activeAlarmsList.length} valueColor={activeAlarmsList.length > 0 ? COLORS.danger : COLORS.success}
-            sub={criticalAlarmsCount > 0 ? `${criticalAlarmsCount} Critical` : 'All clear'} subColor={criticalAlarmsCount > 0 ? COLORS.danger : COLORS.success}
-          />
-        </div>
-
-        {/* Live Instruments: Pressure + Feed Tank (mock layout) */}
-        <div className="mb-3 sm:mb-4">
-          <SectionTitle>Live Instruments</SectionTitle>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-            <InstrumentCard
-              title="Pressure"
-              subtitle="System Pressure Gauge"
-              status={!pressureHasData ? 'No Data' : pressureBand?.label}
-              statusTone={pressureStatusTone}
-              legend={PRESSURE_BANDS_BAR.map(b => ({
-                label: b.label,
-                range: `${b.min.toFixed(1)} – ${b.max.toFixed(1)}`,
-                color: b.color,
-              }))}
-            >
-              <PressureGauge
-                value={pressureHasData ? roPressure : undefined}
-                unit={PRESSURE_UNIT_DISPLAY}
-                size={isMobile ? 150 : 180}
-                bands={PRESSURE_BANDS_BAR}
-              />
-            </InstrumentCard>
-
-            <InstrumentCard
-              title="Feed Tank"
-              subtitle="Tank Level"
-              status={!tankHasData ? 'No Data' : tankBand?.statusLabel}
-              statusTone={tankStatusTone}
-              legend={TANK_BANDS.map(b => ({
-                label: b.label,
-                range: `${b.min} – ${b.max}%`,
-                color: b.color,
-              }))}
-            >
-              <TankLevelGauge
-                value={tankHasData ? feedTankLevel : undefined}
-                width={isMobile ? 100 : 120}
-                height={isMobile ? 160 : 200}
-              />
-            </InstrumentCard>
-          </div>
-        </div>
-
-        {/* KPI grid */}
-        <div className="mb-3 sm:mb-4">
-          <SectionTitle>Key Performance Indicators</SectionTitle>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1.5 sm:gap-3">
-            <KPICardV2 label="Feed Flow" unit="m³/h" icon={Droplets} value={safeFormat(feedFlow, 1)}
-              color={feedFlow > 40 ? COLORS.success : feedFlow > 0 ? COLORS.warning : COLORS.danger}
-              trend={getTrend(history, 'RO5-FEEDFlow')} statusText={feedFlow > 40 ? "Normal" : feedFlow > 0 ? "Check" : "No flow"} statusOk={feedFlow > 40} />
-            <KPICardV2 label="Permeate Flow" unit="m³/h" icon={Droplets} value={safeFormat(permeateFlow, 1)}
-              color={permeateFlow > 30 ? COLORS.success : permeateFlow > 0 ? COLORS.warning : COLORS.danger}
-              trend={getTrend(history, 'RO5-Permeateflow')} statusText={permeateFlow > 30 ? "Normal" : permeateFlow > 0 ? "Low" : "No flow"} statusOk={permeateFlow > 30} />
-            <KPICardV2 label="System Recovery" unit="%" icon={Activity} value={safeFormat(systemRecovery, 1)}
-              color={systemRecovery > 0 && systemRecovery < SYSTEM_RECOVERY_CRITICAL_PCT ? COLORS.danger : systemRecovery > 75 ? COLORS.success : systemRecovery > 0 ? COLORS.warning : COLORS.primary}
-              trend={getTrend(history, 'RO5-SystemRecovery')} statusText={systemRecovery > 0 && systemRecovery < SYSTEM_RECOVERY_CRITICAL_PCT ? "Critical" : systemRecovery > 75 ? "Good" : systemRecovery > 0 ? "Check" : "—"} statusOk={systemRecovery > 75} />
-            <KPICardV2 label="RO Pressure" unit="bar" icon={Gauge} value={pressureHasData ? safeFormat(roPressure, 1) : '--'}
-              color={!pressureHasData ? COLORS.muted : roPressure >= 8 && roPressure <= 16 ? COLORS.success : roPressure > 16 ? COLORS.danger : roPressure > 0 ? COLORS.warning : COLORS.primary}
-              trend={getTrend(history, 'RO5-ROPressure')} statusText={!pressureHasData ? 'No Data' : roPressure >= 8 && roPressure <= 16 ? "Normal" : roPressure > 0 ? "Check" : "—"} statusOk={pressureHasData && roPressure >= 8 && roPressure <= 16} />
-            <KPICardV2 label="Concentrate Flow" unit="m³/h" icon={Activity} value={safeFormat(concentrateFlow, 1)}
-              color={concentrateFlow > 15 ? COLORS.success : COLORS.warning}
-              trend={getTrend(history, 'RO5-ConcetrateFlow')} statusText={concentrateFlow > 15 ? "Normal" : "Low"} statusOk={concentrateFlow > 15} />
-            <KPICardV2 label="Filter Delta P" unit="bar" icon={Filter} value={safeFormat(filterDeltaP, 2)}
-              color={filterDeltaP >= FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? COLORS.danger : filterDeltaP > 0 ? COLORS.success : COLORS.primary}
-              trend={getTrend(history, 'RO5-MediaFilterDeltaP')} statusText={filterDeltaP >= FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? "Critical" : filterDeltaP > 0 ? "Normal" : "—"} statusOk={filterDeltaP < FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR && filterDeltaP > 0} />
-            <KPICardV2 label="Stage 1 Delta P" unit="bar" icon={Zap} value={safeFormat(stage1Delta, 2)}
-              color={stage1Delta >= MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? COLORS.danger : stage1Delta > 0 ? COLORS.success : COLORS.primary}
-              trend={getTrend(history, 'RO5-Stage1Delta')} statusText={stage1Delta >= MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? "Critical" : stage1Delta > 0 ? "Normal" : "—"} statusOk={stage1Delta < MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR && stage1Delta > 0} />
-            <KPICardV2 label="Stage 2 Delta P" unit="bar" icon={Zap} value={safeFormat(stage2Delta, 2)}
-              color={stage2Delta >= MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? COLORS.danger : stage2Delta > 0 ? COLORS.success : COLORS.primary}
-              trend={getTrend(history, 'RO5-Stage2Delta')} statusText={stage2Delta >= MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? "Critical" : stage2Delta > 0 ? "Normal" : "—"} statusOk={stage2Delta < MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR && stage2Delta > 0} />
-            <KPICardV2 label="Product Water EC" unit="µS/cm" icon={FlaskConical} value={safeFormat(pureWaterEC, 0)}
-              color={pureWaterEC > 150 ? COLORS.danger : pureWaterEC > 0 ? COLORS.success : COLORS.primary}
-              trend={getTrend(history, 'RO5-PureWaterEc')} statusText={pureWaterEC > 150 ? "High" : pureWaterEC > 0 ? "Within limits" : "—"} statusOk={pureWaterEC <= 150 && pureWaterEC > 0} />
-            <KPICardV2 label="Daily Production" unit="m³" icon={TrendingUp} value={dailyProdDisplay}
-              color={dailyProduction > 0 ? COLORS.success : COLORS.primary}
-              trend={getTrend(history, 'RO5-Permeateflow', 60 * 60 * 1000)} statusText={summaryLoading ? "Loading" : `${safeFormat(permeateFlow, 1)} m³/h now`} statusOk={true} />
-          </div>
-        </div>
-
-        {/* Performance Trends + System Status */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4 mb-3 sm:mb-4">
-          <div className="lg:col-span-2 rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-            <LiveTrendChart
-              data={{ ...sensorData, history }}
-              sensorKey={selectedSensors[0] || 'RO5-Permeateflow'}
-              height={isMobile ? 180 : 220}
-            />
-          </div>
-
-          <div className="flex flex-col gap-3">
-            <div className="rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-              <SectionTitle>System Status</SectionTitle>
-
-              <PumpStartupSequence
-                feedPumpOn={feedPumpOn}
-                highPressurePumpOn={highPressurePumpOn}
-                dosingPumpOn={dosingPumpOn}
-              />
-
-              <div style={{
-                marginTop: 8,
-                padding: '6px 12px',
-                borderRadius: 4,
-                background: `${startupStatus.color}22`,
-                border: `1px solid ${startupStatus.color}40`,
-                fontSize: 10,
-                color: startupStatus.color,
-                fontWeight: 600,
-                textAlign: 'center'
-              }}>
-                {startupStatus.message}
-              </div>
-
-              {isStartingUp && (
-                <div style={{
-                  marginTop: 4,
-                  padding: '4px 12px',
-                  borderRadius: 4,
-                  background: 'rgba(245, 158, 11, 0.1)',
-                  border: '1px solid rgba(245, 158, 11, 0.3)',
-                  fontSize: 8,
-                  color: COLORS.warning,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  justifyContent: 'center'
-                }}>
-                  <RefreshCw size={10} className="animate-spin" />
-                  Startup in progress... Waiting for pumps to come online
-                </div>
-              )}
-
-              {systemStateHistory.lastChanged && (
-                <div style={{
-                  fontSize: 8,
-                  color: 'var(--muted-foreground)',
-                  marginTop: 6,
-                  textAlign: 'center'
-                }}>
-                  Last state change: {new Date(systemStateHistory.lastChanged).toLocaleTimeString()}
-                  {systemStateHistory.previousState &&
-                    ` (was ${systemStateHistory.previousState})`}
-                </div>
-              )}
-
-              <div className="flex justify-around" style={{ marginTop: 8 }}>
-                <CircularGauge
-                  value={tankHasData ? feedTankLevel : 0}
-                  color={!tankHasData ? COLORS.muted
-                       : feedTankLevel === 0 ? COLORS.danger
-                       : feedTankLevel > 30 ? COLORS.success
-                       : COLORS.warning}
-                  label="Feed Tank"
-                  statusLabel={!tankHasData ? "No Data" : tankEmpty ? "Empty" : feedTankLevel > 30 ? "Normal" : "Low"}
-                  noData={!tankHasData}
-                />
-                <CircularGauge
-                  value={systemRecovery}
-                  color={systemRecovery > 0 && systemRecovery < SYSTEM_RECOVERY_CRITICAL_PCT ? COLORS.danger : systemRecovery > 75 ? COLORS.success : COLORS.warning}
-                  label="Recovery"
-                  statusLabel={!hasFreshData ? "No Data" : systemRecovery > 0 && systemRecovery < SYSTEM_RECOVERY_CRITICAL_PCT ? "Critical" : systemRecovery > 75 ? "Good" : "Check"}
-                  noData={!hasFreshData}
-                />
-                <CircularGauge
-                  value={roHealthScore ?? 0}
-                  color={roHealthScore === null ? COLORS.muted : roHealthScore > 80 ? COLORS.success : roHealthScore > 50 ? COLORS.warning : COLORS.danger}
-                  label="RO Health"
-                  statusLabel={roHealthScore === null ? "No Data" : roHealthScore > 80 ? "Excellent" : roHealthScore > 50 ? "Fair" : "Poor"}
-                  noData={roHealthScore === null}
-                />
-              </div>
-
-              <div style={{ marginTop: 12 }}>
-                <SectionTitle>Equipment Status</SectionTitle>
-                <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
-                  <EquipmentStatusItem
-                    icon={Wrench}
-                    label="High Pressure Pump"
-                    state={highPressurePumpOn ? 'on' : 'off'}
-                    value={pressureHasData ? roPressure : 0}
-                    unit="bar"
-                  />
-                  <EquipmentStatusItem
-                    icon={Wrench}
-                    label="Feed Pump"
-                    state={feedPumpOn && !tankEmpty ? 'on' : 'off'}
-                    value={feedFlow}
-                    unit="m³/h"
-                  />
-                  <EquipmentStatusItem
-                    icon={FlaskConical}
-                    label="Dosing Pump"
-                    state={dosingPumpOn ? 'on' : 'off'}
-                  />
-                  <EquipmentStatusItem
-                    icon={Filter}
-                    label="Prefilter"
-                    state={backwashOn ? 'backwash' : 'filtering'}
-                    value={filterDeltaP}
-                    unit="bar"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div id="alarms-panel" className="rounded-lg p-3 sm:p-4 flex flex-col gap-2" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-              <div className="flex items-center justify-between">
-                <SectionTitle>Recent Alarms</SectionTitle>
-                <button
-                  onClick={() => onViewAllAlerts ? onViewAllAlerts() : console.warn('Dashboard: no onViewAllAlerts handler was passed in')}
-                  style={{ fontSize: 10.5, color: COLORS.primary, fontWeight: 600, cursor: 'pointer', background: 'none', border: 'none', padding: 0 }}
-                >
-                  View All →
-                </button>
-              </div>
-              <div className="flex flex-col gap-1.5 sm:gap-2 max-h-[150px] overflow-auto">
-                {activeAlarmsList.length > 0 ? activeAlarmsList.slice(0, isMobile ? 2 : 4).map(a => <RecentAlarmItem key={a.id} alarm={a} />) : (
-                  <div className="flex items-center gap-2" style={{ color: 'var(--muted-foreground)', fontSize: 11 }}>
-                    <CheckCircle size={13} style={{ color: COLORS.success }} /> All systems operating normally
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Sensor selection + radar */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 mb-3 sm:mb-4">
-          <div className="mb-3 sm:mb-4">
-            <div className="rounded-lg p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-              <span style={{ fontSize: isMobile ? 9 : 11, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 6, display: "block" }}>
-                Select Sensor for Comparison
+        {/* Tab Navigation */}
+        <div className="flex overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+          <button
+            onClick={() => setActiveTab('overview')}
+            style={{
+              flex: 1, padding: '10px 16px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              background: activeTab === 'overview' ? 'var(--card)' : 'transparent',
+              color: activeTab === 'overview' ? COLORS.primary : 'var(--muted-foreground)',
+              border: 'none', borderBottom: activeTab === 'overview' ? `2px solid ${COLORS.primary}` : '2px solid transparent',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, whiteSpace: 'nowrap'
+            }}
+          >
+            <LayoutDashboard size={14} /> Overview
+          </button>
+          <button
+            onClick={() => setActiveTab('system')}
+            style={{
+              flex: 1, padding: '10px 16px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              background: activeTab === 'system' ? 'var(--card)' : 'transparent',
+              color: activeTab === 'system' ? COLORS.primary : 'var(--muted-foreground)',
+              border: 'none', borderBottom: activeTab === 'system' ? `2px solid ${COLORS.primary}` : '2px solid transparent',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, whiteSpace: 'nowrap'
+            }}
+          >
+            <SlidersHorizontal size={14} /> System & Alerts
+            {activeAlarmsList.length > 0 && (
+              <span style={{ background: COLORS.danger, color: 'white', borderRadius: 10, padding: '1px 6px', fontSize: 9, fontWeight: 700 }}>
+                {activeAlarmsList.length}
               </span>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? 4 : 8 }}>
-                {Object.keys(SENSOR_MAP).slice(0, isMobile ? 8 : 15).map(key => {
-                  const sensor = SENSOR_MAP[key];
-                  const isSelected = selectedSensors.includes(key);
-                  return (
-                    <button
-                      key={key}
-                      onClick={() => setSelectedSensors([key])}
-                      style={{
-                        padding: isMobile ? '2px 8px' : '4px 12px',
-                        borderRadius: isMobile ? 8 : 12,
-                        background: isSelected ? sensor.color : 'var(--secondary)',
-                        color: isSelected ? 'white' : 'var(--muted-foreground)',
-                        border: isSelected ? `2px solid ${sensor.color}` : '1px solid var(--border)',
-                        fontSize: isMobile ? 8 : 10,
-                        cursor: 'pointer',
-                        transition: 'all 0.2s',
-                        fontWeight: isSelected ? 600 : 400,
-                        opacity: isSelected ? 1 : 0.7,
-                      }}
-                    >
-                      {isMobile ? sensor.shortName || sensor.label : sensor.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-          <SystemHealthRadar data={sensorData} />
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab('analytics')}
+            style={{
+              flex: 1, padding: '10px 16px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              background: activeTab === 'analytics' ? 'var(--card)' : 'transparent',
+              color: activeTab === 'analytics' ? COLORS.primary : 'var(--muted-foreground)',
+              border: 'none', borderBottom: activeTab === 'analytics' ? `2px solid ${COLORS.primary}` : '2px solid transparent',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, whiteSpace: 'nowrap'
+            }}
+          >
+            <LineChartIcon size={14} /> Trends & Analytics
+          </button>
         </div>
+      </div>
 
-        {/* Flow balance + distributions */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-3 sm:mb-4">
-          <FlowBalanceChart data={sensorData} />
-          <DistributionHistogram data={{ ...sensorData, history }} sensorKey="RO5-ROPressure" />
-          <DistributionHistogram data={{ ...sensorData, history }} sensorKey="RO5-FEEDFlow" />
-        </div>
+      {/* Scrollable Content Area */}
+      <div className="flex-1 overflow-auto p-3 sm:p-4">
+        {activeTab === 'overview' && renderOverviewTab()}
+        {activeTab === 'system' && renderSystemTab()}
+        {activeTab === 'analytics' && renderAnalyticsTab()}
 
         {/* Footer */}
         <div style={{
@@ -934,7 +967,8 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           fontSize: 10,
           color: "var(--muted-foreground)",
           flexWrap: "wrap",
-          gap: 8
+          gap: 8,
+          marginTop: 24
         }}>
           <span>RO System v2.0</span>
           <span>© {new Date().getFullYear()} All rights reserved</span>
