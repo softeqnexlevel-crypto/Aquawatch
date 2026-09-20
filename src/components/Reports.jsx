@@ -10,6 +10,22 @@ import {
 import { useData } from '../contexts/DataContext';
 import { format, subDays, subWeeks, subMonths } from 'date-fns';
 
+// ===================== NUMBER FORMATTING =====================
+// Every measurement in the reports (on screen and in the CSV export)
+// is shown with this many decimals.
+const DECIMALS = 2;
+
+// Sensor values can arrive as numbers or strings; anything unusable becomes 0
+function toNumber(raw) {
+  const n = typeof raw === 'number' ? raw : parseFloat(raw);
+  return Number.isFinite(n) ? n : 0;
+}
+
+// 45.1 -> "45.10"
+function fmt(raw) {
+  return toNumber(raw).toFixed(DECIMALS);
+}
+
 // ===================== CATEGORY ICONS =====================
 const categoryIcons = {
   Production: Droplets,
@@ -90,9 +106,24 @@ function Toast({ toast }) {
 }
 
 // ===================== REPORT GENERATION FUNCTIONS =====================
+
+// Numbers (and numeric strings) are written with 2 decimals, e.g. 45.1 -> 45.10.
+// Text such as dates or IDs is left untouched.
+function formatCell(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'number') return Number.isFinite(value) ? value.toFixed(DECIMALS) : '';
+  if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) {
+    return Number(value).toFixed(DECIMALS);
+  }
+  return value;
+}
+
 function generateCSV(reportData, title) {
-  const headers = Object.keys(reportData[0] || {}).join(',');
-  const rows = reportData.map(row => Object.values(row).join(',')).join('\n');
+  const keys = Object.keys(reportData[0] || {});
+  const headers = keys.join(',');
+  const rows = reportData
+    .map(row => keys.map(k => formatCell(row[k])).join(','))
+    .join('\n');
   const content = `Report: ${title}\nGenerated: ${new Date().toISOString()}\n\n${headers}\n${rows}`;
   return content;
 }
@@ -131,15 +162,15 @@ export function Reports() {
 
   // ===================== GENERATE REAL REPORTS FROM DATA =====================
   const generateReportsFromData = useMemo(() => {
-    const feedFlow = getValue('RO5-FEEDFlow') || 0;
-    const permeateFlow = getValue('RO5-Permeateflow') || 0;
-    const concentrateFlow = getValue('RO5-ConcetrateFlow') || 0;
-    const roPressure = getValue('RO5-ROPressure') || 0;
-    const recovery = getValue('RO5-SystemRecovery') || 0;
-    const pureWaterEC = getValue('RO5-PureWaterEc') || 0;
-    const stage1Delta = getValue('RO5-Stage1Delta') || 0;
-    const stage2Delta = getValue('RO5-Stage2Delta') || 0;
-    const filterDeltaP = getValue('RO5-MediaFilterDeltaP') || 0;
+    const feedFlow = toNumber(getValue('RO5-FEEDFlow'));
+    const permeateFlow = toNumber(getValue('RO5-Permeateflow'));
+    const concentrateFlow = toNumber(getValue('RO5-ConcetrateFlow'));
+    const roPressure = toNumber(getValue('RO5-ROPressure'));
+    const recovery = toNumber(getValue('RO5-SystemRecovery'));
+    const pureWaterEC = toNumber(getValue('RO5-PureWaterEc'));
+    const stage1Delta = toNumber(getValue('RO5-Stage1Delta'));
+    const stage2Delta = toNumber(getValue('RO5-Stage2Delta'));
+    const filterDeltaP = toNumber(getValue('RO5-MediaFilterDeltaP'));
 
     const feedHistory = getHistory('RO5-FEEDFlow');
     const permeateHistory = getHistory('RO5-Permeateflow');
@@ -147,7 +178,7 @@ export function Reports() {
     const dailyAvg = (data) => {
       if (data.length === 0) return 0;
       const last24h = data.filter(d => new Date(d.time) >= subDays(new Date(), 1));
-      return last24h.reduce((sum, d) => sum + d.value, 0) / (last24h.length || 1);
+      return last24h.reduce((sum, d) => sum + toNumber(d.value), 0) / (last24h.length || 1);
     };
 
     const avgFeed = dailyAvg(feedHistory);
@@ -161,7 +192,7 @@ export function Reports() {
         type: "Daily",
         category: "Operations",
         size: "156 KB",
-        summary: `Feed: ${feedFlow.toFixed(1)} m³/h | Permeate: ${permeateFlow.toFixed(1)} m³/h | Recovery: ${recovery.toFixed(1)}%`,
+        summary: `Feed: ${fmt(feedFlow)} m³/h | Permeate: ${fmt(permeateFlow)} m³/h | Recovery: ${fmt(recovery)}%`,
         data: {
           feed: feedFlow,
           permeate: permeateFlow,
@@ -178,11 +209,11 @@ export function Reports() {
         type: "Daily",
         category: "Performance",
         size: "218 KB",
-        summary: `RO Pressure: ${roPressure.toFixed(1)} bar | Stage 1 ΔP: ${stage1Delta.toFixed(2)} bar | Filter ΔP: ${filterDeltaP.toFixed(2)} bar`,
+        summary: `RO Pressure: ${fmt(roPressure)} bar | Stage 1 ΔP: ${fmt(stage1Delta)} bar | Filter ΔP: ${fmt(filterDeltaP)} bar`,
         data: {
           roPressure: roPressure,
-          interstagePress: getValue('RO5-InterstagePress') || 0,
-          concentratePress: getValue('RO5-ConcetratePress') || 0,
+          interstagePress: toNumber(getValue('RO5-InterstagePress')),
+          concentratePress: toNumber(getValue('RO5-ConcetratePress')),
           stage1Delta: stage1Delta,
           stage2Delta: stage2Delta,
           filterDeltaP: filterDeltaP
@@ -195,7 +226,7 @@ export function Reports() {
         type: "Daily",
         category: "Quality",
         size: "89 KB",
-        summary: `Product EC: ${pureWaterEC.toFixed(1)} µS/cm | Recovery: ${recovery.toFixed(1)}%`,
+        summary: `Product EC: ${fmt(pureWaterEC)} µS/cm | Recovery: ${fmt(recovery)}%`,
         data: {
           pureWaterEC: pureWaterEC,
           recovery: recovery,
@@ -210,7 +241,7 @@ export function Reports() {
         type: "Weekly",
         category: "Production",
         size: "380 KB",
-        summary: `Avg Feed: ${avgFeed.toFixed(1)} m³/h | Avg Permeate: ${avgPermeate.toFixed(1)} m³/h`,
+        summary: `Avg Feed: ${fmt(avgFeed)} m³/h | Avg Permeate: ${fmt(avgPermeate)} m³/h`,
         data: {
           avgFeed: avgFeed,
           avgPermeate: avgPermeate,
@@ -225,7 +256,7 @@ export function Reports() {
         type: "Weekly",
         category: "Maintenance",
         size: "290 KB",
-        summary: `Stage 1 ΔP: ${stage1Delta.toFixed(2)} bar | Filter ΔP: ${filterDeltaP.toFixed(2)} bar`,
+        summary: `Stage 1 ΔP: ${fmt(stage1Delta)} bar | Filter ΔP: ${fmt(filterDeltaP)} bar`,
         data: {
           stage1Delta: stage1Delta,
           stage2Delta: stage2Delta,
@@ -240,10 +271,10 @@ export function Reports() {
         type: "Monthly",
         category: "Chemical",
         size: "654 KB",
-        summary: `Based on ${permeateFlow.toFixed(1)} m³/h production rate`,
+        summary: `Based on ${fmt(permeateFlow)} m³/h production rate`,
         data: {
-          antiscalant: (permeateFlow * 24 * 30 * 0.02).toFixed(1),
-          biocide: (permeateFlow * 24 * 30 * 0.005).toFixed(1),
+          antiscalant: permeateFlow * 24 * 30 * 0.02,
+          biocide: permeateFlow * 24 * 30 * 0.005,
           permeateFlow: permeateFlow,
           recovery: recovery
         }
@@ -255,7 +286,7 @@ export function Reports() {
         type: "Quarterly",
         category: "Performance",
         size: "1.2 MB",
-        summary: `Avg Recovery: ${recovery.toFixed(1)}% | System Efficiency: ${(recovery * 0.95).toFixed(1)}%`,
+        summary: `Avg Recovery: ${fmt(recovery)}% | System Efficiency: ${fmt(recovery * 0.95)}%`,
         data: {
           avgRecovery: recovery,
           avgProduction: permeateFlow * 24 * 90,
@@ -716,4 +747,4 @@ export function Reports() {
   );
 }
 
-export default Reports;
+export default Reports; 

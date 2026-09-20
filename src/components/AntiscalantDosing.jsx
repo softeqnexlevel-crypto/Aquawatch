@@ -14,8 +14,21 @@ import {
 import { useData } from "../contexts/DataContext";
 import { format, subHours, subDays, startOfDay, subMonths } from 'date-fns';
 
-const DOSING_RATE_ML_MIN = 2.64;
-const STORAGE_KEY = 'antiscalant_dosing_totals_v1';
+// ─── Dosing pump constants ───────────────────────────────────────────────────
+const DOSING_RATE_ML_MIN = 2.7;                    // pump setting
+const DOSING_RATE_ML_SEC = DOSING_RATE_ML_MIN / 60; // 2.7 ÷ 60 = 0.045 ml/second
+
+// The totals are counted in SECONDS OF PUMP ON-TIME, then converted to ml:
+//     mlDosed = secondsOn × 0.045
+// Counting whole seconds (instead of adding 0.045 over and over) avoids
+// floating-point error piling up over a full day.
+const STORAGE_KEY = 'antiscalant_dosing_totals_v2';
+const LEGACY_STORAGE_KEY = 'antiscalant_dosing_totals_v1';
+
+// If the browser pauses timers (background tab / sleep), the next tick can
+// arrive late. We add the real elapsed time so no seconds are lost, but never
+// more than this many seconds in a single tick.
+const MAX_TICK_GAP_S = 65;
 
 function toBool(raw) {
   if (raw === true || raw === false) return raw;
@@ -34,23 +47,48 @@ function toNum(raw, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function loadStoredTotals() {
+// Returns today's accumulated pump ON-time in seconds (0 if none / new day)
+function loadStoredSeconds(today) {
   try {
     const raw = window.localStorage?.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed.mlToday !== 'number' || typeof parsed.day !== 'string') return null;
-    return parsed;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.day === today && Number.isFinite(parsed.secondsOn)) {
+        return Math.max(0, parsed.secondsOn);
+      }
+      return 0;
+    }
+
+    // One-time migration from the old ml-based storage
+    const legacyRaw = window.localStorage?.getItem(LEGACY_STORAGE_KEY);
+    if (legacyRaw) {
+      const legacy = JSON.parse(legacyRaw);
+      if (legacy && legacy.day === today && typeof legacy.mlToday === 'number') {
+        return Math.max(0, legacy.mlToday / DOSING_RATE_ML_SEC);
+      }
+    }
+    return 0;
   } catch {
-    return null;
+    return 0;
   }
 }
 
-function saveStoredTotals(data) {
+function saveStoredSeconds(data) {
   try {
     window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(data));
   } catch {
   }
+}
+
+// 3725 -> "1h 02m 05s"
+function formatDuration(totalSeconds) {
+  const s = Math.floor(totalSeconds);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m ${String(sec).padStart(2, '0')}s`;
+  if (m > 0) return `${m}m ${String(sec).padStart(2, '0')}s`;
+  return `${sec}s`;
 }
 
 const CustomTooltip = ({ active, payload, label }) => {
@@ -215,45 +253,56 @@ export function AntiscalantDosing() {
   const dosingStatusRaw = getValue('RO5-AntiscalantDosingActive');
   const isDosingActive = toBool(dosingStatusRaw);
 
-  const [dosedTodayMl, setDosedTodayMl] = useState(() => {
-    const stored = loadStoredTotals();
-    const today = format(new Date(), 'yyyy-MM-dd');
-    return stored && stored.day === today ? stored.mlToday : 0;
-  });
-  const [currentDay, setCurrentDay] = useState(() => format(new Date(), 'yyyy-MM-dd'));
+  // ─── Per-second dosing counter ─────────────────────────────────────────────
+  // Every second the pump is ON, add 1 second of ON-time.
+  //   ml dosed = secondsOn × 0.045 ml/s   (0.045 = 2.7 ÷ 60)
+  // The running values live in refs so the timer never works with stale state
+  // and never has side effects inside a state updater.
+  const initialDay = format(new Date(), 'yyyy-MM-dd');
+  const [secondsOnToday, setSecondsOnToday] = useState(() => loadStoredSeconds(initialDay));
+  const secondsOnRef = useRef(secondsOnToday);
+  const dayRef = useRef(initialDay);
+  const lastTickRef = useRef(Date.now());
   const isDosingActiveRef = useRef(isDosingActive);
   isDosingActiveRef.current = isDosingActive;
 
   useEffect(() => {
+    lastTickRef.current = Date.now();
+
     const interval = setInterval(() => {
-      const todayStr = format(new Date(), 'yyyy-MM-dd');
+      const now = Date.now();
+      // Real time since the previous tick (normally ~1 s). Using the clock
+      // instead of assuming "1 tick = 1 s" keeps the count accurate even if
+      // the timer drifts or the tab was throttled.
+      const elapsedS = Math.min(Math.max((now - lastTickRef.current) / 1000, 0), MAX_TICK_GAP_S);
+      lastTickRef.current = now;
 
-      setCurrentDay(prevDay => {
-        if (todayStr !== prevDay) {
-          setDosedTodayMl(0);
-          saveStoredTotals({ day: todayStr, mlToday: 0 });
-          return todayStr;
-        }
-        return prevDay;
-      });
-
-      if (isDosingActiveRef.current) {
-        setDosedTodayMl(prev => {
-          const next = prev + (DOSING_RATE_ML_MIN / 60);
-          saveStoredTotals({ day: todayStr, mlToday: next });
-          return next;
-        });
+      // New day -> reset the daily counter
+      const todayStr = format(new Date(now), 'yyyy-MM-dd');
+      if (todayStr !== dayRef.current) {
+        dayRef.current = todayStr;
+        secondsOnRef.current = 0;
       }
+
+      // Pump ON -> add this second (× 0.045 ml is applied when displaying)
+      if (isDosingActiveRef.current) {
+        secondsOnRef.current += elapsedS;
+      }
+
+      setSecondsOnToday(secondsOnRef.current);
+      saveStoredSeconds({ day: dayRef.current, secondsOn: secondsOnRef.current });
     }, 1000);
 
     return () => clearInterval(interval);
   }, []);
 
+  const dosedTodayMl = secondsOnToday * DOSING_RATE_ML_SEC;
+
   const dosingRateMlMin = isDosingActive ? DOSING_RATE_ML_MIN : 0;
 
   const dailyConsumptionL = dosedTodayMl / 1000;
 
-  const projectedDailyConsumptionL = (DOSING_RATE_ML_MIN * 60 * 24) / 1000;
+  const projectedDailyConsumptionL = (DOSING_RATE_ML_SEC * 60 * 60 * 24) / 1000;
   const weeklyConsumptionL = projectedDailyConsumptionL * 7;
   const monthlyConsumptionL = projectedDailyConsumptionL * 30;
   const yearlyConsumptionL = projectedDailyConsumptionL * 365;
@@ -434,7 +483,7 @@ export function AntiscalantDosing() {
             color: 'var(--muted-foreground)'
           }}>
             <Clock size={isMobile ? 10 : 14} />
-            Rate: {DOSING_RATE_ML_MIN.toFixed(2)} ml/min
+            Rate: {DOSING_RATE_ML_MIN.toFixed(2)} ml/min ({DOSING_RATE_ML_SEC.toFixed(3)} ml/s)
           </div>
           {alerts.length > 0 && (
             <div style={{
@@ -525,16 +574,16 @@ export function AntiscalantDosing() {
           unit="ml/min"
           color="#a78bfa"
           icon={FlaskConical}
-          sub={isDosingActive ? '✅ Active' : '⛔ Stopped'}
+          sub={isDosingActive ? `✅ Active · ${DOSING_RATE_ML_SEC.toFixed(3)} ml/s` : '⛔ Stopped'}
           isMobile={isMobile}
         />
         <MetricCard
           label="Dosed Today"
-          value={dailyConsumptionL.toFixed(3)}
-          unit="L"
+          value={dosedTodayMl.toFixed(2)}
+          unit="ml"
           color="#0ea5e9"
           icon={Droplet}
-          sub={`${dosedTodayMl.toFixed(0)} ml accumulated`}
+          sub={`${formatDuration(secondsOnToday)} ON · ${dailyConsumptionL.toFixed(3)} L`}
           isMobile={isMobile}
         />
         <MetricCard
@@ -857,16 +906,16 @@ export function AntiscalantDosing() {
                   const consumptionL = isToday
                     ? dailyConsumptionL
                     : projectedDailyConsumptionL * assumedOnFractionOfDay;
-                  const onMinutes = isToday
-                    ? dosedTodayMl / DOSING_RATE_ML_MIN
-                    : 24 * 60 * assumedOnFractionOfDay;
+                  const onSeconds = isToday
+                    ? secondsOnToday
+                    : 24 * 60 * 60 * assumedOnFractionOfDay;
                   const isLow = !isToday && assumedOnFractionOfDay < 0.85;
 
                   records.push({
                     date: format(date, 'yyyy-MM-dd'),
                     rate: isToday ? dosingRateMlMin : DOSING_RATE_ML_MIN,
                     consumption: consumptionL,
-                    onMinutes,
+                    onSeconds,
                     status: isToday ? (isDosingActive ? 'RUNNING' : 'STOPPED') : (isLow ? 'PARTIAL' : 'NORMAL'),
                     ok: isToday ? isDosingActive : !isLow
                   });
@@ -922,7 +971,7 @@ export function AntiscalantDosing() {
                         {r.consumption.toFixed(3)} L
                       </td>
                       <td style={{ padding: "8px 12px", fontFamily: "var(--font-mono)", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>
-                        {r.onMinutes.toFixed(0)} min
+                        {formatDuration(r.onSeconds)}
                       </td>
                       <td style={{ padding: "8px 12px", borderBottom: "1px solid var(--border)" }}>
                         <div className="flex items-center gap-1.5">

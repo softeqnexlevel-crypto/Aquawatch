@@ -321,7 +321,7 @@ export default function Billing() {
           </div>
 
           <div className="mb-4">
-            <span className="text-3xl font-bold text-white">From $200</span>
+            <span className="text-3xl font-bold text-white">From $50</span>
             <span className="text-neutral-400 text-sm ml-2">Per month / Billed annually</span>
           </div>
 
