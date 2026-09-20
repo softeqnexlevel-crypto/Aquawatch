@@ -792,41 +792,8 @@ export function Dashboard({ onViewAllAlerts } = {}) {
         </div>
       </div>
 
-      {/* Sensor selection + radar */}
+      {/* Health Radar */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
-        <div className="mb-3 sm:mb-4">
-          <div className="rounded-lg p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-            <span style={{ fontSize: isMobile ? 9 : 11, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 6, display: "block" }}>
-              Select Sensor for Comparison
-            </span>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? 4 : 8 }}>
-              {Object.keys(SENSOR_MAP).slice(0, isMobile ? 8 : 15).map(key => {
-                const sensor = SENSOR_MAP[key];
-                const isSelected = selectedSensors.includes(key);
-                return (
-                  <button
-                    key={key}
-                    onClick={() => setSelectedSensors([key])}
-                    style={{
-                      padding: isMobile ? '2px 8px' : '4px 12px',
-                      borderRadius: isMobile ? 8 : 12,
-                      background: isSelected ? sensor.color : 'var(--secondary)',
-                      color: isSelected ? 'white' : 'var(--muted-foreground)',
-                      border: isSelected ? `2px solid ${sensor.color}` : '1px solid var(--border)',
-                      fontSize: isMobile ? 8 : 10,
-                      cursor: 'pointer',
-                      transition: 'all 0.2s',
-                      fontWeight: isSelected ? 600 : 400,
-                      opacity: isSelected ? 1 : 0.7,
-                    }}
-                  >
-                    {isMobile ? sensor.shortName || sensor.label : sensor.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
         <SystemHealthRadar data={sensorData} />
       </div>
     </div>
@@ -834,8 +801,37 @@ export function Dashboard({ onViewAllAlerts } = {}) {
 
   const renderAnalyticsTab = () => (
     <div className="flex flex-col gap-3 sm:gap-4">
-      {/* Live Trend Chart */}
-      <div className="rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+      {/* Sensor selection + Live Trend Chart */}
+      <div className="rounded-lg p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+        <span style={{ fontSize: isMobile ? 9 : 11, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 6, display: "block" }}>
+          Select Sensor for Comparison
+        </span>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? 4 : 8, marginBottom: 12 }}>
+          {Object.keys(SENSOR_MAP).slice(0, isMobile ? 8 : 15).map(key => {
+            const sensor = SENSOR_MAP[key];
+            const isSelected = selectedSensors.includes(key);
+            return (
+              <button
+                key={key}
+                onClick={() => setSelectedSensors([key])}
+                style={{
+                  padding: isMobile ? '2px 8px' : '4px 12px',
+                  borderRadius: isMobile ? 8 : 12,
+                  background: isSelected ? sensor.color : 'var(--secondary)',
+                  color: isSelected ? 'white' : 'var(--muted-foreground)',
+                  border: isSelected ? `2px solid ${sensor.color}` : '1px solid var(--border)',
+                  fontSize: isMobile ? 8 : 10,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                  fontWeight: isSelected ? 600 : 400,
+                  opacity: isSelected ? 1 : 0.7,
+                }}
+              >
+                {isMobile ? sensor.shortName || sensor.label : sensor.label}
+              </button>
+            );
+          })}
+        </div>
         <LiveTrendChart
           data={{ ...sensorData, history }}
           sensorKey={selectedSensors[0] || 'RO5-Permeateflow'}
