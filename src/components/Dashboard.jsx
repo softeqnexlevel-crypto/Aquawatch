@@ -571,7 +571,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const renderOverviewTab = () => (
     <div className="flex flex-col gap-3 sm:gap-4">
       
-      {/* Top Status Cards - RESTORED */}
+      {/* Top Status Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
         <TopStatusCard
           icon={Settings} iconBg="rgba(34,197,94,0.12)" iconColor={isSystemOn ? COLORS.success : COLORS.danger}
