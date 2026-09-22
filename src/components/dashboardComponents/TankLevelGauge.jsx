@@ -14,8 +14,8 @@ export function classifyTankLevel(value) {
   return TANK_BANDS[2];
 }
 
-// Vertical gradient endpoints for the water fill, derived from the band color
-// so the fill matches the current classification (red / yellow / green).
+// Vertical gradient endpoints for the bright water fill, derived from the
+// band color so the fill matches the current classification (red / yellow / green).
 const WATER_GRADIENTS = {
   '#ef4444': 'linear-gradient(180deg, #f87171 0%, #b91c1c 100%)', // red
   '#eab308': 'linear-gradient(180deg, #facc15 0%, #a16207 100%)', // yellow
@@ -27,10 +27,6 @@ export function TankLevelGauge({ value, height = 200, width = 120 }) {
   const clamped = hasValue ? Math.max(0, Math.min(100, value)) : 0;
   const band = hasValue ? classifyTankLevel(clamped) : null;
 
-  // Color of the water fill follows the classification band:
-  //   < 25%  → red
-  //   25–50% → yellow
-  //   >= 50% → green
   const fillColor = band?.color || '#64748b';
   const fillGradient = WATER_GRADIENTS[fillColor] || WATER_GRADIENTS['#ef4444'];
 
@@ -43,17 +39,23 @@ export function TankLevelGauge({ value, height = 200, width = 120 }) {
         borderRadius: 12,
         overflow: 'hidden',
         border: '2px solid #0f172a',
-        // Static zone backdrop: red 0–25, yellow 25–50, green 50–100.
-        // Note the gradient is written bottom-to-top because CSS gradients
-        // read top-to-bottom. So the first colour band we write corresponds
-        // to the TOP of the tank.
-        background:
-          'linear-gradient(to bottom,' +
-          ' #166534 0%, #166534 50%,' +   // top 50–100%  → green
-          ' #ca8a04 50%, #ca8a04 75%,' +  // middle 25–50% → yellow
-          ' #b91c1c 75%, #b91c1c 100%)',  // bottom 0–25% → red
+        // Whole-container backdrop now follows the CURRENT band (muted),
+        // so an empty/off tank reads as fully red, a full tank reads as
+        // fully green, and a partial tank shows the same hue above the
+        // bright fill instead of unrelated static zone stripes.
+        backgroundColor: fillColor,
+        opacity: 1,
       }}>
-        {/* Water fill — colored by the current band */}
+        {/* Muted backdrop tint across the whole container, current band */}
+        <div style={{
+          position: 'absolute',
+          inset: 0,
+          background: fillColor,
+          opacity: 0.22,
+          transition: 'background 0.6s ease',
+        }} />
+
+        {/* Bright water fill — colored by the current band, height = value% */}
         <div style={{
           position: 'absolute',
           left: 0, right: 0, bottom: 0,
@@ -72,14 +74,6 @@ export function TankLevelGauge({ value, height = 200, width = 120 }) {
           pointerEvents: 'none',
         }}>
           {hasValue ? `${clamped.toFixed(1)}%` : '--'}
-        </div>
-
-        {/* "Max 100%" label at top */}
-        <div style={{
-          position: 'absolute', top: 4, left: 0, right: 0,
-          textAlign: 'center', fontSize: 9, color: '#e2e8f0',
-        }}>
-          Max 100%
         </div>
       </div>
 

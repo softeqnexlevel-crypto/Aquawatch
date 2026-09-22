@@ -9,19 +9,6 @@ import React, { useRef } from 'react';
 
 export const PRESSURE_UNIT_DISPLAY = 'bar';
 
-// ── Status classification (unchanged) ───────────────────────────────────────
-export const PRESSURE_BANDS_BAR = [
-  { key: 'warning', label: 'Low',    min: 0,  max: 8,  color: '#eab308' },
-  { key: 'normal',  label: 'Normal', min: 8,  max: 16, color: '#22c55e' },
-  { key: 'danger',  label: 'High',   min: 16, max: 20, color: '#ef4444' },
-];
-
-export function classifyPressure(value, bands = PRESSURE_BANDS_BAR) {
-  if (!Number.isFinite(value)) return null;
-  const hit = bands.find((b, i) => (i === 0 ? value < b.max : value <= b.max));
-  return hit || bands[bands.length - 1];
-}
-
 // ── Physical dial ───────────────────────────────────────────────────────────
 export const DIAL_MAX_BAR = 16;
 export const DIAL_BANDS_BAR = [
@@ -79,7 +66,6 @@ export function PressureGauge({
   value,
   unit = PRESSURE_UNIT_DISPLAY,
   size = 180,
-  bands = PRESSURE_BANDS_BAR,
   dialBands = DIAL_BANDS_BAR,
   showReadout = true,
 }) {
@@ -91,8 +77,7 @@ export function PressureGauge({
   const clamped = hasValue ? Math.max(0, Math.min(DIAL_MAX_BAR * OVERTRAVEL, value)) : 0;
   const needleRotation = -angleFor(clamped);
 
-  const band = hasValue ? classifyPressure(value, bands) : null;
-  const valueColor = band?.color || 'var(--muted-foreground)';
+  const valueColor = 'var(--foreground)';
 
   const readoutSize = Math.max(16, Math.round(size * 0.13));
 
