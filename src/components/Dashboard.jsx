@@ -73,13 +73,37 @@ const safeNumber = (value, fallback = 0) => {
   return (isNaN(num) || !isFinite(num)) ? fallback : num;
 };
 
-function formatDuration(ms) {
-  if (!ms || ms < 0) return '--:--:--';
-  const totalSeconds = Math.floor(ms / 1000);
-  const h = Math.floor(totalSeconds / 3600);
-  const m = Math.floor((totalSeconds % 3600) / 60);
-  const s = totalSeconds % 60;
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+function formatHoursMinutes(ms) {
+  if (!ms || ms < 0) return '0h 0m';
+  const totalMinutes = Math.floor(ms / 60000);
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return `${h}h ${m}m`;
+}
+
+// Daily run-time is accumulated client-side in localStorage, keyed to
+// today's date, so it survives page refreshes but is per-browser (not
+// synced across devices). A backend-tracked totalizer would be needed
+// for a value that's consistent everywhere.
+const DAILY_RUN_STORAGE_KEY = 'ro5_daily_run_ms';
+
+function loadDailyRunMs() {
+  try {
+    const raw = localStorage.getItem(DAILY_RUN_STORAGE_KEY);
+    if (!raw) return 0;
+    const parsed = JSON.parse(raw);
+    return parsed.date === new Date().toDateString() ? (parsed.ms || 0) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function saveDailyRunMs(ms) {
+  try {
+    localStorage.setItem(DAILY_RUN_STORAGE_KEY, JSON.stringify({ date: new Date().toDateString(), ms }));
+  } catch {
+    // ignore storage errors (e.g. private browsing)
+  }
 }
 
 export const SENSOR_MAP = {
@@ -380,20 +404,14 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     previousState: null,
   });
 
-  // Operation-time tracking (client-side uptime since last transition to ON)
-  const [systemOnSince, setSystemOnSince] = useState(null);
-  const [nowTick, setNowTick] = useState(Date.now());
+  // Daily run-time tracking: total time the system has been ON today.
+  const [dailyRunMs, setDailyRunMs] = useState(() => loadDailyRunMs());
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 640);
     checkMobile();
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
-  }, []);
-
-  useEffect(() => {
-    const interval = setInterval(() => setNowTick(Date.now()), 1000);
-    return () => clearInterval(interval);
   }, []);
 
   const fetchProductionSummary = async () => {
@@ -467,18 +485,6 @@ export function Dashboard({ onViewAllAlerts } = {}) {
 
   const isSystemOn = feedPumpOn && !tankEmpty;
 
-  // Track continuous "on" duration. Resets to null when the system turns off,
-  // and starts a fresh timestamp the moment it turns back on. Note: this is
-  // client-side only, so it resets on page refresh — if you need runtime that
-  // survives reloads/reconnects, the start timestamp should come from the backend.
-  useEffect(() => {
-    if (isSystemOn && systemOnSince === null) {
-      setSystemOnSince(Date.now());
-    } else if (!isSystemOn && systemOnSince !== null) {
-      setSystemOnSince(null);
-    }
-  }, [isSystemOn]);
-
   const isDosingOn = dosingActive === 'ON' || isActive(dosingActive);
 
   const operationMode = tankEmpty
@@ -494,6 +500,31 @@ export function Dashboard({ onViewAllAlerts } = {}) {
 
   const highPressurePumpOn = operationMode === 'FILTER' && isSystemOn;
   const dosingPumpOn = operationMode === 'FILTER' && isDosingOn;
+
+  // Accumulate run time in 1-second ticks while the HIGH PRESSURE PUMP is on
+  // (this is the actual RO production run time, not just the feed pump).
+  // Resets to zero automatically when the calendar date rolls over (checked
+  // on every tick), and persists to localStorage so a page refresh doesn't
+  // lose today's total.
+  useEffect(() => {
+    if (!highPressurePumpOn) return;
+    const interval = setInterval(() => {
+      setDailyRunMs((prev) => {
+        const todayKey = new Date().toDateString();
+        let base = prev;
+        try {
+          const stored = JSON.parse(localStorage.getItem(DAILY_RUN_STORAGE_KEY) || 'null');
+          if (!stored || stored.date !== todayKey) base = 0;
+        } catch {
+          // ignore parse errors, fall back to prev
+        }
+        const next = base + 1000;
+        saveDailyRunMs(next);
+        return next;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [highPressurePumpOn]);
 
   const getOperationDisplay = () => {
     if (tankEmpty) {
@@ -621,10 +652,10 @@ export function Dashboard({ onViewAllAlerts } = {}) {
         />
         <TopStatusCard
           icon={Clock} iconBg="rgba(34,197,94,0.12)" iconColor={isSystemOn ? COLORS.success : COLORS.muted}
-          title="Operation Time"
-          value={isSystemOn && systemOnSince ? formatDuration(nowTick - systemOnSince) : '--:--:--'}
+          title="System Run hours"
+          value={formatHoursMinutes(dailyRunMs)}
           valueColor={isSystemOn ? COLORS.success : 'var(--muted-foreground)'}
-          sub={isSystemOn ? 'Time since system started' : 'System not running'}
+          sub={isSystemOn ? 'System currently running' : 'System currently stopped'}
           subColor="var(--muted-foreground)"
         />
         <TopStatusCard
