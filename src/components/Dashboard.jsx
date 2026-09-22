@@ -25,7 +25,7 @@ import { PressureGauge, PRESSURE_BANDS_BAR, classifyPressure, PRESSURE_UNIT_DISP
 import { TankLevelGauge, TANK_BANDS, classifyTankLevel }
   from './dashboardComponents/TankLevelGauge';
 import { InstrumentCard } from './dashboardComponents/InstrumentCard';
-import { RadialGauge, classifyByBands } from './dashboardComponents/RadialGauge';
+import { RadialGauge, classifyByBands } from './dashboardComponents/Radialgauge';
 import {
   getDisplayedTankLevelPct,
   getDisplayedPressure,
@@ -311,7 +311,7 @@ function KPICardV2({ label, value, unit, icon: Icon, color, trend, statusText, s
   );
 }
 
-function EquipmentStatusItem({ icon: Icon, label, state, value, unit }) {
+function EquipmentStatusItem({ icon: Icon, label, state, }) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
   const color = state === 'on' ? COLORS.success : state === 'off' ? COLORS.danger : 'var(--muted-foreground)';
   const bg = state === 'on' ? 'rgba(34,197,94,0.1)' : state === 'off' ? 'rgba(239,68,68,0.1)' : 'var(--secondary)';
@@ -328,11 +328,11 @@ function EquipmentStatusItem({ icon: Icon, label, state, value, unit }) {
           <div style={{ fontSize: isMobile ? 8 : 9.5, color, fontWeight: 600 }}>{text}</div>
         </div>
       </div>
-      {value !== undefined && (
+      {/* {value !== undefined && (
         <div style={{ fontSize: isMobile ? 8 : 10, fontFamily: 'var(--font-mono)', color: 'var(--muted-foreground)' }}>
           {value.toFixed(1)} {unit}
         </div>
-      )}
+      )} */}
     </div>
   );
 }
@@ -867,15 +867,13 @@ export function Dashboard({ onViewAllAlerts } = {}) {
                 icon={Wrench}
                 label="High Pressure Pump"
                 state={highPressurePumpOn ? 'on' : 'off'}
-                value={pressureHasData ? roPressure : 0}
-                unit="bar"
+               
               />
               <EquipmentStatusItem
                 icon={Wrench}
                 label="Feed Pump"
                 state={feedPumpOn && !tankEmpty ? 'on' : 'off'}
-                value={feedFlow}
-                unit="m³/h"
+               
               />
               <EquipmentStatusItem
                 icon={FlaskConical}
@@ -886,8 +884,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
                 icon={Filter}
                 label="Prefilter"
                 state={backwashOn ? 'backwash' : 'filtering'}
-                value={filterDeltaP}
-                unit="bar"
+             
               />
             </div>
           </div>

@@ -146,12 +146,18 @@ export function PowerProblemImpact() {
       buckets, inRange, rangeStart, rangeEnd,
       totalDowntimeMin, avgMin, flowSeries, typicalFlow, lostM3,
       ongoing: allIncidents.some((i) => i.ongoing),
+      hasFlowData: flowSeries.length > 0,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [history, permeateHistory, range, tick]);
 
   const axisTick = { fontSize: 9, fill: '#4d7a9e' };
   const minBand = (view.rangeEnd - view.rangeStart) / 250; // keeps very short outages visible
+
+  // ---- Empty-state copy, now range-aware ----
+  const emptyMessage = view.allCount === 0
+    ? 'No power problems recorded yet. This fills in automatically each time the Power Problem alarm triggers and clears.'
+    : `No power problems in the selected ${range} window. Try widening the range (24H → 7D → 30D).`;
 
   return (
     <div className="rounded p-3" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
@@ -190,25 +196,41 @@ export function PowerProblemImpact() {
         </div>
       </div>
 
+      {/* Stats grid always renders so the layout is stable across range changes */}
+      <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', marginBottom: 12 }}>
+        <Stat label="Outages" value={view.inRange.length} sub={`last ${range}`} color={view.inRange.length > 0 ? RED : undefined} />
+        <Stat label="Total downtime" value={formatMinutes(view.totalDowntimeMin)} color={view.totalDowntimeMin > 0 ? AMBER : undefined} />
+        <Stat label="Average outage" value={view.inRange.length ? formatMinutes(view.avgMin) : '—'} />
+        <Stat
+          label="Est. production lost"
+          value={view.lostM3 !== null && view.lostM3 > 0 ? `${view.lostM3.toFixed(2)} m³` : '—'}
+          sub={
+            view.typicalFlow !== null
+              ? `at ${view.typicalFlow.toFixed(2)} m³/h typical flow`
+              : 'needs permeate history'
+          }
+        />
+      </div>
+
       {view.inRange.length === 0 ? (
-        <div style={{ fontSize: 11, color: 'var(--muted-foreground)', padding: '16px 0', textAlign: 'center' }}>
-          {view.allCount === 0
-            ? 'No power problems recorded yet. This fills in automatically each time the Power Problem alarm triggers and clears.'
-            : `No power problems in the last ${range}.`}
+        <div
+          style={{
+            fontSize: 11,
+            color: 'var(--muted-foreground)',
+            padding: '20px 12px',
+            textAlign: 'center',
+            border: '1px dashed var(--border)',
+            borderRadius: 6,
+            background: 'var(--muted)',
+          }}
+        >
+          {emptyMessage}
+          <div style={{ marginTop: 6, fontSize: 9, opacity: 0.75 }}>
+            Showing range: <span style={{ color: BLUE, fontFamily: 'var(--font-mono)' }}>{range}</span>
+          </div>
         </div>
       ) : (
         <>
-          <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', marginBottom: 12 }}>
-            <Stat label="Outages" value={view.inRange.length} sub={`last ${range}`} color={RED} />
-            <Stat label="Total downtime" value={formatMinutes(view.totalDowntimeMin)} color={AMBER} />
-            <Stat label="Average outage" value={formatMinutes(view.avgMin)} />
-            <Stat
-              label="Est. production lost"
-              value={view.lostM3 !== null ? `${view.lostM3.toFixed(2)} m³` : '—'}
-              sub={view.typicalFlow !== null ? `at ${view.typicalFlow.toFixed(2)} m³/h typical flow` : 'needs permeate history'}
-            />
-          </div>
-
           <div style={{ fontSize: 10, color: 'var(--muted-foreground)', marginBottom: 4 }}>
             Downtime per {RANGES[range].unit} (bars) and number of outages (line)
           </div>
@@ -230,7 +252,7 @@ export function PowerProblemImpact() {
           <div style={{ fontSize: 10, color: 'var(--muted-foreground)', margin: '12px 0 4px' }}>
             Permeate flow (m³/h) with power problems shaded red
           </div>
-          {view.flowSeries.length === 0 ? (
+          {!view.hasFlowData ? (
             <div style={{ fontSize: 10, color: 'var(--muted-foreground)', padding: '12px 0' }}>
               No permeate flow history available for this range.
             </div>

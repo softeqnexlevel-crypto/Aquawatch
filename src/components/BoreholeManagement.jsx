@@ -126,7 +126,7 @@ export function FeedTankManagement() {
         volume: (tankALevel / 100) * 500,
         dailyConsumption: tankHasData ? feedFlow * 24 * 0.4 : 0,
         monthlyConsumption: tankHasData ? feedFlow * 24 * 30 * 0.4 : 0,
-        runtimeHours: 22.5,
+        // runtimeHours: 22.5,
         health: getHealth(tankALevel, tankHasData),
         lastMaintenance: format(subDays(now, 45), 'yyyy-MM-dd'),
         nextMaintenance: format(subDays(now, -15), 'yyyy-MM-dd'),
@@ -141,7 +141,7 @@ export function FeedTankManagement() {
         volume: (tankBLevel / 100) * 400,
         dailyConsumption: tankHasData ? feedFlow * 24 * 0.35 : 0,
         monthlyConsumption: tankHasData ? feedFlow * 24 * 30 * 0.35 : 0,
-        runtimeHours: 18.2,
+        // runtimeHours: 18.2,
         health: getHealth(tankBLevel, tankHasData),
         lastMaintenance: format(subDays(now, 30), 'yyyy-MM-dd'),
         nextMaintenance: format(subDays(now, -20), 'yyyy-MM-dd'),
@@ -468,7 +468,7 @@ export function FeedTankManagement() {
           <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
             {[
               { label: "Daily Consumption", value: tankHasData ? `${selected.dailyConsumption.toFixed(0)} m³` : '--' },
-              { label: "Runtime", value: `${selected.runtimeHours}h` },
+              // { label: "Runtime", value: `${selected.runtimeHours}h` },
               { label: "Monthly Usage", value: tankHasData ? `${Math.round(selected.monthlyConsumption).toLocaleString()} m³` : '--' },
               { label: "Health Score", value: tankHasData ? `${Math.round(selected.health)}%` : '--' },
             ].map(m => (

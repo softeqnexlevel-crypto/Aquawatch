@@ -29,6 +29,30 @@ function RecoveryGauge({ value, target, isMobile }) {
   const pct = Math.min(Math.max(value, 0), 100);
   const color = value >= target ? "#22c55e" : value >= target - 2 ? "#eab308" : "#ef4444";
 
+  // --- Theme detection -----------------------------------------------------
+  // The app toggles theme by adding/removing `.dark` on <html>. Rather than
+  // sniffing background colors, we read the class directly and observe it,
+  // so the gauge re-colors instantly when the user toggles theme.
+  const [isLight, setIsLight] = React.useState(
+    () => typeof document !== 'undefined' && !document.documentElement.classList.contains('dark')
+  );
+
+  React.useEffect(() => {
+    const root = document.documentElement;
+    const sync = () => setIsLight(!root.classList.contains('dark'));
+    sync();
+
+    const observer = new MutationObserver(sync);
+    observer.observe(root, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
+
+  // --- Theme-aware palette -------------------------------------------------
+  const needleColor  = isLight ? '#0f172a' : '#ffffff';
+  const hubRingColor = isLight ? '#ffffff' : '#0f172a';
+  const trackColor   = isLight ? 'rgba(15,23,42,0.10)' : 'rgba(255,255,255,0.06)';
+  const labelColor   = isLight ? '#475569' : '#4d7a9e';
+
   const polarToCartesian = (cx, cy, r, angle) => {
     const rad = ((angle - 90) * Math.PI) / 180;
     return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
@@ -46,41 +70,86 @@ function RecoveryGauge({ value, target, isMobile }) {
   const radius = isMobile ? 65 : 80;
   const needleLength = isMobile ? 50 : 65;
 
+  // Unique filter id so multiple gauges on the page don't collide.
+  const shadowId = React.useId().replace(/:/g, '');
+
   return (
     <div className="flex flex-col items-center">
       <svg viewBox={`0 0 ${size} ${size * 0.6}`} width={size} height={size * 0.6}>
+        <defs>
+          <filter id={`needleShadow-${shadowId}`} x="-50%" y="-50%" width="200%" height="200%">
+            <feDropShadow
+              dx="0"
+              dy={isLight ? 1 : 0.5}
+              stdDeviation={isLight ? 1.2 : 0.6}
+              floodColor={isLight ? '#0f172a' : '#000000'}
+              floodOpacity={isLight ? 0.45 : 0.55}
+            />
+          </filter>
+        </defs>
+
         {/* Background track */}
-        <path d={describeArc(size/2, size/2, radius, -90, 90)} fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth={isMobile ? 12 : 16} strokeLinecap="round" />
+        <path
+          d={describeArc(size / 2, size / 2, radius, -90, 90)}
+          fill="none"
+          stroke={trackColor}
+          strokeWidth={isMobile ? 12 : 16}
+          strokeLinecap="round"
+        />
+
         {/* Zones */}
-        <path d={describeArc(size/2, size/2, radius, -90, -10)} fill="none" stroke="#ef444430" strokeWidth={isMobile ? 12 : 16} />
-        <path d={describeArc(size/2, size/2, radius, -10, 15)} fill="none" stroke="#eab30830" strokeWidth={isMobile ? 12 : 16} />
-        <path d={describeArc(size/2, size/2, radius, 15, 90)} fill="none" stroke="#22c55e30" strokeWidth={isMobile ? 12 : 16} />
+        <path d={describeArc(size / 2, size / 2, radius, -90, -10)} fill="none" stroke="#ef444430" strokeWidth={isMobile ? 12 : 16} />
+        <path d={describeArc(size / 2, size / 2, radius, -10, 15)} fill="none" stroke="#eab30830" strokeWidth={isMobile ? 12 : 16} />
+        <path d={describeArc(size / 2, size / 2, radius, 15, 90)} fill="none" stroke="#22c55e30" strokeWidth={isMobile ? 12 : 16} />
+
         {/* Fill */}
-        <path d={describeArc(size/2, size/2, radius, -90, -90 + (pct / 100) * 180)} fill="none" stroke={color} strokeWidth={isMobile ? 12 : 16} strokeLinecap="round" />
+        <path
+          d={describeArc(size / 2, size / 2, radius, -90, -90 + (pct / 100) * 180)}
+          fill="none"
+          stroke={color}
+          strokeWidth={isMobile ? 12 : 16}
+          strokeLinecap="round"
+        />
+
         {/* Needle */}
         <line
-          x1={size/2} y1={size/2}
-          x2={size/2 + needleLength * Math.cos(((gaugeAngle - 90) * Math.PI) / 180)}
-          y2={size/2 + needleLength * Math.sin(((gaugeAngle - 90) * Math.PI) / 180)}
-          stroke="#fff" strokeWidth={2} strokeLinecap="round"
+          x1={size / 2} y1={size / 2}
+          x2={size / 2 + needleLength * Math.cos(((gaugeAngle - 90) * Math.PI) / 180)}
+          y2={size / 2 + needleLength * Math.sin(((gaugeAngle - 90) * Math.PI) / 180)}
+          stroke={needleColor}
+          strokeWidth={isMobile ? 2.5 : 3}
+          strokeLinecap="round"
+          filter={`url(#needleShadow-${shadowId})`}
         />
-        <circle cx={size/2} cy={size/2} r={isMobile ? 4 : 5} fill={color} />
+
+        {/* Hub */}
+        <circle
+          cx={size / 2} cy={size / 2}
+          r={isMobile ? 4 : 5}
+          fill={color}
+          stroke={hubRingColor}
+          strokeWidth={isMobile ? 1.5 : 2}
+        />
+
         {/* Labels */}
-        <text x={isMobile ? 14 : 18} y={size * 0.54} fontSize={isMobile ? 6 : 8} fill="#4d7a9e" fontFamily="JetBrains Mono">0%</text>
-        <text x={size - (isMobile ? 24 : 30)} y={size * 0.54} fontSize={isMobile ? 6 : 8} fill="#4d7a9e" fontFamily="JetBrains Mono">100%</text>
-        <text x={size/2 - (isMobile ? 10 : 14)} y={size * 0.26} fontSize={isMobile ? 6 : 8} fill="#4d7a9e" fontFamily="JetBrains Mono">50%</text>
+        <text x={isMobile ? 14 : 18} y={size * 0.54} fontSize={isMobile ? 6 : 8} fill={labelColor} fontFamily="JetBrains Mono">0%</text>
+        <text x={size - (isMobile ? 24 : 30)} y={size * 0.54} fontSize={isMobile ? 6 : 8} fill={labelColor} fontFamily="JetBrains Mono">100%</text>
+        <text x={size / 2 - (isMobile ? 10 : 14)} y={size * 0.26} fontSize={isMobile ? 6 : 8} fill={labelColor} fontFamily="JetBrains Mono">50%</text>
+
         {/* Target marker */}
         <line
-          x1={size/2 + (radius + 5) * Math.cos((((-90 + (target / 100) * 180) - 90) * Math.PI) / 180)}
-          y1={size/2 + (radius + 5) * Math.sin((((-90 + (target / 100) * 180) - 90) * Math.PI) / 180)}
-          x2={size/2 + (radius + 15) * Math.cos((((-90 + (target / 100) * 180) - 90) * Math.PI) / 180)}
-          y2={size/2 + (radius + 15) * Math.sin((((-90 + (target / 100) * 180) - 90) * Math.PI) / 180)}
-          stroke="#eab308" strokeWidth={2}
+          x1={size / 2 + (radius + 5) * Math.cos((((-90 + (target / 100) * 180) - 90) * Math.PI) / 180)}
+          y1={size / 2 + (radius + 5) * Math.sin((((-90 + (target / 100) * 180) - 90) * Math.PI) / 180)}
+          x2={size / 2 + (radius + 15) * Math.cos((((-90 + (target / 100) * 180) - 90) * Math.PI) / 180)}
+          y2={size / 2 + (radius + 15) * Math.sin((((-90 + (target / 100) * 180) - 90) * Math.PI) / 180)}
+          stroke="#eab308"
+          strokeWidth={2}
         />
+
         {/* Target label */}
-        <text 
-          x={size/2 + (radius + 20) * Math.cos((((-90 + (target / 100) * 180) - 90) * Math.PI) / 180)}
-          y={size/2 + (radius + 20) * Math.sin((((-90 + (target / 100) * 180) - 90) * Math.PI) / 180) + (isMobile ? 8 : 12)}
+        <text
+          x={size / 2 + (radius + 20) * Math.cos((((-90 + (target / 100) * 180) - 90) * Math.PI) / 180)}
+          y={size / 2 + (radius + 20) * Math.sin((((-90 + (target / 100) * 180) - 90) * Math.PI) / 180) + (isMobile ? 8 : 12)}
           fontSize={isMobile ? 6 : 7}
           fill="#eab308"
           textAnchor="middle"
@@ -89,8 +158,13 @@ function RecoveryGauge({ value, target, isMobile }) {
           Target
         </text>
       </svg>
-      <div style={{ fontFamily: "var(--font-mono)", fontSize: isMobile ? 28 : 36, fontWeight: 700, color, lineHeight: 1, marginTop: -6 }}>{value.toFixed(1)}%</div>
-      <div style={{ fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)", marginTop: 2 }}>Target: {target}%</div>
+
+      <div style={{ fontFamily: "var(--font-mono)", fontSize: isMobile ? 28 : 36, fontWeight: 700, color, lineHeight: 1, marginTop: -6 }}>
+        {value.toFixed(1)}%
+      </div>
+      <div style={{ fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)", marginTop: 2 }}>
+        Target: {target}%
+      </div>
     </div>
   );
 }
@@ -166,20 +240,20 @@ export function SystemRecovery() {
     const now = new Date();
     const today = startOfDay(now);
     const todayData = recoveryHistory.filter(d => new Date(d.time) >= today);
-    const dailyAvg = todayData.length > 0 
-      ? todayData.reduce((sum, d) => sum + d.value, 0) / todayData.length 
+    const dailyAvg = todayData.length > 0
+      ? todayData.reduce((sum, d) => sum + d.value, 0) / todayData.length
       : recovery;
 
     const weekAgo = subDays(now, 7);
     const weekData = recoveryHistory.filter(d => new Date(d.time) >= weekAgo);
-    const weeklyAvg = weekData.length > 0 
-      ? weekData.reduce((sum, d) => sum + d.value, 0) / weekData.length 
+    const weeklyAvg = weekData.length > 0
+      ? weekData.reduce((sum, d) => sum + d.value, 0) / weekData.length
       : recovery;
 
     const monthAgo = subDays(now, 30);
     const monthData = recoveryHistory.filter(d => new Date(d.time) >= monthAgo);
-    const monthlyAvg = monthData.length > 0 
-      ? monthData.reduce((sum, d) => sum + d.value, 0) / monthData.length 
+    const monthlyAvg = monthData.length > 0
+      ? monthData.reduce((sum, d) => sum + d.value, 0) / monthData.length
       : recovery;
 
     // TARGET SET TO 70%
@@ -213,25 +287,25 @@ export function SystemRecovery() {
   // ===================== HOURLY RECOVERY DATA =====================
   const hourlyRecoveryData = useMemo(() => {
     if (recoveryHistory.length === 0) return [];
-    
+
     const now = new Date();
     const startTime = timeRange === '24h' ? subHours(now, 24) : subHours(now, 1);
-    
+
     const filtered = recoveryHistory.filter(d => new Date(d.time) >= startTime);
     const grouped = {};
-    
+
     filtered.forEach(d => {
       const hour = format(new Date(d.time), 'HH:00');
       if (!grouped[hour]) grouped[hour] = { hour, recovery: 0, count: 0 };
       grouped[hour].recovery += d.value;
       grouped[hour].count++;
     });
-    
+
     const result = Object.values(grouped).map(g => ({
       hour: g.hour,
       recovery: g.recovery / g.count
     }));
-    
+
     return result.sort((a, b) => a.hour.localeCompare(b.hour));
   }, [recoveryHistory, timeRange]);
 
@@ -239,11 +313,11 @@ export function SystemRecovery() {
   const monthlyRecoveryTrend = useMemo(() => {
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
     const currentMonth = new Date().getMonth();
-    
+
     return months.slice(0, 6).map((month, i) => {
       const monthIndex = (currentMonth - 5 + i + 12) % 12;
       const monthName = months[monthIndex];
-      
+
       let recoveryValue = metrics.monthlyAvg;
       if (recoveryHistory.length > 0) {
         const monthData = recoveryHistory.filter(d => {
@@ -254,7 +328,7 @@ export function SystemRecovery() {
           recoveryValue = monthData.reduce((sum, d) => sum + d.value, 0) / monthData.length;
         }
       }
-      
+
       return {
         month: monthName,
         recovery: recoveryValue * (0.97 + Math.random() * 0.06),
@@ -267,14 +341,14 @@ export function SystemRecovery() {
   const recoveryVsProduction = useMemo(() => {
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
     const currentMonth = new Date().getMonth();
-    
+
     return months.slice(0, 6).map((month, i) => {
       const monthIndex = (currentMonth - 5 + i + 12) % 12;
       const monthName = months[monthIndex];
-      
+
       const production = metrics.permeateFlow * 24 * 30 * (0.85 + Math.random() * 0.3);
       const recoveryVal = metrics.monthlyAvg * (0.97 + Math.random() * 0.06);
-      
+
       return {
         month: monthName,
         production: production / 1000,
@@ -308,7 +382,7 @@ export function SystemRecovery() {
 
   return (
     <div className="flex flex-col gap-3 sm:gap-4 p-2 sm:p-4 overflow-auto h-full" style={{ scrollbarWidth: "none" }}>
-      
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
         <div>
@@ -338,55 +412,55 @@ export function SystemRecovery() {
         </div>
 
         <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(3, 1fr)", alignContent: "start" }}>
-          <MetricCard 
-            label="Current" 
-            value={metrics.currentRecovery.toFixed(1)} 
-            unit="%" 
+          <MetricCard
+            label="Current"
+            value={metrics.currentRecovery.toFixed(1)}
+            unit="%"
             color={metrics.currentRecovery >= metrics.target ? "#22c55e" : "#eab308"}
             sub={metrics.currentRecovery >= metrics.target ? `+${(metrics.currentRecovery - metrics.target).toFixed(1)}%` : `${(metrics.target - metrics.currentRecovery).toFixed(1)}% below`}
             trend={metrics.currentRecovery - metrics.target}
             isMobile={isMobile}
           />
-          <MetricCard 
-            label="Daily Avg" 
-            value={metrics.dailyAvg.toFixed(1)} 
-            unit="%" 
+          <MetricCard
+            label="Daily Avg"
+            value={metrics.dailyAvg.toFixed(1)}
+            unit="%"
             color={metrics.dailyAvg >= metrics.target ? "#22c55e" : "#eab308"}
             sub="24 hrs"
             trend={metrics.dailyAvg - metrics.target}
             isMobile={isMobile}
           />
-          <MetricCard 
-            label="Weekly Avg" 
-            value={metrics.weeklyAvg.toFixed(1)} 
-            unit="%" 
+          <MetricCard
+            label="Weekly Avg"
+            value={metrics.weeklyAvg.toFixed(1)}
+            unit="%"
             color={metrics.weeklyAvg >= metrics.target ? "#22c55e" : "#eab308"}
             sub="7 days"
             trend={metrics.weeklyAvg - metrics.target}
             isMobile={isMobile}
           />
-          <MetricCard 
-            label="Monthly Avg" 
-            value={metrics.monthlyAvg.toFixed(1)} 
-            unit="%" 
+          <MetricCard
+            label="Monthly Avg"
+            value={metrics.monthlyAvg.toFixed(1)}
+            unit="%"
             color={metrics.monthlyAvg >= metrics.target ? "#22c55e" : "#eab308"}
             sub={format(new Date(), 'MMM yyyy')}
             trend={metrics.monthlyAvg - metrics.target}
             isMobile={isMobile}
           />
-          <MetricCard 
-            label="Target" 
-            value={metrics.target.toFixed(1)} 
-            unit="%" 
+          <MetricCard
+            label="Target"
+            value={metrics.target.toFixed(1)}
+            unit="%"
             color="#eab308"
             sub={`Target: ${metrics.target}%`}
             trend={0}
             isMobile={isMobile}
           />
-          <MetricCard 
-            label="Efficiency" 
-            value={metrics.efficiency.toFixed(1)} 
-            unit="%" 
+          <MetricCard
+            label="Efficiency"
+            value={metrics.efficiency.toFixed(1)}
+            unit="%"
             color={metrics.efficiency > 70 ? "#22c55e" : "#eab308"}
             sub={metrics.efficiency > 70 ? 'Good' : 'Check'}
             trend={metrics.efficiency - 75}
@@ -421,7 +495,7 @@ export function SystemRecovery() {
       {/* Recovery charts - Responsive */}
       <div className="grid gap-3 sm:gap-4" style={{ gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr" }}>
         {/* Hourly recovery today */}
-        <ChartPanel 
+        <ChartPanel
           title={`Hourly Recovery`}
           meta={`${timeRange === '24h' ? '24 Hours' : '1 Hour'}`}
           isMobile={isMobile}
