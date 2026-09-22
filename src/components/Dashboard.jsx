@@ -5,7 +5,7 @@ import {
   CheckCircle, Gauge, Zap, Filter, TrendingUp, TrendingDown,
   Minus, RefreshCw, Power, AlertCircle, Settings,
   Wrench, LayoutDashboard, LineChart as LineChartIcon, 
-  SlidersHorizontal, Bell
+  SlidersHorizontal, Bell, Clock
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
@@ -72,6 +72,15 @@ const safeNumber = (value, fallback = 0) => {
   const num = typeof value === 'string' ? parseFloat(value) : Number(value);
   return (isNaN(num) || !isFinite(num)) ? fallback : num;
 };
+
+function formatDuration(ms) {
+  if (!ms || ms < 0) return '--:--:--';
+  const totalSeconds = Math.floor(ms / 1000);
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
 
 export const SENSOR_MAP = {
   'RO5-FEEDFlow': { label: 'Feed Flow', unit: 'm³/h', icon: Droplets, color: COLORS.primary, shortName: 'FEEDFlow' },
@@ -371,11 +380,20 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     previousState: null,
   });
 
+  // Operation-time tracking (client-side uptime since last transition to ON)
+  const [systemOnSince, setSystemOnSince] = useState(null);
+  const [nowTick, setNowTick] = useState(Date.now());
+
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 640);
     checkMobile();
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(interval);
   }, []);
 
   const fetchProductionSummary = async () => {
@@ -448,6 +466,18 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const tankEmpty = tankHasData && feedTankLevel <= TANK_EMPTY_THRESHOLD_PCT;
 
   const isSystemOn = feedPumpOn && !tankEmpty;
+
+  // Track continuous "on" duration. Resets to null when the system turns off,
+  // and starts a fresh timestamp the moment it turns back on. Note: this is
+  // client-side only, so it resets on page refresh — if you need runtime that
+  // survives reloads/reconnects, the start timestamp should come from the backend.
+  useEffect(() => {
+    if (isSystemOn && systemOnSince === null) {
+      setSystemOnSince(Date.now());
+    } else if (!isSystemOn && systemOnSince !== null) {
+      setSystemOnSince(null);
+    }
+  }, [isSystemOn]);
 
   const isDosingOn = dosingActive === 'ON' || isActive(dosingActive);
 
@@ -590,17 +620,12 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           subColor="var(--muted-foreground)"
         />
         <TopStatusCard
-          icon={Droplets} iconBg="rgba(14,165,233,0.12)" iconColor={COLORS.primary}
-          title="Feed Tank Level" value=""
-          gauge={<CircularGauge
-            value={tankHasData ? feedTankLevel : 0}
-            size={isMobile ? 56 : 64} strokeWidth={5}
-            color={!tankHasData ? COLORS.muted
-                 : feedTankLevel === 0 ? COLORS.danger
-                 : feedTankLevel > 30 ? COLORS.success
-                 : COLORS.warning}
-            label="" noData={!tankHasData}
-          />}
+          icon={Clock} iconBg="rgba(34,197,94,0.12)" iconColor={isSystemOn ? COLORS.success : COLORS.muted}
+          title="Operation Time"
+          value={isSystemOn && systemOnSince ? formatDuration(nowTick - systemOnSince) : '--:--:--'}
+          valueColor={isSystemOn ? COLORS.success : 'var(--muted-foreground)'}
+          sub={isSystemOn ? 'Time since system started' : 'System not running'}
+          subColor="var(--muted-foreground)"
         />
         <TopStatusCard
           icon={AlertTriangle} iconBg="rgba(239,68,68,0.12)" iconColor={COLORS.danger}
@@ -612,7 +637,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
       {/* Live Instruments: Pressure + Feed Tank */}
       <div>
         <SectionTitle>Live Instruments</SectionTitle>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+        <div className="grid grid-cols-2 gap-2 sm:gap-4">
           <InstrumentCard
             title="Pressure"
             subtitle="System Pressure Gauge"
@@ -627,7 +652,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             <PressureGauge
               value={pressureHasData ? roPressure : undefined}
               unit={PRESSURE_UNIT_DISPLAY}
-              size={isMobile ? 150 : 180}
+              size={isMobile ? 110 : 180}
               bands={PRESSURE_BANDS_BAR}
             />
           </InstrumentCard>
@@ -645,8 +670,8 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           >
             <TankLevelGauge
               value={tankHasData ? feedTankLevel : undefined}
-              width={isMobile ? 100 : 120}
-              height={isMobile ? 160 : 200}
+              width={isMobile ? 80 : 120}
+              height={isMobile ? 130 : 200}
             />
           </InstrumentCard>
         </div>

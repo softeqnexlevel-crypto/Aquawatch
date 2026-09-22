@@ -1,21 +1,37 @@
 // components/dashboardComponents/PressureGauge.jsx
-//
-// Dial-style industrial pressure gauge: 270° sweep, dual scale
-// (MPa outside, bar inside), green/yellow/red printed arc, tapered
-// black needle, thin dark rim on a transparent background.
-//
-// Same exports and props as before — drop-in replacement.
 import React, { useRef } from 'react';
 
 export const PRESSURE_UNIT_DISPLAY = 'bar';
 
 // ── Physical dial ───────────────────────────────────────────────────────────
 export const DIAL_MAX_BAR = 16;
-export const DIAL_BANDS_BAR = [
-  { from: 0,  to: 8,  color: '#2e9e4f' },
-  { from: 8,  to: 12, color: '#f2c318' },
-  { from: 12, to: 16, color: '#dc2626' },
+
+// Single source of truth: label/key drive status logic (used by Dashboard's
+// legend + pressureStatusTone), color/min/max drive both the dial arc and
+// the legend range text.
+export const PRESSURE_BANDS_BAR = [
+  { key: 'normal',   label: 'Normal',   min: 0,  max: 8,  color: '#2e9e4f' },
+  { key: 'warning',  label: 'Warning',  min: 8,  max: 12, color: '#f2c318' },
+  { key: 'critical', label: 'Critical', min: 12, max: 16, color: '#dc2626' },
 ];
+
+// Back-compat alias + shape the SVG arc code already expects ({from, to}).
+export const DIAL_BANDS_BAR = PRESSURE_BANDS_BAR.map(b => ({
+  from: b.min,
+  to: b.max,
+  color: b.color,
+}));
+
+// Returns the matching band object ({key, label, min, max, color}) for a
+// given pressure value, clamping to the outer bands if out of range.
+export function classifyPressure(value, bands = PRESSURE_BANDS_BAR) {
+  if (!Number.isFinite(value)) return null;
+  for (const b of bands) {
+    if (value >= b.min && value < b.max) return b;
+  }
+  if (value >= bands[bands.length - 1].max) return bands[bands.length - 1];
+  return bands[0];
+}
 
 const BAR_PER_MPA = 10;
 const SWEEP_START_DEG = 225;
@@ -66,19 +82,24 @@ export function PressureGauge({
   value,
   unit = PRESSURE_UNIT_DISPLAY,
   size = 180,
-  dialBands = DIAL_BANDS_BAR,
+  bands,        // preferred: array of {min, max, color}
+  dialBands,    // back-compat: array of {from, to, color}
   showReadout = true,
 }) {
   const idRef = useRef(null);
   if (idRef.current === null) idRef.current = `pg${++gaugeInstance}`;
   const id = idRef.current;
 
+  // Normalize whichever prop was passed into {from, to, color} for the arc.
+  const resolvedBands = bands
+    ? bands.map(b => ({ from: b.min, to: b.max, color: b.color }))
+    : dialBands || DIAL_BANDS_BAR;
+
   const hasValue = Number.isFinite(value);
   const clamped = hasValue ? Math.max(0, Math.min(DIAL_MAX_BAR * OVERTRAVEL, value)) : 0;
   const needleRotation = -angleFor(clamped);
 
   const valueColor = 'var(--foreground)';
-
   const readoutSize = Math.max(16, Math.round(size * 0.13));
 
   return (
@@ -120,7 +141,7 @@ export function PressureGauge({
         <circle cx={CX} cy={CY} r="60" fill={`url(#${id}-dial)`} />
 
         {/* Printed colour arc */}
-        {dialBands.map((b) => (
+        {resolvedBands.map((b) => (
           <path
             key={`${b.from}-${b.to}`}
             d={arcPath(38.5, angleFor(b.from), angleFor(b.to))}
