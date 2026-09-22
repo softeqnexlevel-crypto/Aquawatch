@@ -643,11 +643,6 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             subtitle="System Pressure Gauge"
             status={!pressureHasData ? 'No Data' : pressureBand?.label}
             statusTone={pressureStatusTone}
-            legend={PRESSURE_BANDS_BAR.map(b => ({
-              label: b.label,
-              range: `${b.min.toFixed(1)} – ${b.max.toFixed(1)}`,
-              color: b.color,
-            }))}
           >
             <PressureGauge
               value={pressureHasData ? roPressure : undefined}
@@ -662,11 +657,6 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             subtitle="Tank Level"
             status={!tankHasData ? 'No Data' : tankBand?.statusLabel}
             statusTone={tankStatusTone}
-            legend={TANK_BANDS.map(b => ({
-              label: b.label,
-              range: `${b.min} – ${b.max}%`,
-              color: b.color,
-            }))}
           >
             <TankLevelGauge
               value={tankHasData ? feedTankLevel : undefined}
