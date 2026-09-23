@@ -4,7 +4,7 @@ import {
   Droplets, Activity, FlaskConical, AlertTriangle,
   CheckCircle, Gauge, Zap, Filter, TrendingUp, TrendingDown,
   Minus, RefreshCw, Power, AlertCircle, Settings,
-  Wrench, LayoutDashboard, LineChart as LineChartIcon, 
+  Wrench, LayoutDashboard, LineChart as LineChartIcon,
   SlidersHorizontal, Bell, Clock
 } from "lucide-react";
 import {
@@ -112,13 +112,49 @@ function saveDailyRunMs(ms) {
 const MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR = 2.0;
 const FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR = 0.40;
 
+// Shared pressure bands for the 0–16 bar dials (RO / interstage /
+// concentrate / filter inlet / filter outlet). Tune these to your skid's
+// actual operating envelope if 10/14/16 don't match the OEM datasheet.
+const PRESSURE_GAUGE_MAX = 16;
+const PRESSURE_GAUGE_BANDS = [
+  { key: 'normal',   label: 'Normal',   min: 0,  max: 10, color: '#2e9e4f' },
+  { key: 'warning',  label: 'Warning',  min: 10, max: 14, color: '#f2c318' },
+  { key: 'critical', label: 'Critical', min: 14, max: 16, color: '#dc2626' },
+];
+
 export const SENSOR_MAP = {
   'RO5-FEEDFlow': { label: 'Feed Flow', unit: 'm³/h', icon: Droplets, color: COLORS.primary, shortName: 'FEEDFlow' },
   'RO5-Permeateflow': { label: 'Permeate Flow', unit: 'm³/h', icon: Droplets, color: COLORS.secondary, shortName: 'Permeateflow' },
   'RO5-ConcetrateFlow': { label: 'Concentrate Flow', unit: 'm³/h', icon: Activity, color: COLORS.warning, shortName: 'ConcentrateFlow' },
-  'RO5-ROPressure': { label: 'RO Pressure', unit: 'bar', icon: Gauge, color: COLORS.danger, shortName: 'ROPressure', chartType: 'gauge' },
-  'RO5-InterstagePress': { label: 'Interstage Pressure', unit: 'bar', icon: Gauge, color: COLORS.orange, shortName: 'InterstagePress',  chartType: 'gauge'  },
-  'RO5-ConcetratePress': { label: 'Concentrate Pressure', unit: 'bar', icon: Gauge, color: COLORS.yellow, shortName: 'ConcetratePress',  chartType: 'gauge'  },
+
+  // ---- Pressures (all rendered with the radial gauge) ----
+  'RO5-ROPressure': {
+    label: 'RO Pressure', unit: 'bar', icon: Gauge, color: COLORS.danger, shortName: 'ROPressure',
+    chartType: 'gauge',
+    gauge: { max: PRESSURE_GAUGE_MAX, bands: PRESSURE_GAUGE_BANDS },
+  },
+  'RO5-InterstagePress': {
+    label: 'Interstage Pressure', unit: 'bar', icon: Gauge, color: COLORS.orange, shortName: 'InterstagePress',
+    chartType: 'gauge',
+    gauge: { max: PRESSURE_GAUGE_MAX, bands: PRESSURE_GAUGE_BANDS },
+  },
+  'RO5-ConcetratePress': {
+    label: 'Concentrate Pressure', unit: 'bar', icon: Gauge, color: COLORS.yellow, shortName: 'ConcetratePress',
+    chartType: 'gauge',
+    gauge: { max: PRESSURE_GAUGE_MAX, bands: PRESSURE_GAUGE_BANDS },
+  },
+  'RO5-MediaFilterInPress': {
+    label: 'Filter Inlet Pressure', unit: 'bar', icon: Filter, color: COLORS.purple, shortName: 'MediaFilterInPress',
+    chartType: 'gauge',
+    gauge: { max: PRESSURE_GAUGE_MAX, bands: PRESSURE_GAUGE_BANDS },
+  },
+  'RO5-MediaFilterOutPress': {
+    label: 'Filter Outlet Pressure', unit: 'bar', icon: Filter, color: COLORS.indigo, shortName: 'MediaFilterOutPress',
+    chartType: 'gauge',
+    gauge: { max: PRESSURE_GAUGE_MAX, bands: PRESSURE_GAUGE_BANDS },
+  },
+
+  // ---- Differential pressures ----
   'RO5-Stage1Delta': {
     label: 'Stage 1 Delta P', unit: 'bar', icon: Zap, color: COLORS.success, shortName: 'Stage1Delta',
     chartType: 'gauge',
@@ -143,8 +179,6 @@ export const SENSOR_MAP = {
       ],
     },
   },
-  'RO5-MediaFilterInPress': { label: 'Filter Inlet Pressure', unit: 'bar', icon: Filter, color: COLORS.purple, shortName: 'MediaFilterInPress',  chartType: 'gauge'  },
-  'RO5-MediaFilterOutPress': { label: 'Filter Outlet Pressure', unit: 'bar', icon: Filter, color: COLORS.indigo, shortName: 'MediaFilterOutPress',  chartType: 'gauge'  },
   'RO5-MediaFilterDeltaP': {
     label: 'Filter Delta P', unit: 'bar', icon: Filter, color: '#7c3aed', shortName: 'MediaFilterDeltaP',
     chartType: 'gauge',
@@ -157,6 +191,8 @@ export const SENSOR_MAP = {
       ],
     },
   },
+
+  // ---- Non-pressure sensors ----
   'RO5-SystemRecovery': { label: 'System Recovery', unit: '%', icon: Activity, color: COLORS.success, shortName: 'SystemRecovery' },
   'RO5-PureWaterEc': { label: 'Product Water EC', unit: 'µS/cm', icon: FlaskConical, color: COLORS.purple, shortName: 'PureWaterEC' },
   'RO5-FeedTankLevel': { label: 'Feed Tank Level', unit: '%', icon: Droplets, color: '#14b8a6', shortName: 'FeedTankLevel' },
@@ -256,14 +292,16 @@ function TopStatusCard({ icon: Icon, iconBg, iconColor, title, value, valueColor
     <div className="rounded-lg p-3 sm:p-4 flex items-center justify-between gap-2 sm:gap-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
       <div style={{ display: "flex", gap: isMobile ? 8 : 12, alignItems: "flex-start" }}>
         {Icon && (
-          <div style={{ width: isMobile ? 28 : 34, height: isMobile ? 28 : 34, borderRadius: 8, background: iconBg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <Icon size={isMobile ? 13 : 15} color={iconColor} />
+          <div style={{ width: isMobile ? 26 : 30, height: isMobile ? 26 : 30, borderRadius: 8, background: iconBg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <Icon size={isMobile ? 12 : 14} color={iconColor} />
           </div>
         )}
         <div>
-          <div style={{ fontSize: isMobile ? 8 : 9.5, color: "var(--muted-foreground)", marginBottom: 2 }}>{title}</div>
-          <div style={{ fontFamily: "var(--font-mono)", fontSize: isMobile ? 15 : 18, fontWeight: 700, color: valueColor || "var(--foreground)", lineHeight: 1.1 }}>{value}</div>
-          {sub && <div style={{ fontSize: isMobile ? 8 : 9, color: subColor || "var(--muted-foreground)", marginTop: 2 }}>{sub}</div>}
+          {/* Reduced: title 9.5 -> 8.5 desktop, 8 -> 7.5 mobile */}
+          <div style={{ fontSize: isMobile ? 7.5 : 8.5, color: "var(--muted-foreground)", marginBottom: 2 }}>{title}</div>
+          {/* Reduced: value 18 -> 15 desktop, 15 -> 13 mobile */}
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: isMobile ? 13 : 15, fontWeight: 700, color: valueColor || "var(--foreground)", lineHeight: 1.1 }}>{value}</div>
+          {sub && <div style={{ fontSize: isMobile ? 7.5 : 8.5, color: subColor || "var(--muted-foreground)", marginTop: 2 }}>{sub}</div>}
           {action}
         </div>
       </div>
@@ -311,7 +349,7 @@ function KPICardV2({ label, value, unit, icon: Icon, color, trend, statusText, s
   );
 }
 
-function EquipmentStatusItem({ icon: Icon, label, state, }) {
+function EquipmentStatusItem({ icon: Icon, label, state }) {
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
   const color = state === 'on' ? COLORS.success : state === 'off' ? COLORS.danger : 'var(--muted-foreground)';
   const bg = state === 'on' ? 'rgba(34,197,94,0.1)' : state === 'off' ? 'rgba(239,68,68,0.1)' : 'var(--secondary)';
@@ -328,11 +366,6 @@ function EquipmentStatusItem({ icon: Icon, label, state, }) {
           <div style={{ fontSize: isMobile ? 8 : 9.5, color, fontWeight: 600 }}>{text}</div>
         </div>
       </div>
-      {/* {value !== undefined && (
-        <div style={{ fontSize: isMobile ? 8 : 10, fontFamily: 'var(--font-mono)', color: 'var(--muted-foreground)' }}>
-          {value.toFixed(1)} {unit}
-        </div>
-      )} */}
     </div>
   );
 }
@@ -352,24 +385,9 @@ function PumpStartupSequence({ feedPumpOn, highPressurePumpOn, dosingPumpOn }) {
       <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
         {steps.map((step, idx) => (
           <React.Fragment key={step.id}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 3,
-              opacity: step.active ? 1 : 0.4
-            }}>
-              <div style={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                background: step.active ? COLORS.success : COLORS.border,
-                boxShadow: step.active ? `0 0 8px ${COLORS.success}80` : 'none'
-              }} />
-              <span style={{
-                fontSize: 8,
-                fontWeight: 600,
-                color: step.active ? 'var(--foreground)' : 'var(--muted-foreground)'
-              }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 3, opacity: step.active ? 1 : 0.4 }}>
+              <div style={{ width: 6, height: 6, borderRadius: '50%', background: step.active ? COLORS.success : COLORS.border, boxShadow: step.active ? `0 0 8px ${COLORS.success}80` : 'none' }} />
+              <span style={{ fontSize: 8, fontWeight: 600, color: step.active ? 'var(--foreground)' : 'var(--muted-foreground)' }}>
                 {step.name}
               </span>
             </div>
@@ -430,7 +448,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     refresh,
   } = useData();
 
-  const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'system' | 'analytics'
+  const [activeTab, setActiveTab] = useState('overview');
   const [selectedSensors, setSelectedSensors] = useState(['RO5-Permeateflow']);
   const [isMobile, setIsMobile] = useState(false);
   const [productionSummary, setProductionSummary] = useState(null);
@@ -441,7 +459,6 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     previousState: null,
   });
 
-  // Daily run-time tracking: total time the system has been ON today.
   const [dailyRunMs, setDailyRunMs] = useState(() => loadDailyRunMs());
 
   useEffect(() => {
@@ -538,13 +555,12 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const highPressurePumpOn = operationMode === 'FILTER' && isSystemOn;
   const dosingPumpOn = operationMode === 'FILTER' && isDosingOn;
 
-  // Accumulate run time in 1-second ticks while the HIGH PRESSURE PUMP is on
-  // (this is the actual RO production run time, not just the feed pump).
-  // Resets to zero automatically when the calendar date rolls over (checked
-  // on every tick), and persists to localStorage so a page refresh doesn't
-  // lose today's total.
+  // Run-time accumulates while the DOSING pump is on (this matches the
+  // physical antiscalant dosing runtime, which is what the operator cares
+  // about). Resets to zero on date rollover; persists to localStorage so a
+  // page refresh doesn't lose today's total.
   useEffect(() => {
-    if (!highPressurePumpOn) return;
+    if (!dosingPumpOn) return;
     const interval = setInterval(() => {
       setDailyRunMs((prev) => {
         const todayKey = new Date().toDateString();
@@ -561,7 +577,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [highPressurePumpOn]);
+  }, [dosingPumpOn]);
 
   const getOperationDisplay = () => {
     if (tankEmpty) {
@@ -579,12 +595,8 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const opStatus = getOperationDisplay();
 
   const getStartupStatus = () => {
-    if (tankEmpty) {
-      return { stage: 'Stopped', color: COLORS.danger, message: 'Feed tank empty - system stopped' };
-    }
-    if (!feedPumpOn) {
-      return { stage: 'Stopped', color: COLORS.danger, message: 'System stopped' };
-    }
+    if (tankEmpty) return { stage: 'Stopped', color: COLORS.danger, message: 'Feed tank empty - system stopped' };
+    if (!feedPumpOn) return { stage: 'Stopped', color: COLORS.danger, message: 'System stopped' };
     if (feedPumpOn && !highPressurePumpOn && operationMode === 'BACKWASH') {
       return { stage: 'Backwash', color: COLORS.warning, message: 'Backwash in progress - Feed pump only' };
     }
@@ -668,7 +680,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
 
   const renderOverviewTab = () => (
     <div className="flex flex-col gap-3 sm:gap-4">
-      
+
       {/* Top Status Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
         <TopStatusCard
@@ -688,11 +700,11 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           subColor="var(--muted-foreground)"
         />
         <TopStatusCard
-          icon={Clock} iconBg="rgba(34,197,94,0.12)" iconColor={highPressurePumpOn ? COLORS.success : COLORS.muted}
+          icon={Clock} iconBg="rgba(34,197,94,0.12)" iconColor={dosingPumpOn ? COLORS.success : COLORS.muted}
           title="Run Time Today"
           value={formatHoursMinutes(dailyRunMs)}
-          valueColor={highPressurePumpOn ? COLORS.success : 'var(--muted-foreground)'}
-          sub={highPressurePumpOn ? 'High pressure pump running' : 'High pressure pump stopped'}
+          valueColor={dosingPumpOn ? COLORS.success : 'var(--muted-foreground)'}
+          sub={dosingPumpOn ? 'Antiscalant dosing active' : 'Antiscalant dosing stopped'}
           subColor="var(--muted-foreground)"
         />
         <TopStatusCard
@@ -702,7 +714,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
         />
       </div>
 
-      {/* Live Instruments: Pressure + Feed Tank */}
+      {/* Live Instruments */}
       <div>
         <SectionTitle>Live Instruments</SectionTitle>
         <div className="grid grid-cols-2 gap-2 sm:gap-4">
@@ -821,25 +833,16 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           )}
 
           {systemStateHistory.lastChanged && (
-            <div style={{
-              fontSize: 8,
-              color: 'var(--muted-foreground)',
-              marginTop: 6,
-              textAlign: 'center'
-            }}>
+            <div style={{ fontSize: 8, color: 'var(--muted-foreground)', marginTop: 6, textAlign: 'center' }}>
               Last state change: {new Date(systemStateHistory.lastChanged).toLocaleTimeString()}
-              {systemStateHistory.previousState &&
-                ` (was ${systemStateHistory.previousState})`}
+              {systemStateHistory.previousState && ` (was ${systemStateHistory.previousState})`}
             </div>
           )}
 
           <div className="flex justify-around" style={{ marginTop: 8 }}>
             <CircularGauge
               value={tankHasData ? feedTankLevel : 0}
-              color={!tankHasData ? COLORS.muted
-                   : feedTankLevel === 0 ? COLORS.danger
-                   : feedTankLevel > 30 ? COLORS.success
-                   : COLORS.warning}
+              color={!tankHasData ? COLORS.muted : feedTankLevel === 0 ? COLORS.danger : feedTankLevel > 30 ? COLORS.success : COLORS.warning}
               label="Feed Tank"
               statusLabel={!tankHasData ? "No Data" : tankEmpty ? "Empty" : feedTankLevel > 30 ? "Normal" : "Low"}
               noData={!tankHasData}
@@ -863,29 +866,10 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           <div style={{ marginTop: 12 }}>
             <SectionTitle>Equipment Status</SectionTitle>
             <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
-              <EquipmentStatusItem
-                icon={Wrench}
-                label="High Pressure Pump"
-                state={highPressurePumpOn ? 'on' : 'off'}
-               
-              />
-              <EquipmentStatusItem
-                icon={Wrench}
-                label="Feed Pump"
-                state={feedPumpOn && !tankEmpty ? 'on' : 'off'}
-               
-              />
-              <EquipmentStatusItem
-                icon={FlaskConical}
-                label="Dosing Pump"
-                state={dosingPumpOn ? 'on' : 'off'}
-              />
-              <EquipmentStatusItem
-                icon={Filter}
-                label="Prefilter"
-                state={backwashOn ? 'backwash' : 'filtering'}
-             
-              />
+              <EquipmentStatusItem icon={Wrench} label="High Pressure Pump" state={highPressurePumpOn ? 'on' : 'off'} />
+              <EquipmentStatusItem icon={Wrench} label="Feed Pump" state={feedPumpOn && !tankEmpty ? 'on' : 'off'} />
+              <EquipmentStatusItem icon={FlaskConical} label="Dosing Pump" state={dosingPumpOn ? 'on' : 'off'} />
+              <EquipmentStatusItem icon={Filter} label="Prefilter" state={backwashOn ? 'backwash' : 'filtering'} />
             </div>
           </div>
         </div>
@@ -921,153 +905,159 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const renderAnalyticsTab = () => {
     const selectedKey = selectedSensors[0] || 'RO5-Permeateflow';
     const selectedMeta = SENSOR_MAP[selectedKey];
-    const isGaugeSensor = selectedMeta?.chartType === 'gauge';
     const isRoPressure = selectedKey === 'RO5-ROPressure';
 
-    // For generic gauge sensors (Delta P etc.), compute current value + band
-    // classification from the sensor's own gauge config.
+    // A sensor is "gauge-renderable" only when it declares chartType === 'gauge'
+    // AND has a valid gauge config. Anything else falls back to the plain
+    // trend chart, so a bad config can't take the whole page down.
+    const gaugeCfg = selectedMeta?.gauge;
+    const isGaugeSensor =
+      selectedMeta?.chartType === 'gauge' &&
+      gaugeCfg &&
+      Number.isFinite(gaugeCfg.max) &&
+      gaugeCfg.max > 0 &&
+      Array.isArray(gaugeCfg.bands) &&
+      gaugeCfg.bands.length > 0;
+
     const genericValue = isGaugeSensor && !isRoPressure ? getNumber(selectedKey) : null;
-    const genericBands = selectedMeta?.gauge?.bands || [];
+    const genericBands = isGaugeSensor ? gaugeCfg.bands : [];
     const genericBand = isGaugeSensor && !isRoPressure ? classifyByBands(genericValue, genericBands) : null;
 
     return (
-    <div className="flex flex-col gap-3 sm:gap-4">
-      {/* Sensor selection + Live Trend Chart */}
-      <div className="rounded-lg p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-        <span style={{ fontSize: isMobile ? 9 : 11, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 6, display: "block" }}>
-          Select Sensor for Comparison
-        </span>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? 4 : 8, marginBottom: 12 }}>
-          {Object.keys(SENSOR_MAP).slice(0, isMobile ? 8 : 15).map(key => {
-            const sensor = SENSOR_MAP[key];
-            const isSelected = selectedSensors.includes(key);
-            return (
-              <button
-                key={key}
-                onClick={() => setSelectedSensors([key])}
-                style={{
-                  padding: isMobile ? '2px 8px' : '4px 12px',
-                  borderRadius: isMobile ? 8 : 12,
-                  background: isSelected ? sensor.color : 'var(--secondary)',
-                  color: isSelected ? 'white' : 'var(--muted-foreground)',
-                  border: isSelected ? `2px solid ${sensor.color}` : '1px solid var(--border)',
-                  fontSize: isMobile ? 8 : 10,
-                  cursor: 'pointer',
-                  transition: 'all 0.2s',
-                  fontWeight: isSelected ? 600 : 400,
-                  opacity: isSelected ? 1 : 0.7,
-                }}
-              >
-                {isMobile ? sensor.shortName || sensor.label : sensor.label}
-              </button>
-            );
-          })}
+      <div className="flex flex-col gap-3 sm:gap-4">
+        {/* Sensor selection + Live Trend Chart */}
+        <div className="rounded-lg p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+          <span style={{ fontSize: isMobile ? 9 : 11, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 6, display: "block" }}>
+            Select Sensor for Comparison
+          </span>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? 4 : 6, marginBottom: 12 }}>
+            {Object.keys(SENSOR_MAP).slice(0, isMobile ? 8 : 15).map(key => {
+              const sensor = SENSOR_MAP[key];
+              const isSelected = selectedSensors.includes(key);
+              return (
+                <button
+                  key={key}
+                  onClick={() => setSelectedSensors([key])}
+                  style={{
+                    // Reduced: filter pill font + padding
+                    padding: isMobile ? '2px 7px' : '3px 9px',
+                    borderRadius: isMobile ? 8 : 10,
+                    background: isSelected ? sensor.color : 'var(--secondary)',
+                    color: isSelected ? 'white' : 'var(--muted-foreground)',
+                    border: isSelected ? `1.5px solid ${sensor.color}` : '1px solid var(--border)',
+                    fontSize: isMobile ? 7.5 : 9,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    fontWeight: isSelected ? 600 : 400,
+                    opacity: isSelected ? 1 : 0.75,
+                  }}
+                >
+                  {isMobile ? sensor.shortName || sensor.label : sensor.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {isRoPressure ? (
+            <div className="flex flex-col sm:flex-row gap-4 items-center sm:items-stretch">
+              <div style={{
+                flexShrink: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: isMobile ? 8 : 12,
+                background: 'var(--secondary)',
+                borderRadius: 8,
+                width: isMobile ? '100%' : 220,
+              }}>
+                <PressureGauge
+                  value={pressureHasData ? roPressure : undefined}
+                  unit={PRESSURE_UNIT_DISPLAY}
+                  size={isMobile ? 150 : 190}
+                  bands={PRESSURE_BANDS_BAR}
+                />
+                <span style={{
+                  marginTop: 6,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: !pressureHasData ? COLORS.muted
+                    : pressureStatusTone === 'normal' ? COLORS.success
+                    : pressureStatusTone === 'warning' ? COLORS.warning
+                    : COLORS.danger,
+                }}>
+                  {!pressureHasData ? 'No Data' : pressureBand?.label}
+                </span>
+              </div>
+
+              <div style={{ flex: 1, minWidth: 0, width: '100%' }}>
+                <LiveTrendChart
+                  data={{ ...sensorData, history }}
+                  sensorKey={selectedKey}
+                  height={isMobile ? 220 : 300}
+                />
+              </div>
+            </div>
+          ) : isGaugeSensor ? (
+            <div className="flex flex-col sm:flex-row gap-4 items-center sm:items-stretch">
+              <div style={{
+                flexShrink: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: isMobile ? 8 : 12,
+                background: 'var(--secondary)',
+                borderRadius: 8,
+                width: isMobile ? '100%' : 220,
+              }}>
+                <RadialGauge
+                  value={genericValue}
+                  unit={selectedMeta.unit}
+                  label={selectedMeta.label}
+                  size={isMobile ? 150 : 190}
+                  max={gaugeCfg.max}
+                  bands={genericBands}
+                  precision={selectedMeta.unit === 'bar' && gaugeCfg.max < 1 ? 3 : 2}
+                />
+                <span style={{
+                  marginTop: 6,
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: !Number.isFinite(genericValue) ? COLORS.muted
+                    : genericBand?.key === 'normal' ? COLORS.success
+                    : genericBand?.key === 'warning' ? COLORS.warning
+                    : COLORS.danger,
+                }}>
+                  {!Number.isFinite(genericValue) ? 'No Data' : genericBand?.label}
+                </span>
+              </div>
+
+              <div style={{ flex: 1, minWidth: 0, width: '100%' }}>
+                <LiveTrendChart
+                  data={{ ...sensorData, history }}
+                  sensorKey={selectedKey}
+                  height={isMobile ? 220 : 300}
+                />
+              </div>
+            </div>
+          ) : (
+            <LiveTrendChart
+              data={{ ...sensorData, history }}
+              sensorKey={selectedKey}
+              height={isMobile ? 250 : 350}
+            />
+          )}
         </div>
 
-        {isRoPressure ? (
-          <div className="flex flex-col sm:flex-row gap-4 items-center sm:items-stretch">
-            {/* Live gauge: instant status, reusing the same value/bands as the Overview tab */}
-            <div style={{
-              flexShrink: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: isMobile ? 8 : 12,
-              background: 'var(--secondary)',
-              borderRadius: 8,
-              width: isMobile ? '100%' : 220,
-            }}>
-              <PressureGauge
-                value={pressureHasData ? roPressure : undefined}
-                unit={PRESSURE_UNIT_DISPLAY}
-                size={isMobile ? 150 : 190}
-                bands={PRESSURE_BANDS_BAR}
-              />
-              <span style={{
-                marginTop: 6,
-                fontSize: 11,
-                fontWeight: 700,
-                color: !pressureHasData ? COLORS.muted
-                  : pressureStatusTone === 'normal' ? COLORS.success
-                  : pressureStatusTone === 'warning' ? COLORS.warning
-                  : COLORS.danger,
-              }}>
-                {!pressureHasData ? 'No Data' : pressureBand?.label}
-              </span>
-            </div>
-
-            {/* Historical trend, kept alongside the gauge for context */}
-            <div style={{ flex: 1, minWidth: 0, width: '100%' }}>
-              <LiveTrendChart
-                data={{ ...sensorData, history }}
-                sensorKey={selectedKey}
-                height={isMobile ? 220 : 300}
-              />
-            </div>
-          </div>
-        ) : isGaugeSensor ? (
-          <div className="flex flex-col sm:flex-row gap-4 items-center sm:items-stretch">
-            {/* Generic radial gauge for Delta P style sensors */}
-            <div style={{
-              flexShrink: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: isMobile ? 8 : 12,
-              background: 'var(--secondary)',
-              borderRadius: 8,
-              width: isMobile ? '100%' : 220,
-            }}>
-              <RadialGauge
-                value={genericValue}
-                unit={selectedMeta.unit}
-                label={selectedMeta.label}
-                size={isMobile ? 150 : 190}
-                max={selectedMeta.gauge.max}
-                bands={genericBands}
-                precision={selectedMeta.unit === 'bar' && selectedMeta.gauge.max < 1 ? 3 : 2}
-              />
-              <span style={{
-                marginTop: 6,
-                fontSize: 11,
-                fontWeight: 700,
-                color: !Number.isFinite(genericValue) ? COLORS.muted
-                  : genericBand?.key === 'normal' ? COLORS.success
-                  : genericBand?.key === 'warning' ? COLORS.warning
-                  : COLORS.danger,
-              }}>
-                {!Number.isFinite(genericValue) ? 'No Data' : genericBand?.label}
-              </span>
-            </div>
-
-            {/* Historical trend, kept alongside the gauge for context */}
-            <div style={{ flex: 1, minWidth: 0, width: '100%' }}>
-              <LiveTrendChart
-                data={{ ...sensorData, history }}
-                sensorKey={selectedKey}
-                height={isMobile ? 220 : 300}
-              />
-            </div>
-          </div>
-        ) : (
-          <LiveTrendChart
-            data={{ ...sensorData, history }}
-            sensorKey={selectedKey}
-            height={isMobile ? 250 : 350}
-          />
-        )}
+        {/* Flow balance + distributions */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+          <FlowBalanceChart data={sensorData} />
+          <DistributionHistogram data={{ ...sensorData, history }} sensorKey="RO5-ROPressure" />
+          <DistributionHistogram data={{ ...sensorData, history }} sensorKey="RO5-FEEDFlow" />
+        </div>
       </div>
-
-      {/* Flow balance + distributions */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-        <FlowBalanceChart data={sensorData} />
-        <DistributionHistogram data={{ ...sensorData, history }} sensorKey="RO5-ROPressure" />
-        <DistributionHistogram data={{ ...sensorData, history }} sensorKey="RO5-FEEDFlow" />
-      </div>
-    </div>
-  );
+    );
   };
 
 
