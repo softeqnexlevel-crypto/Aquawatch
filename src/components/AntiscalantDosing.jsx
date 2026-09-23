@@ -1,47 +1,33 @@
 // components/AntiscalantDosing.jsx - FULLY MOBILE RESPONSIVE
+//
+// Server-authoritative. This component never counts, never writes to
+// localStorage, and never invents data. It polls /api/dosing/* every 5 s
+// and interpolates the display between polls (cosmetic only).
 
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   AreaChart, Area, LineChart, Line, BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  ReferenceLine, PieChart, Pie, Cell, Legend
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
 } from "recharts";
 import {
   AlertTriangle, CheckCircle, FlaskConical, Droplet,
-  TrendingUp, TrendingDown, Clock, Calendar, Power,
-  AlertCircle, Info
+  TrendingUp, TrendingDown, Clock, Calendar, AlertCircle, Info
 } from "lucide-react";
 import { useData } from "../contexts/DataContext";
-import { format, subHours, subDays, startOfDay, subMonths } from 'date-fns';
+import { API_BASE_URL } from "../config";
+import { format, subHours, subDays } from 'date-fns';
 
-// ─── Dosing pump constants ───────────────────────────────────────────────────
-// Per the shaded spec: 0.048 ml per second of pump ON-time.
-// (The previous 0.045 value was 2.7 ml/min ÷ 60, which was ~6.7% low.)
-const DOSING_RATE_ML_MIN = 2.7;
-const DOSING_RATE_ML_SEC = DOSING_RATE_ML_MIN / 60; // 2.88 ml/min
+// ─── Fallback constants (only used until the first server fetch returns) ────
+const FALLBACK_RATE_ML_MIN = 2.7;
+const FALLBACK_RATE_ML_SEC = FALLBACK_RATE_ML_MIN / 60;
 
-// Startup prime: an extra 0.048 ml is dosed the moment the pump goes ON,
-// on top of the continuous per-second dosing. This matches the operator
-// spec ("initial dose 0.048 ml/sec to result in A") and is counted into
-// today's total the same as any other second of ON-time.
-const STARTUP_PRIME_ML = DOSING_RATE_ML_SEC;
-
-// Storage keys
-const STORAGE_KEY = 'antiscalant_dosing_totals_v3';         // daily seconds + prime flag
-const MONTHLY_STORAGE_KEY = 'antiscalant_monthly_total_v1'; // running monthly ml
-
-// If the browser pauses timers (background tab / sleep), the next tick can
-// arrive late. We add the real elapsed time so no seconds are lost, but never
-// more than this many seconds in a single tick.
-const MAX_TICK_GAP_S = 65;
-
+// ─── Helpers ────────────────────────────────────────────────────────────────
 function toBool(raw) {
-  if (raw === true || raw === false) return raw;
-  if (raw === null || raw === undefined) return false;
-  if (typeof raw === 'number') return raw === 1;
+  if (raw === true || raw === 1 || raw === '1') return true;
+  if (raw === false || raw === 0 || raw === '0') return false;
   if (typeof raw === 'string') {
     const v = raw.trim().toUpperCase();
-    return v === 'ON' || v === 'TRUE' || v === '1' || v === 'RUNNING' || v === 'ACTIVE' || v === 'YES';
+    return v === 'ON' || v === 'TRUE' || v === 'RUNNING' || v === 'ACTIVE' || v === 'YES';
   }
   return false;
 }
@@ -52,80 +38,6 @@ function toNum(raw, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-// Returns today's accumulated pump ON-time in seconds (0 if none / new day)
-function loadStoredSeconds(today) {
-  try {
-    const raw = window.localStorage?.getItem(STORAGE_KEY);
-    if (!raw) return 0;
-    const parsed = JSON.parse(raw);
-    if (parsed && parsed.day === today && Number.isFinite(parsed.secondsOn)) {
-      return Math.max(0, parsed.secondsOn);
-    }
-    return 0;
-  } catch {
-    return 0;
-  }
-}
-
-function loadStoredPrime(today) {
-  try {
-    const raw = window.localStorage?.getItem(STORAGE_KEY);
-    if (!raw) return false;
-    const parsed = JSON.parse(raw);
-    if (parsed && parsed.day === today && parsed.primedToday) {
-      return true;
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-function saveStoredSeconds(data) {
-  try {
-    window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(data));
-  } catch {
-  }
-}
-
-// Monthly total storage — { month: 'YYYY-MM', mlDosed: number }
-function loadMonthlyTotal() {
-  try {
-    const raw = window.localStorage?.getItem(MONTHLY_STORAGE_KEY);
-    if (!raw) return { month: currentMonthKey(), mlDosed: 0 };
-    const parsed = JSON.parse(raw);
-    const thisMonth = currentMonthKey();
-    if (parsed && parsed.month === thisMonth && Number.isFinite(parsed.mlDosed)) {
-      return parsed;
-    }
-    // Month changed — archive last month and start fresh
-    if (parsed && parsed.month) {
-      try {
-        window.localStorage?.setItem(
-          `antiscalant_monthly_history_${parsed.month}`,
-          JSON.stringify(parsed)
-        );
-      } catch { /* ignore */ }
-    }
-    return { month: thisMonth, mlDosed: 0 };
-  } catch {
-    return { month: currentMonthKey(), mlDosed: 0 };
-  }
-}
-
-function saveMonthlyTotal(data) {
-  try {
-    window.localStorage?.setItem(MONTHLY_STORAGE_KEY, JSON.stringify(data));
-  } catch {
-  }
-}
-
-function currentMonthKey() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-}
-
-// 3725 -> "1h 02m 05s"
 function formatDuration(totalSeconds) {
   const s = Math.floor(totalSeconds);
   const h = Math.floor(s / 3600);
@@ -136,151 +48,110 @@ function formatDuration(totalSeconds) {
   return `${sec}s`;
 }
 
+function monthKeyNow() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+// ─── Tooltip ────────────────────────────────────────────────────────────────
 const CustomTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
   return (
     <div style={{
-      background: "#0a1828",
-      border: "1px solid rgba(14,165,233,0.2)",
-      borderRadius: 8,
-      padding: "8px 14px",
-      boxShadow: "0 4px 12px rgba(0,0,0,0.4)"
+      background: "#0a1828", border: "1px solid rgba(14,165,233,0.2)",
+      borderRadius: 8, padding: "8px 14px", boxShadow: "0 4px 12px rgba(0,0,0,0.4)"
     }}>
       <p style={{ fontSize: 10, color: "#4d7a9e", marginBottom: 4, fontWeight: 500 }}>{label}</p>
       {payload.map((p, i) => (
         <p key={i} style={{
-          fontSize: 12,
-          fontFamily: "var(--font-mono)",
-          color: p.color,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6
+          fontSize: 12, fontFamily: "var(--font-mono)", color: p.color,
+          display: 'flex', alignItems: 'center', gap: 6
         }}>
-          <span style={{
-            display: 'inline-block',
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            background: p.color
-          }} />
-          {p.name}: {typeof p.value === "number" ? p.value.toFixed(2) : p.value}
+          <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: p.color }} />
+          {p.name}: {typeof p.value === "number" ? p.value.toFixed(3) : p.value}
         </p>
       ))}
     </div>
   );
 };
 
-function MetricCard({ label, value, unit, color, sub, trend, icon: Icon, onClick, isMobile }) {
-  const TrendIcon = trend > 0 ? TrendingUp : trend < 0 ? TrendingDown : null;
-  const trendColor = trend > 0 ? "#22c55e" : trend < 0 ? "#ef4444" : "var(--muted-foreground)";
-
+// ─── Presentational ─────────────────────────────────────────────────────────
+function MetricCard({ label, value, unit, color, sub, icon: Icon, isMobile }) {
   return (
-    <div
-      className="rounded-lg p-3 sm:p-4 cursor-pointer hover:border-opacity-100 transition-all"
-      style={{
-        background: "var(--card)",
-        border: "1px solid var(--border)",
-        borderColor: color ? `${color}40` : "var(--border)",
-        transition: "all 0.3s ease"
-      }}
-      onClick={onClick}
-    >
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 4
-      }}>
+    <div className="rounded-lg p-3 sm:p-4" style={{
+      background: "var(--card)",
+      border: "1px solid var(--border)",
+      borderColor: color ? `${color}40` : "var(--border)"
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
         <span style={{
-          fontSize: isMobile ? 9 : 10,
-          color: "var(--muted-foreground)",
-          textTransform: "uppercase",
-          letterSpacing: "0.08em",
-          fontWeight: 600
-        }}>
-          {label}
-        </span>
+          fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)",
+          textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 600
+        }}>{label}</span>
         {Icon && <Icon size={isMobile ? 12 : 14} style={{ color: color || "var(--muted-foreground)" }} />}
       </div>
       <div className="flex items-end gap-1">
         <span style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: isMobile ? 20 : 24,
-          fontWeight: 700,
-          color: color || "var(--foreground)",
-          lineHeight: 1
-        }}>
-          {value}
-        </span>
+          fontFamily: "var(--font-mono)", fontSize: isMobile ? 20 : 24,
+          fontWeight: 700, color: color || "var(--foreground)", lineHeight: 1
+        }}>{value}</span>
         {unit && <span style={{ fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)", marginBottom: 2 }}>{unit}</span>}
       </div>
-      {sub && (
-        <div style={{
-          fontSize: isMobile ? 9 : 10,
-          color: "var(--muted-foreground)",
-          marginTop: 3,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 4
-        }}>
-          {TrendIcon && <TrendIcon size={isMobile ? 9 : 10} style={{ color: trendColor }} />}
-          {sub}
-        </div>
-      )}
+      {sub && <div style={{ fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)", marginTop: 3 }}>{sub}</div>}
     </div>
   );
 }
 
 function StatusBadge({ isActive, size = 'md', isMobile }) {
-  const sizeMap = {
-    sm: { dot: 5, text: 8, padding: '2px 6px' },
-    md: { dot: 7, text: 10, padding: '3px 10px' },
-    lg: { dot: 9, text: 12, padding: '4px 14px' }
-  };
-  const s = sizeMap[size] || sizeMap.md;
-  const actualSize = sizeMap[isMobile ? 'sm' : size] || s;
-
+  const pad = size === 'lg' ? '4px 14px' : size === 'sm' ? '2px 6px' : '3px 10px';
+  const txt = size === 'lg' ? 12 : size === 'sm' ? 8 : 10;
   return (
     <div style={{
-      display: 'inline-flex',
-      alignItems: 'center',
-      gap: isMobile ? 4 : 6,
-      padding: isMobile ? '2px 8px' : actualSize.padding,
-      borderRadius: 20,
+      display: 'inline-flex', alignItems: 'center', gap: 4,
+      padding: isMobile ? '2px 8px' : pad, borderRadius: 20,
       background: isActive ? 'rgba(34,197,94,0.12)' : 'rgba(239,68,68,0.12)',
       border: `1px solid ${isActive ? 'rgba(34,197,94,0.25)' : 'rgba(239,68,68,0.25)'}`
     }}>
-      <div style={{
-        width: isMobile ? 5 : actualSize.dot,
-        height: isMobile ? 5 : actualSize.dot,
-        borderRadius: '50%',
-        background: isActive ? '#22c55e' : '#ef4444',
-        animation: isActive ? 'pulse-dot 2s infinite' : 'none'
-      }} />
+      <div style={{ width: 6, height: 6, borderRadius: '50%', background: isActive ? '#22c55e' : '#ef4444' }} />
       <span style={{
-        fontSize: isMobile ? 8 : actualSize.text,
-        fontWeight: 700,
-        color: isActive ? '#22c55e' : '#ef4444',
-        letterSpacing: '0.05em'
+        fontSize: isMobile ? 8 : txt, fontWeight: 700,
+        color: isActive ? '#22c55e' : '#ef4444', letterSpacing: '0.05em'
       }}>
         {isActive ? 'RUNNING' : 'STOPPED'}
       </span>
-      <style>{`
-        @keyframes pulse-dot {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50% { opacity: 0.5; transform: scale(0.8); }
-        }
-      `}</style>
     </div>
   );
 }
 
+function ChartPanel({ title, meta, children, isMobile }) {
+  return (
+    <div className="rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+      <div className="flex items-center justify-between mb-3">
+        <span style={{
+          fontSize: isMobile ? 10 : 12, fontWeight: 600,
+          color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.08em"
+        }}>{title}</span>
+        {meta && <span style={{
+          fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)"
+        }}>{meta}</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// ─── Main ───────────────────────────────────────────────────────────────────
 export function AntiscalantDosing() {
-  const { sensorData, getValue, getHistory, lastUpdate, connected } = useData();
-  const [timeRange, setTimeRange] = useState('24h');
-  const [showAlerts, setShowAlerts] = useState(true);
-  const [selectedMetric, setSelectedMetric] = useState(null);
+  const { getValue, getHistory, lastUpdate, connected } = useData();
   const [isMobile, setIsMobile] = useState(false);
+  const [showAlerts, setShowAlerts] = useState(true);
+  const [timeRange, setTimeRange] = useState('24h');
+
+  // Server state
+  const [totals, setTotals] = useState(null);
+  const [monthSummary, setMonthSummary] = useState(null);
+  const [monthHistory, setMonthHistory] = useState(null);
+  const [fetchError, setFetchError] = useState(null);
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -289,344 +160,266 @@ export function AntiscalantDosing() {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  const feedFlow = toNum(getValue('RO5-FEEDFlow'));
-  const permeateFlow = toNum(getValue('RO5-Permeateflow'));
-  const recovery = toNum(getValue('RO5-SystemRecovery'));
-  const pureWaterEC = toNum(getValue('RO5-PureWaterEc'));
-  const feedTankLevel = toNum(getValue('RO5-FeedTankLevel'));
-
-  const dosingStatusRaw = getValue('RO5-AntiscalantDosingActive');
-  const isDosingActive = toBool(dosingStatusRaw);
-
-  // ─── Per-second dosing counter ─────────────────────────────────────────────
-  // Every second the pump is ON, add 1 second of ON-time.
-  //   ml dosed = secondsOn × 0.048 ml/s   (plus a one-time startup prime)
-  // The running values live in refs so the timer never works with stale state
-  // and never has side effects inside a state updater.
-  const initialDay = format(new Date(), 'yyyy-MM-dd');
-  const [secondsOnToday, setSecondsOnToday] = useState(() => loadStoredSeconds(initialDay));
-  const [primedToday, setPrimedToday] = useState(() => loadStoredPrime(initialDay));
-
-  const secondsOnRef = useRef(secondsOnToday);
-  const primedTodayRef = useRef(primedToday);
-  const dayRef = useRef(initialDay);
-  const lastTickRef = useRef(Date.now());
-  const isDosingActiveRef = useRef(isDosingActive);
-  const prevDosingActiveRef = useRef(isDosingActive);
-  isDosingActiveRef.current = isDosingActive;
-
-  // Monthly running total — { month, mlDosed }
-  const [monthlyTotal, setMonthlyTotal] = useState(() => loadMonthlyTotal());
-  const monthlyTotalRef = useRef(monthlyTotal.mlDosed);
-  monthlyTotalRef.current = monthlyTotal.mlDosed;
-
+  // ── Poll /api/dosing/* every 5 s ─────────────────────────────────────────
   useEffect(() => {
-    lastTickRef.current = Date.now();
+    let cancelled = false;
+    const token = localStorage.getItem('accessToken');
+    const headers = { Authorization: `Bearer ${token}` };
 
-    const interval = setInterval(() => {
-      const now = Date.now();
-      // Real time since the previous tick (normally ~1 s). Using the clock
-      // instead of assuming "1 tick = 1 s" keeps the count accurate even if
-      // the timer drifts or the tab was throttled.
-      const elapsedS = Math.min(Math.max((now - lastTickRef.current) / 1000, 0), MAX_TICK_GAP_S);
-      lastTickRef.current = now;
-
-      // New day -> reset the daily counter and prime flag
-      const todayStr = format(new Date(now), 'yyyy-MM-dd');
-      if (todayStr !== dayRef.current) {
-        dayRef.current = todayStr;
-        secondsOnRef.current = 0;
-        primedTodayRef.current = false;
-        setPrimedToday(false);
+    const fetchAll = async () => {
+      try {
+        const month = monthKeyNow();
+        const [tRes, mRes, hRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/api/dosing/totals`, { headers }),
+          fetch(`${API_BASE_URL}/api/dosing/month`, { headers }),
+          fetch(`${API_BASE_URL}/api/dosing/history?month=${month}`, { headers }),
+        ]);
+        if (cancelled) return;
+        if (tRes.ok) setTotals(await tRes.json());
+        if (mRes.ok) setMonthSummary(await mRes.json());
+        if (hRes.ok) setMonthHistory(await hRes.json());
+        setFetchError(null);
+      } catch (err) {
+        if (!cancelled) setFetchError(err.message);
       }
+    };
 
-      const wasOn = prevDosingActiveRef.current;
-      const nowOn = isDosingActiveRef.current;
-
-      // Rising edge (OFF -> ON): emit one startup prime dose. This is the
-      // initial 0.048 ml shot, added on top of the continuous dosing.
-      if (!wasOn && nowOn) {
-        secondsOnRef.current += STARTUP_PRIME_ML / DOSING_RATE_ML_SEC; // == 1 second
-        primedTodayRef.current = true;
-        setPrimedToday(true);
-      }
-      prevDosingActiveRef.current = nowOn;
-
-      // Pump ON -> add this second of ON-time
-      if (nowOn) {
-        secondsOnRef.current += elapsedS;
-      }
-
-      setSecondsOnToday(secondsOnRef.current);
-      saveStoredSeconds({
-        day: dayRef.current,
-        secondsOn: secondsOnRef.current,
-        primedToday: primedTodayRef.current,
-      });
-
-      // Roll the monthly total forward by however many ml were added this tick.
-      if (nowOn) {
-        const mlAddedThisTick = elapsedS * DOSING_RATE_ML_SEC;
-        const nextMonthly = monthlyTotalRef.current + mlAddedThisTick;
-        monthlyTotalRef.current = nextMonthly;
-        setMonthlyTotal({ month: currentMonthKey(), mlDosed: nextMonthly });
-        saveMonthlyTotal({ month: currentMonthKey(), mlDosed: nextMonthly });
-      }
-    }, 1000);
-
-    return () => clearInterval(interval);
+    fetchAll();
+    const id = setInterval(fetchAll, 5000);
+    return () => { cancelled = true; clearInterval(id); };
   }, []);
 
-  // Today's ml, computed from accumulated ON-time. The prime is already
-  // baked into secondsOnRef (as +1 second), so no double-counting.
-  const dosedTodayMl = secondsOnToday * DOSING_RATE_ML_SEC;
-  const dosedThisMonthMl = monthlyTotal.mlDosed;
-  const dosedThisMonthL = dosedThisMonthMl / 1000;
+  // ── Live plant signals from DataContext (WebSocket-fed) ──────────────────
+  const feedFlow       = toNum(getValue('RO5-FEEDFlow'));
+  const permeateFlow   = toNum(getValue('RO5-Permeateflow'));
+  const recovery       = toNum(getValue('RO5-SystemRecovery'));
+  const pureWaterEC    = toNum(getValue('RO5-PureWaterEc'));
+  const feedTankLevel  = toNum(getValue('RO5-FeedTankLevel'));
+  const isDosingActive = toBool(getValue('RO5-AntiscalantDosingActive'));
 
-  const dosingRateMlMin = isDosingActive ? DOSING_RATE_ML_MIN : 0;
+  // ── Server-driven values ────────────────────────────────────────────────
+  const rateMlPerSec     = totals?.rateMlPerSec ?? FALLBACK_RATE_ML_SEC;
+  const rateMlPerMin     = totals?.rateMlPerMin ?? FALLBACK_RATE_ML_MIN;
+  const secondsOnToday   = totals?.secondsOn ?? 0;
+  const dosedTodayMl     = totals?.mlDosed ?? 0;
+  const primedToday      = totals?.primedToday ?? false;
+  const dosedThisMonthMl = monthSummary?.mlDosed ?? 0;
+  const dosedThisMonthL  = dosedThisMonthMl / 1000;
+  const dosingRateMlMin  = isDosingActive ? rateMlPerMin : 0;
 
-  const dailyConsumptionL = dosedTodayMl / 1000;
+  // ── Cosmetic live interpolation between polls ───────────────────────────
+  const [displayMl, setDisplayMl] = useState(0);
+  const [displaySeconds, setDisplaySeconds] = useState(0);
 
-  const projectedDailyConsumptionL = (DOSING_RATE_ML_SEC * 60 * 60 * 24) / 1000;
-  const weeklyConsumptionL = projectedDailyConsumptionL * 7;
-  const monthlyConsumptionL = projectedDailyConsumptionL * 30;
-  const yearlyConsumptionL = projectedDailyConsumptionL * 365;
-
-  const initialStock = 500;
-  const daysSinceLastRefill = 15;
-  const currentStock = Math.max(0, initialStock - projectedDailyConsumptionL * daysSinceLastRefill);
-  const daysRemaining = projectedDailyConsumptionL > 0
-    ? Math.floor(currentStock / projectedDailyConsumptionL)
-    : Infinity;
-
-  const efficiency = Math.min(100, 82 + (recovery / 100) * 18);
-
-  const feedHistory = getHistory('RO5-FEEDFlow');
-
-  const hourlyDosingData = useMemo(() => {
-    if (feedHistory.length === 0) {
-      const now = new Date();
-      const hours = timeRange === '24h' ? 24 : 6;
-      const data = [];
-      for (let i = hours; i >= 0; i--) {
-        const hour = format(subHours(now, i), 'HH:00');
-        data.push({
-          hour,
-          rate: isDosingActive ? DOSING_RATE_ML_MIN * (0.92 + Math.random() * 0.16) : 0,
-          flow: feedFlow * (0.9 + Math.random() * 0.2)
-        });
-      }
-      return data;
+  useEffect(() => {
+    if (!isDosingActive) {
+      setDisplayMl(dosedTodayMl);
+      setDisplaySeconds(secondsOnToday);
+      return;
     }
+    const baseMl = dosedTodayMl;
+    const baseSec = secondsOnToday;
+    const startedAt = Date.now();
+    const tick = () => {
+      const elapsed = (Date.now() - startedAt) / 1000;
+      setDisplayMl(baseMl + elapsed * rateMlPerSec);
+      setDisplaySeconds(baseSec + elapsed);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [dosedTodayMl, secondsOnToday, isDosingActive, rateMlPerSec]);
 
+  const dailyConsumptionL = displayMl / 1000;
+
+  // ── Chart: daily consumption for the current month (REAL) ───────────────
+  const monthlyConsumptionData = useMemo(() => {
+    const now = new Date();
+    const thisMonth = monthKeyNow();
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const byDay = new Map();
+    (monthHistory?.days ?? []).forEach((d) => {
+      byDay.set(d.day, (Number(d.mlDosed) || 0) / 1000);
+    });
+    return Array.from({ length: daysInMonth }, (_, i) => {
+      const day = i + 1;
+      const key = `${thisMonth}-${String(day).padStart(2, '0')}`;
+      const isToday = day === now.getDate();
+      const consumption = byDay.has(key)
+        ? byDay.get(key)
+        : (isToday ? dailyConsumptionL : 0);
+      return { day: String(day), consumption, isToday };
+    });
+  }, [monthHistory, dailyConsumptionL]);
+
+  // ── Chart: hourly feed flow over selected range (from client-side ring buffer) ──
+  const feedHistory = getHistory('RO5-FEEDFlow');
+  const hourlyFlowData = useMemo(() => {
     const now = new Date();
     const hours = timeRange === '24h' ? 24 : timeRange === '6h' ? 6 : 1;
     const startTime = subHours(now, hours);
-
-    const filtered = feedHistory.filter(d => new Date(d.time) >= startTime);
+    const filtered = (feedHistory || []).filter(d => new Date(d.time) >= startTime);
     const grouped = {};
-
     filtered.forEach(d => {
       const hour = format(new Date(d.time), 'HH:00');
-      if (!grouped[hour]) grouped[hour] = { hour, rate: 0, flow: 0, count: 0 };
-      const value = toNum(d.value);
-      const rate = isDosingActive ? DOSING_RATE_ML_MIN * (0.92 + (value / 100) * 0.16) : 0;
-      grouped[hour].rate += rate;
-      grouped[hour].flow += value;
+      if (!grouped[hour]) grouped[hour] = { hour, flow: 0, count: 0 };
+      grouped[hour].flow += toNum(d.value);
       grouped[hour].count++;
     });
+    return Object.values(grouped)
+      .map(g => ({ hour: g.hour, flow: g.count ? g.flow / g.count : 0 }))
+      .sort((a, b) => a.hour.localeCompare(b.hour));
+  }, [feedHistory, timeRange]);
 
-    return Object.values(grouped).map(g => ({
-      hour: g.hour,
-      rate: g.rate / g.count,
-      flow: g.flow / g.count
-    })).sort((a, b) => a.hour.localeCompare(b.hour));
-  }, [feedHistory, timeRange, isDosingActive, feedFlow]);
+  // ── Projections (only meaningful if the plant runs 24/7) ────────────────
+  const projectedDailyL = (rateMlPerSec * 86400) / 1000;
+  const monthlyProjectedL = projectedDailyL * 30;
+  const yearlyProjectedL = projectedDailyL * 365;
 
-  const monthlyConsumptionData = useMemo(() => {
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const currentMonth = new Date().getMonth();
-    return Array.from({ length: 12 }, (_, i) => {
-      const monthIndex = (currentMonth - 11 + i + 12) % 12;
-      const isCurrentMonth = i === 11;
-      const baseConsumption = isCurrentMonth
-        ? dosedThisMonthL
-        : monthlyConsumptionL * (0.7 + Math.random() * 0.6);
-      return {
-        month: months[monthIndex],
-        consumption: baseConsumption,
-        target: monthlyConsumptionL * 1.1,
-        isCurrent: isCurrentMonth
-      };
-    });
-  }, [dosedThisMonthL, monthlyConsumptionL]);
-
+  // ── Alerts derived from real signals ────────────────────────────────────
   const alerts = useMemo(() => {
     const list = [];
 
-    if (isDosingActive && dosingRateMlMin > DOSING_RATE_ML_MIN * 1.2) {
-      list.push({
-        id: 'ALERT-001',
-        type: 'High Dosing Rate',
-        description: 'Dosing rate exceeds maximum threshold',
-        equipment: 'Antiscalant Pump',
-        value: `${dosingRateMlMin.toFixed(2)} ml/min`,
-        threshold: `${(DOSING_RATE_ML_MIN * 1.2).toFixed(2)} ml/min`,
-        severity: 'critical',
-        time: new Date().toISOString()
-      });
-    }
-
-    if (isDosingActive && dosingRateMlMin < DOSING_RATE_ML_MIN * 0.8) {
-      list.push({
-        id: 'ALERT-002',
-        type: 'Low Dosing Rate',
-        description: 'Dosing rate below minimum threshold',
-        equipment: 'Antiscalant Pump',
-        value: `${dosingRateMlMin.toFixed(2)} ml/min`,
-        threshold: `${(DOSING_RATE_ML_MIN * 0.8).toFixed(2)} ml/min`,
-        severity: 'critical',
-        time: new Date().toISOString()
-      });
-    }
-
     if (!isDosingActive && permeateFlow > 1) {
       list.push({
-        id: 'ALERT-005',
+        id: 'ALERT-DOSE-OFF',
         type: 'Pump Stopped While System Running',
         description: 'Dosing pump is OFF but system is producing water',
         equipment: 'Antiscalant Pump',
         value: 'OFF',
         threshold: 'ON required',
-        severity: 'warning',
-        time: new Date().toISOString()
+        severity: 'critical',
       });
     }
 
-    if (currentStock < 50) {
+    if (secondsOnToday > 60 && !primedToday) {
       list.push({
-        id: 'ALERT-003',
-        type: 'Low Chemical Stock',
-        description: 'Chemical stock is critically low',
-        equipment: 'Tank A',
-        value: `${Math.round(currentStock)} L`,
-        threshold: '50 L',
-        severity: 'critical',
-        time: new Date().toISOString()
+        id: 'ALERT-NO-PRIME',
+        type: 'Startup Prime Missing',
+        description: 'Pump has run today but the startup prime has not been recorded',
+        equipment: 'Antiscalant Pump',
+        value: `${Math.round(secondsOnToday)} s ON`,
+        threshold: 'prime expected on first ON',
+        severity: 'warning',
       });
     }
 
     if (pureWaterEC > 50) {
       list.push({
-        id: 'ALERT-004',
+        id: 'ALERT-HIGH-EC',
         type: 'High Product Conductivity',
-        description: 'Product water conductivity exceeds limit',
+        description: 'Product water EC exceeds limit; check dosing and membranes',
         equipment: 'RO System',
         value: `${pureWaterEC.toFixed(1)} µS/cm`,
         threshold: '50 µS/cm',
+        severity: 'critical',
+      });
+    }
+
+    if (feedTankLevel > 0 && feedTankLevel < 20) {
+      list.push({
+        id: 'ALERT-LOW-TANK',
+        type: 'Feed Tank Low',
+        description: 'Feed tank level is low; system may stop shortly',
+        equipment: 'Feed Tank',
+        value: `${feedTankLevel.toFixed(0)} %`,
+        threshold: '20 %',
         severity: 'warning',
-        time: new Date().toISOString()
       });
     }
 
     return list;
-  }, [dosingRateMlMin, isDosingActive, permeateFlow, currentStock, pureWaterEC]);
+  }, [isDosingActive, permeateFlow, pureWaterEC, feedTankLevel, secondsOnToday, primedToday]);
 
   const criticalAlerts = alerts.filter(a => a.severity === 'critical');
-  const warningAlerts = alerts.filter(a => a.severity === 'warning');
 
+  // ── Render ──────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col gap-3 sm:gap-4 p-2 sm:p-4 overflow-auto h-full" style={{ scrollbarWidth: "none" }}>
 
+      {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
         <div>
           <h2 style={{
-            fontSize: isMobile ? 18 : 20,
-            fontWeight: 700,
-            color: "var(--foreground)",
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8
+            fontSize: isMobile ? 18 : 20, fontWeight: 700, color: "var(--foreground)",
+            display: 'flex', alignItems: 'center', gap: 8
           }}>
             <FlaskConical size={isMobile ? 16 : 20} style={{ color: "#a78bfa" }} />
             Antiscalant Dosing
           </h2>
           <p style={{ fontSize: isMobile ? 10 : 12, color: "var(--muted-foreground)", marginTop: 2 }}>
-            {connected ? '✅ Connected' : '⚠️ Disconnected'} · Last updated: {lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--'}
+            {connected ? '✅ Connected' : '⚠️ Disconnected'} · server totalizer · Last updated:{' '}
+            {lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--'}
           </p>
         </div>
         <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
           <StatusBadge isActive={isDosingActive} size="lg" isMobile={isMobile} />
           <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 4,
-            padding: '2px 10px',
-            background: 'var(--secondary)',
-            borderRadius: 20,
-            fontSize: isMobile ? 9 : 11,
-            color: 'var(--muted-foreground)'
+            display: 'flex', alignItems: 'center', gap: 4, padding: '2px 10px',
+            background: 'var(--secondary)', borderRadius: 20,
+            fontSize: isMobile ? 9 : 11, color: 'var(--muted-foreground)'
           }}>
             <Clock size={isMobile ? 10 : 14} />
-            Rate: {DOSING_RATE_ML_MIN.toFixed(2)} ml/min ({DOSING_RATE_ML_SEC.toFixed(3)} ml/s)
+            Rate: {rateMlPerMin.toFixed(2)} ml/min ({rateMlPerSec.toFixed(3)} ml/s)
           </div>
+          {fetchError && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 3, padding: '2px 10px',
+              background: 'rgba(239,68,68,0.12)', borderRadius: 20,
+              border: '1px solid rgba(239,68,68,0.2)'
+            }}>
+              <AlertCircle size={isMobile ? 10 : 14} style={{ color: '#ef4444' }} />
+              <span style={{ fontSize: isMobile ? 9 : 11, color: '#ef4444' }}>sync offline</span>
+            </div>
+          )}
           {alerts.length > 0 && (
             <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 3,
-              padding: '2px 10px',
+              display: 'flex', alignItems: 'center', gap: 3, padding: '2px 10px',
               background: criticalAlerts.length > 0 ? 'rgba(239,68,68,0.12)' : 'rgba(234,179,8,0.12)',
               borderRadius: 20,
               border: `1px solid ${criticalAlerts.length > 0 ? 'rgba(239,68,68,0.2)' : 'rgba(234,179,8,0.2)'}`
             }}>
               <AlertCircle size={isMobile ? 10 : 14} style={{ color: criticalAlerts.length > 0 ? '#ef4444' : '#eab308' }} />
-              <span style={{ fontSize: isMobile ? 9 : 11, fontWeight: 600, color: criticalAlerts.length > 0 ? '#ef4444' : '#eab308' }}>
-                {alerts.length}
-              </span>
+              <span style={{
+                fontSize: isMobile ? 9 : 11, fontWeight: 600,
+                color: criticalAlerts.length > 0 ? '#ef4444' : '#eab308'
+              }}>{alerts.length}</span>
             </div>
           )}
         </div>
       </div>
 
+      {/* Alerts */}
       {alerts.length > 0 && showAlerts && (
         <div className="flex flex-col gap-2">
           {alerts.slice(0, isMobile ? 2 : 5).map((a) => (
-            <div
-              key={a.id}
-              className="flex items-start sm:items-center gap-2 sm:gap-3 rounded-lg p-2 sm:p-3"
-              style={{
-                background: a.severity === 'critical' ? "rgba(239,68,68,0.08)" : "rgba(234,179,8,0.08)",
-                border: `1px solid ${a.severity === 'critical' ? 'rgba(239,68,68,0.2)' : 'rgba(234,179,8,0.2)'}`,
-                borderLeft: `4px solid ${a.severity === 'critical' ? '#ef4444' : '#eab308'}`
-              }}
-            >
-              <AlertTriangle size={isMobile ? 12 : 16} style={{ color: a.severity === 'critical' ? "#ef4444" : "#eab308", flexShrink: 0, marginTop: isMobile ? 2 : 0 }} />
+            <div key={a.id} className="flex items-start sm:items-center gap-2 sm:gap-3 rounded-lg p-2 sm:p-3" style={{
+              background: a.severity === 'critical' ? "rgba(239,68,68,0.08)" : "rgba(234,179,8,0.08)",
+              border: `1px solid ${a.severity === 'critical' ? 'rgba(239,68,68,0.2)' : 'rgba(234,179,8,0.2)'}`,
+              borderLeft: `4px solid ${a.severity === 'critical' ? '#ef4444' : '#eab308'}`
+            }}>
+              <AlertTriangle size={isMobile ? 12 : 16} style={{
+                color: a.severity === 'critical' ? "#ef4444" : "#eab308",
+                flexShrink: 0, marginTop: isMobile ? 2 : 0
+              }} />
               <div className="flex-1 min-w-0">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: isMobile ? 11 : 13, fontWeight: 600, color: a.severity === 'critical' ? "#ef4444" : "#eab308" }}>
-                    {a.type}
-                  </span>
-                  <span style={{ fontSize: isMobile ? 9 : 11, color: "var(--muted-foreground)" }}>
-                    {a.equipment}
-                  </span>
+                  <span style={{
+                    fontSize: isMobile ? 11 : 13, fontWeight: 600,
+                    color: a.severity === 'critical' ? "#ef4444" : "#eab308"
+                  }}>{a.type}</span>
+                  <span style={{ fontSize: isMobile ? 9 : 11, color: "var(--muted-foreground)" }}>{a.equipment}</span>
                 </div>
                 <div style={{ fontSize: isMobile ? 9 : 11, color: "var(--muted-foreground)", marginTop: 2 }}>
                   {a.description} · {a.value}
                 </div>
               </div>
               <span style={{
-                fontSize: isMobile ? 7 : 9,
-                fontWeight: 700,
+                fontSize: isMobile ? 7 : 9, fontWeight: 700,
                 color: a.severity === 'critical' ? "#ef4444" : "#eab308",
                 background: a.severity === 'critical' ? "rgba(239,68,68,0.15)" : "rgba(234,179,8,0.15)",
-                borderRadius: 4,
-                padding: "1px 6px",
-                letterSpacing: "0.05em",
-                flexShrink: 0
-              }}>
-                {a.severity.toUpperCase()}
-              </span>
+                borderRadius: 4, padding: "1px 6px", letterSpacing: "0.05em", flexShrink: 0
+              }}>{a.severity.toUpperCase()}</span>
             </div>
           ))}
           {alerts.length > (isMobile ? 2 : 5) && (
@@ -637,14 +430,9 @@ export function AntiscalantDosing() {
           <button
             onClick={() => setShowAlerts(false)}
             style={{
-              alignSelf: 'flex-end',
-              fontSize: isMobile ? 9 : 11,
-              color: 'var(--muted-foreground)',
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              padding: '4px 8px',
-              borderRadius: 4
+              alignSelf: 'flex-end', fontSize: isMobile ? 9 : 11,
+              color: 'var(--muted-foreground)', background: 'transparent',
+              border: 'none', cursor: 'pointer', padding: '4px 8px', borderRadius: 4
             }}
           >
             Dismiss All
@@ -652,6 +440,7 @@ export function AntiscalantDosing() {
         </div>
       )}
 
+      {/* KPI cards — all from server / live context */}
       <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(auto-fit, minmax(180px, 1fr))" }}>
         <MetricCard
           label="Dosing Rate"
@@ -659,34 +448,16 @@ export function AntiscalantDosing() {
           unit="ml/min"
           color="#a78bfa"
           icon={FlaskConical}
-          sub={isDosingActive ? `✅ Active · ${DOSING_RATE_ML_SEC.toFixed(3)} ml/s` : '⛔ Stopped'}
+          sub={isDosingActive ? `✅ Active · ${rateMlPerSec.toFixed(3)} ml/s` : '⛔ Stopped'}
           isMobile={isMobile}
         />
         <MetricCard
           label="Dosed Today"
-          value={dosedTodayMl.toFixed(2)}
+          value={displayMl.toFixed(2)}
           unit="ml"
           color="#0ea5e9"
           icon={Droplet}
-          sub={`${formatDuration(secondsOnToday)} ON · ${dailyConsumptionL.toFixed(3)} L${primedToday ? ' · primed' : ''}`}
-          isMobile={isMobile}
-        />
-        <MetricCard
-          label="Chemical Stock"
-          value={Math.round(currentStock)}
-          unit="L"
-          color={currentStock < 50 ? "#ef4444" : currentStock < 100 ? "#eab308" : "#22c55e"}
-          icon={Info}
-          sub={Number.isFinite(daysRemaining) ? `${daysRemaining} days` : 'Full'}
-          isMobile={isMobile}
-        />
-        <MetricCard
-          label="Efficiency"
-          value={efficiency.toFixed(1)}
-          unit="%"
-          color="#22c55e"
-          icon={CheckCircle}
-          sub={`Target: 85%`}
+          sub={`${formatDuration(displaySeconds)} ON · ${dailyConsumptionL.toFixed(3)} L${primedToday ? ' · primed' : ''}`}
           isMobile={isMobile}
         />
         <MetricCard
@@ -695,156 +466,116 @@ export function AntiscalantDosing() {
           unit="L"
           color="#06b6d4"
           icon={Calendar}
-          sub={`${dosedThisMonthMl.toFixed(1)} ml · ${monthlyTotal.month}`}
+          sub={`${dosedThisMonthMl.toFixed(1)} ml · ${monthSummary?.month ?? '—'}`}
+          isMobile={isMobile}
+        />
+        <MetricCard
+          label="Projected Month"
+          value={monthlyProjectedL.toFixed(1)}
+          unit="L"
+          color="#22c55e"
+          icon={TrendingUp}
+          sub={`at 24/7 · ${yearlyProjectedL.toFixed(0)} L/yr`}
           isMobile={isMobile}
         />
         <MetricCard
           label="Recovery"
           value={recovery.toFixed(1)}
           unit="%"
-          color={recovery > 75 ? "#22c55e" : recovery > 65 ? "#eab308" : "#ef4444"}
+          color={recovery > 75 ? '#22c55e' : recovery > 65 ? '#eab308' : '#ef4444'}
           icon={TrendingUp}
-          sub={`${feedFlow.toFixed(1)} m³/h`}
+          sub={`${feedFlow.toFixed(1)} m³/h feed`}
+          isMobile={isMobile}
+        />
+        <MetricCard
+          label="Feed Tank"
+          value={feedTankLevel.toFixed(0)}
+          unit="%"
+          color={feedTankLevel > 30 ? '#22c55e' : feedTankLevel > 20 ? '#eab308' : '#ef4444'}
+          icon={Info}
+          sub={feedTankLevel > 30 ? 'Normal' : 'Low'}
           isMobile={isMobile}
         />
       </div>
 
+      {/* Row: Daily consumption chart + System status */}
       <div className="grid gap-3 sm:gap-4" style={{ gridTemplateColumns: isMobile ? "1fr" : "1.5fr 1fr" }}>
+        <ChartPanel title="Daily Consumption" meta={`${monthSummary?.month ?? monthKeyNow()} · L/day`} isMobile={isMobile}>
+          <ResponsiveContainer width="100%" height={isMobile ? 180 : 220}>
+            <BarChart data={monthlyConsumptionData} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" vertical={false} />
+              <XAxis dataKey="day" tick={{ fontSize: isMobile ? 7 : 9, fill: "#4d7a9e" }} axisLine={false} tickLine={false} interval={isMobile ? 2 : 0} />
+              <YAxis tick={{ fontSize: isMobile ? 7 : 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} axisLine={false} tickLine={false} />
+              <Tooltip content={<CustomTooltip />} />
+              <Bar dataKey="consumption" fill="#a78bfa" radius={[3, 3, 0, 0]} name="Consumption (L)" />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartPanel>
 
-        <div className="rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 gap-2">
-            <span style={{
-              fontSize: isMobile ? 10 : 12,
-              fontWeight: 600,
-              color: "var(--muted-foreground)",
-              textTransform: "uppercase",
-              letterSpacing: "0.08em"
-            }}>
-              Dosing Rate
-            </span>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>
-                ml/min
-              </span>
-              <div className="flex gap-1">
-                {['1h', '6h', '24h'].map(range => (
-                  <button
-                    key={range}
-                    onClick={() => setTimeRange(range)}
-                    style={{
-                      padding: isMobile ? '1px 6px' : '2px 10px',
-                      borderRadius: 4,
-                      fontSize: isMobile ? 8 : 9,
-                      fontWeight: 600,
-                      background: timeRange === range ? '#0ea5e9' : 'var(--secondary)',
-                      color: timeRange === range ? 'white' : 'var(--muted-foreground)',
-                      border: '1px solid var(--border)',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s'
-                    }}
-                  >
-                    {range}
-                  </button>
-                ))}
+        <ChartPanel title="System Status" meta="live" isMobile={isMobile}>
+          <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
+            <div style={{ padding: isMobile ? '6px' : '10px', background: 'var(--secondary)', borderRadius: 6, textAlign: 'center' }}>
+              <div style={{ fontSize: isMobile ? 8 : 9, color: 'var(--muted-foreground)' }}>Dosing Pump</div>
+              <div style={{
+                fontSize: isMobile ? 14 : 16, fontWeight: 700,
+                color: isDosingActive ? '#22c55e' : '#ef4444', marginTop: 2
+              }}>{isDosingActive ? 'ON' : 'OFF'}</div>
+            </div>
+            <div style={{ padding: isMobile ? '6px' : '10px', background: 'var(--secondary)', borderRadius: 6, textAlign: 'center' }}>
+              <div style={{ fontSize: isMobile ? 8 : 9, color: 'var(--muted-foreground)' }}>Product EC</div>
+              <div style={{
+                fontSize: isMobile ? 14 : 16, fontWeight: 700,
+                color: pureWaterEC < 30 ? '#22c55e' : pureWaterEC < 50 ? '#eab308' : '#ef4444',
+                marginTop: 2
+              }}>{pureWaterEC.toFixed(1)}</div>
+            </div>
+            <div style={{ padding: isMobile ? '6px' : '10px', background: 'var(--secondary)', borderRadius: 6, textAlign: 'center' }}>
+              <div style={{ fontSize: isMobile ? 8 : 9, color: 'var(--muted-foreground)' }}>Feed Flow</div>
+              <div style={{ fontSize: isMobile ? 14 : 16, fontWeight: 700, color: '#0ea5e9', marginTop: 2 }}>
+                {feedFlow.toFixed(1)}
+              </div>
+            </div>
+            <div style={{ padding: isMobile ? '6px' : '10px', background: 'var(--secondary)', borderRadius: 6, textAlign: 'center' }}>
+              <div style={{ fontSize: isMobile ? 8 : 9, color: 'var(--muted-foreground)' }}>Permeate</div>
+              <div style={{ fontSize: isMobile ? 14 : 16, fontWeight: 700, color: '#22c55e', marginTop: 2 }}>
+                {permeateFlow.toFixed(1)}
               </div>
             </div>
           </div>
-          <ResponsiveContainer width="100%" height={isMobile ? 160 : 200}>
-            <AreaChart data={hourlyDosingData} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
-              <defs>
-                <linearGradient id="doseGrad" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="#a78bfa" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="#a78bfa" stopOpacity={0.02} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" />
-              <XAxis
-                dataKey="hour"
-                tick={{ fontSize: isMobile ? 7 : 9, fill: "#4d7a9e" }}
-                axisLine={false}
-                tickLine={false}
-                interval={hourlyDosingData.length > 12 ? Math.floor(hourlyDosingData.length / 8) : 0}
-              />
-              <YAxis
-                tick={{ fontSize: isMobile ? 7 : 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }}
-                axisLine={false}
-                tickLine={false}
-                domain={[0, DOSING_RATE_ML_MIN * 1.4]}
-                tickFormatter={(v) => v.toFixed(1)}
-              />
-              <Tooltip content={<CustomTooltip />} />
-              <ReferenceLine y={DOSING_RATE_ML_MIN} stroke="#a78bfa" strokeDasharray="4 3" strokeWidth={1} label={{ value: "Target", position: "right", fontSize: isMobile ? 7 : 9, fill: "#a78bfa" }} />
-              <Area type="monotone" dataKey="rate" stroke="#a78bfa" strokeWidth={2} fill="url(#doseGrad)" name="Dosing Rate" />
-            </AreaChart>
-          </ResponsiveContainer>
-          <div className="flex flex-wrap items-center gap-2 sm:gap-4 mt-2">
-            <div className="flex items-center gap-1">
-              <div style={{ width: 16, height: 2, background: "#a78bfa" }} />
-              <span style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)" }}>Actual</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <div style={{ width: 16, height: 2, background: "#a78bfa", borderTop: "2px dashed #a78bfa" }} />
-              <span style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)" }}>Target</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-          <div className="flex items-center justify-between mb-3">
-            <span style={{
-              fontSize: isMobile ? 10 : 12,
-              fontWeight: 600,
-              color: "var(--muted-foreground)",
-              textTransform: "uppercase",
-              letterSpacing: "0.08em"
-            }}>
-              Monthly Consumption
-            </span>
-            <span style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>
-              L
-            </span>
-          </div>
-          <ResponsiveContainer width="100%" height={isMobile ? 160 : 200}>
-            <BarChart data={monthlyConsumptionData} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" vertical={false} />
-              <XAxis
-                dataKey="month"
-                tick={{ fontSize: isMobile ? 7 : 9, fill: "#4d7a9e" }}
-                axisLine={false}
-                tickLine={false}
-                interval={isMobile ? Math.floor(12 / 6) : 0}
-              />
-              <YAxis
-                tick={{ fontSize: isMobile ? 7 : 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }}
-                axisLine={false}
-                tickLine={false}
-              />
-              <Tooltip content={<CustomTooltip />} />
-              <Bar dataKey="consumption" fill="#a78bfa" radius={[3, 3, 0, 0]} name="Consumption" />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        </ChartPanel>
       </div>
 
-      <div className="grid gap-3 sm:gap-4" style={{ gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr" }}>
-
-        <div className="rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-          <div className="flex items-center justify-between mb-3">
-            <span style={{
-              fontSize: isMobile ? 10 : 12,
-              fontWeight: 600,
-              color: "var(--muted-foreground)",
-              textTransform: "uppercase",
-              letterSpacing: "0.08em"
-            }}>
-              Flow Rates
-            </span>
-            <span style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>
-              m³/h
-            </span>
+      {/* Row: Feed flow (last N hours) */}
+      <ChartPanel
+        title="Feed Flow"
+        meta={`${timeRange === '24h' ? '24 Hours' : timeRange === '6h' ? '6 Hours' : '1 Hour'} · m³/h`}
+        isMobile={isMobile}
+      >
+        <div className="flex items-center gap-2 mb-2">
+          {['1h', '6h', '24h'].map(range => (
+            <button
+              key={range}
+              onClick={() => setTimeRange(range)}
+              style={{
+                padding: isMobile ? '2px 8px' : '3px 10px',
+                borderRadius: 4,
+                fontSize: isMobile ? 9 : 10,
+                fontWeight: 600,
+                background: timeRange === range ? '#0ea5e9' : 'var(--secondary)',
+                color: timeRange === range ? 'white' : 'var(--muted-foreground)',
+                border: '1px solid var(--border)',
+                cursor: 'pointer',
+              }}
+            >{range}</button>
+          ))}
+        </div>
+        {hourlyFlowData.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '30px 0', color: 'var(--muted-foreground)', fontSize: 11 }}>
+            Waiting for feed flow history...
           </div>
-          <ResponsiveContainer width="100%" height={isMobile ? 120 : 150}>
-            <LineChart data={hourlyDosingData} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
+        ) : (
+          <ResponsiveContainer width="100%" height={isMobile ? 140 : 160}>
+            <LineChart data={hourlyFlowData} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" />
               <XAxis dataKey="hour" tick={{ fontSize: isMobile ? 7 : 8, fill: "#4d7a9e" }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: isMobile ? 7 : 8, fill: "#4d7a9e" }} axisLine={false} tickLine={false} />
@@ -852,235 +583,82 @@ export function AntiscalantDosing() {
               <Line type="monotone" dataKey="flow" stroke="#0ea5e9" strokeWidth={2} dot={false} name="Feed Flow" />
             </LineChart>
           </ResponsiveContainer>
-          <div className="flex flex-wrap items-center justify-between gap-2 mt-2">
-            <span style={{ fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)" }}>
-              Feed: <strong style={{ color: "#0ea5e9" }}>{feedFlow.toFixed(1)}</strong>
-            </span>
-            <span style={{ fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)" }}>
-              Permeate: <strong style={{ color: "#22c55e" }}>{permeateFlow.toFixed(1)}</strong>
-            </span>
-            <span style={{ fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)" }}>
-              Recovery: <strong style={{ color: recovery > 75 ? "#22c55e" : "#eab308" }}>{recovery.toFixed(1)}%</strong>
-            </span>
-          </div>
-        </div>
+        )}
+      </ChartPanel>
 
-        <div className="rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-          <div className="flex items-center justify-between mb-3">
-            <span style={{
-              fontSize: isMobile ? 10 : 12,
-              fontWeight: 600,
-              color: "var(--muted-foreground)",
-              textTransform: "uppercase",
-              letterSpacing: "0.08em"
-            }}>
-              System Status
-            </span>
-            <StatusBadge isActive={isDosingActive} size="sm" isMobile={isMobile} />
-          </div>
-          <div className="grid gap-2" style={{ gridTemplateColumns: isMobile ? "1fr 1fr" : "1fr 1fr" }}>
-            <div style={{
-              padding: isMobile ? '6px' : '10px',
-              background: 'var(--secondary)',
-              borderRadius: 6,
-              textAlign: 'center'
-            }}>
-              <div style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)" }}>Dosing Pump</div>
-              <div style={{
-                fontSize: isMobile ? 14 : 16,
-                fontWeight: 700,
-                color: isDosingActive ? '#22c55e' : '#ef4444',
-                marginTop: 2
-              }}>
-                {isDosingActive ? 'ON' : 'OFF'}
-              </div>
-            </div>
-            <div style={{
-              padding: isMobile ? '6px' : '10px',
-              background: 'var(--secondary)',
-              borderRadius: 6,
-              textAlign: 'center'
-            }}>
-              <div style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)" }}>System</div>
-              <div style={{
-                fontSize: isMobile ? 14 : 16,
-                fontWeight: 700,
-                color: '#22c55e',
-                marginTop: 2
-              }}>
-                RUNNING
-              </div>
-            </div>
-            <div style={{
-              padding: isMobile ? '6px' : '10px',
-              background: 'var(--secondary)',
-              borderRadius: 6,
-              textAlign: 'center'
-            }}>
-              <div style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)" }}>Product EC</div>
-              <div style={{
-                fontSize: isMobile ? 14 : 16,
-                fontWeight: 700,
-                color: pureWaterEC < 30 ? '#22c55e' : pureWaterEC < 50 ? '#eab308' : '#ef4444',
-                marginTop: 2
-              }}>
-                {pureWaterEC.toFixed(1)}
-              </div>
-            </div>
-            <div style={{
-              padding: isMobile ? '6px' : '10px',
-              background: 'var(--secondary)',
-              borderRadius: 6,
-              textAlign: 'center'
-            }}>
-              <div style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)" }}>Tank Level</div>
-              <div style={{
-                fontSize: isMobile ? 14 : 16,
-                fontWeight: 700,
-                color: feedTankLevel > 30 ? '#22c55e' : '#eab308',
-                marginTop: 2
-              }}>
-                {feedTankLevel.toFixed(0)}%
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
+      {/* Daily records table — real data from /api/dosing/history */}
       <div className="rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
         <div style={{
-          fontSize: isMobile ? 10 : 12,
-          fontWeight: 600,
-          color: "var(--muted-foreground)",
-          textTransform: "uppercase",
-          letterSpacing: "0.08em",
-          marginBottom: 10
+          fontSize: isMobile ? 10 : 12, fontWeight: 600, color: "var(--muted-foreground)",
+          textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10
         }}>
-          Recent Dosing Records
+          Daily Dosing Records — {monthSummary?.month ?? monthKeyNow()}
         </div>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: isMobile ? 11 : 12, minWidth: isMobile ? 600 : 'auto' }}>
-            <thead>
-              <tr>
-                {isMobile ? (
-                  <>
-                    <th style={{ padding: "6px 8px", textAlign: "left", fontSize: 8, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>Date</th>
-                    <th style={{ padding: "6px 8px", textAlign: "left", fontSize: 8, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>Rate</th>
-                    <th style={{ padding: "6px 8px", textAlign: "left", fontSize: 8, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>Status</th>
-                  </>
-                ) : (
-                  <>
-                    <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 10, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>Date</th>
-                    <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 10, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>Dose Rate</th>
-                    <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 10, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>Consumption</th>
-                    <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 10, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>ON Time</th>
-                    <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 10, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.06em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>Status</th>
-                  </>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {(() => {
-                const now = new Date();
-                const records = [];
-                const count = isMobile ? 4 : 7;
-                for (let i = 0; i < count; i++) {
-                  const date = subDays(now, i);
-                  const isToday = i === 0;
-                  const assumedOnFractionOfDay = 0.9 + Math.random() * 0.1;
-                  const consumptionL = isToday
-                    ? dailyConsumptionL
-                    : projectedDailyConsumptionL * assumedOnFractionOfDay;
-                  const onSeconds = isToday
-                    ? secondsOnToday
-                    : 24 * 60 * 60 * assumedOnFractionOfDay;
-                  const isLow = !isToday && assumedOnFractionOfDay < 0.85;
 
-                  records.push({
-                    date: format(date, 'yyyy-MM-dd'),
-                    rate: isToday ? dosingRateMlMin : DOSING_RATE_ML_MIN,
-                    consumption: consumptionL,
-                    onSeconds,
-                    status: isToday ? (isDosingActive ? 'RUNNING' : 'STOPPED') : (isLow ? 'PARTIAL' : 'NORMAL'),
-                    ok: isToday ? isDosingActive : !isLow
-                  });
-                }
-                return records;
-              })().map((r, i) => (
-                <tr key={r.date} style={{ background: i % 2 === 0 ? "var(--card)" : "var(--secondary)" }}>
-                  {isMobile ? (
-                    <>
-                      <td style={{ padding: "6px 8px", fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--foreground)", borderBottom: "1px solid var(--border)" }}>
-                        {r.date}
-                      </td>
-                      <td style={{
-                        padding: "6px 8px",
-                        fontFamily: "var(--font-mono)",
-                        fontSize: 9,
-                        color: "#a78bfa",
-                        borderBottom: "1px solid var(--border)"
-                      }}>
-                        {r.rate.toFixed(2)}
-                      </td>
-                      <td style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
-                        <div className="flex items-center gap-1">
-                          {r.ok ? (
-                            <CheckCircle size={10} style={{ color: "#22c55e" }} />
-                          ) : (
-                            <AlertTriangle size={10} style={{ color: "#eab308" }} />
-                          )}
-                          <span style={{
-                            fontSize: 8,
-                            color: r.ok ? "#22c55e" : "#eab308",
-                            fontWeight: 600
-                          }}>
-                            {r.status}
-                          </span>
-                        </div>
-                      </td>
-                    </>
-                  ) : (
-                    <>
-                      <td style={{ padding: "8px 12px", fontFamily: "var(--font-mono)", color: "var(--foreground)", borderBottom: "1px solid var(--border)" }}>
-                        {r.date}
-                      </td>
-                      <td style={{
-                        padding: "8px 12px",
-                        fontFamily: "var(--font-mono)",
-                        color: "#a78bfa",
-                        borderBottom: "1px solid var(--border)"
-                      }}>
-                        {r.rate.toFixed(2)} ml/min
-                      </td>
-                      <td style={{ padding: "8px 12px", fontFamily: "var(--font-mono)", color: "var(--foreground)", borderBottom: "1px solid var(--border)" }}>
-                        {r.consumption.toFixed(3)} L
-                      </td>
-                      <td style={{ padding: "8px 12px", fontFamily: "var(--font-mono)", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>
-                        {formatDuration(r.onSeconds)}
-                      </td>
-                      <td style={{ padding: "8px 12px", borderBottom: "1px solid var(--border)" }}>
-                        <div className="flex items-center gap-1.5">
-                          {r.ok ? (
-                            <CheckCircle size={12} style={{ color: "#22c55e" }} />
-                          ) : (
-                            <AlertTriangle size={12} style={{ color: "#eab308" }} />
-                          )}
-                          <span style={{
-                            fontSize: 10,
-                            color: r.ok ? "#22c55e" : "#eab308",
-                            fontWeight: 600
-                          }}>
-                            {r.status}
-                          </span>
-                        </div>
-                      </td>
-                    </>
-                  )}
+        {!monthHistory || monthHistory.days.length === 0 ? (
+          <div style={{
+            padding: '20px', textAlign: 'center',
+            color: 'var(--muted-foreground)', fontSize: isMobile ? 10 : 11
+          }}>
+            No dosing records yet for this month.
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: isMobile ? 11 : 12 }}>
+              <thead>
+                <tr>
+                  {[
+                    { key: 'date', label: 'Date', showMobile: true },
+                    { key: 'on', label: 'ON Time', showMobile: false },
+                    { key: 'ml', label: 'Volume (ml)', showMobile: true },
+                    { key: 'l', label: 'Volume (L)', showMobile: false },
+                    { key: 'primed', label: 'Primed', showMobile: true },
+                  ].filter(c => !isMobile || c.showMobile).map(col => (
+                    <th key={col.key} style={{
+                      padding: isMobile ? "6px 8px" : "8px 12px", textAlign: "left",
+                      fontSize: isMobile ? 8 : 10, fontWeight: 600,
+                      color: "var(--muted-foreground)", letterSpacing: "0.06em",
+                      textTransform: "uppercase", borderBottom: "1px solid var(--border)"
+                    }}>{col.label}</th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {[...monthHistory.days].reverse().map((r, i) => (
+                  <tr key={r.day} style={{ background: i % 2 === 0 ? "var(--card)" : "var(--secondary)" }}>
+                    <td style={{
+                      padding: isMobile ? "6px 8px" : "8px 12px",
+                      fontFamily: "var(--font-mono)", color: "var(--foreground)",
+                      borderBottom: "1px solid var(--border)"
+                    }}>{r.day}</td>
+                    {!isMobile && (
+                      <td style={{
+                        padding: "8px 12px", fontFamily: "var(--font-mono)",
+                        color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)"
+                      }}>{formatDuration(r.secondsOn)}</td>
+                    )}
+                    <td style={{
+                      padding: isMobile ? "6px 8px" : "8px 12px",
+                      fontFamily: "var(--font-mono)", color: "#a78bfa",
+                      borderBottom: "1px solid var(--border)"
+                    }}>{Number(r.mlDosed).toFixed(2)}</td>
+                    {!isMobile && (
+                      <td style={{
+                        padding: "8px 12px", fontFamily: "var(--font-mono)",
+                        color: "#0ea5e9", borderBottom: "1px solid var(--border)"
+                      }}>{(Number(r.mlDosed) / 1000).toFixed(4)}</td>
+                    )}
+                    <td style={{ padding: isMobile ? "6px 8px" : "8px 12px", borderBottom: "1px solid var(--border)" }}>
+                      {r.primedToday
+                        ? <CheckCircle size={isMobile ? 11 : 13} style={{ color: '#22c55e' }} />
+                        : <span style={{ fontSize: isMobile ? 9 : 10, color: 'var(--muted-foreground)' }}>—</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {!showAlerts && alerts.length > 0 && (
@@ -1088,16 +666,10 @@ export function AntiscalantDosing() {
           onClick={() => setShowAlerts(true)}
           style={{
             padding: isMobile ? '6px 12px' : '8px 16px',
-            background: 'var(--secondary)',
-            border: '1px solid var(--border)',
-            borderRadius: 8,
-            color: 'var(--foreground)',
-            fontSize: isMobile ? 11 : 12,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            justifyContent: 'center'
+            background: 'var(--secondary)', border: '1px solid var(--border)',
+            borderRadius: 8, color: 'var(--foreground)',
+            fontSize: isMobile ? 11 : 12, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center'
           }}
         >
           <AlertTriangle size={isMobile ? 12 : 14} style={{ color: '#eab308' }} />

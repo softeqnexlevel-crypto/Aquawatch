@@ -402,7 +402,7 @@ export function FiltrationMonitoring() {
       </div>
 
       {/* Status summary — driven by FILTERS */}
-      <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: isMobile ? "1fr 1fr" : `repeat(${FILTERS.length}, 1fr)` }}>
+      {/* <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: isMobile ? "1fr 1fr" : `repeat(${FILTERS.length}, 1fr)` }}>
         {filterData.map((f) => {
           const value = latestByKey[f.key];
           const status = healthStatus(value, f.warning, f.critical);
@@ -422,7 +422,7 @@ export function FiltrationMonitoring() {
             </div>
           );
         })}
-      </div>
+      </div> */}
 
       {/* Events table */}
       <div className="rounded p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>

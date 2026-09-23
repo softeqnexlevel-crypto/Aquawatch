@@ -990,7 +990,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             Select Sensor for Comparison
           </span>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? 4 : 6, marginBottom: 12 }}>
-            {Object.keys(SENSOR_MAP).slice(0, isMobile ? 8 : 15).map(key => {
+            {Object.keys(SENSOR_MAP).slice(0, isMobile ? 15 : 15).map(key => {
               const sensor = SENSOR_MAP[key];
               const isSelected = selectedSensors.includes(key);
               return (

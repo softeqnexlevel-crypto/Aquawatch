@@ -146,7 +146,9 @@ export function AuthProvider({ children }) {
         </AuthContext.Provider>
     );
 }
-
+console.log('[auth] logout — keys before cleanup:', Object.keys(localStorage));
+// ... existing cleanup ...
+console.log('[auth] logout — keys after cleanup:', Object.keys(localStorage));
 export function useAuth() {
     const ctx = useContext(AuthContext);
     if (!ctx) throw new Error('useAuth must be used within AuthProvider');
