@@ -15,15 +15,20 @@ import { useData } from "../contexts/DataContext";
 import { format, subHours, subDays, startOfDay, subMonths } from 'date-fns';
 
 // ─── Dosing pump constants ───────────────────────────────────────────────────
-const DOSING_RATE_ML_MIN = 2.7;                    // pump setting
-const DOSING_RATE_ML_SEC = DOSING_RATE_ML_MIN / 60; // 2.7 ÷ 60 = 0.045 ml/second
+// Per the shaded spec: 0.048 ml per second of pump ON-time.
+// (The previous 0.045 value was 2.7 ml/min ÷ 60, which was ~6.7% low.)
+const DOSING_RATE_ML_SEC = 0.048;                  // ml per second (spec)
+const DOSING_RATE_ML_MIN = DOSING_RATE_ML_SEC * 60; // 2.88 ml/min
 
-// The totals are counted in SECONDS OF PUMP ON-TIME, then converted to ml:
-//     mlDosed = secondsOn × 0.045
-// Counting whole seconds (instead of adding 0.045 over and over) avoids
-// floating-point error piling up over a full day.
-const STORAGE_KEY = 'antiscalant_dosing_totals_v2';
-const LEGACY_STORAGE_KEY = 'antiscalant_dosing_totals_v1';
+// Startup prime: an extra 0.048 ml is dosed the moment the pump goes ON,
+// on top of the continuous per-second dosing. This matches the operator
+// spec ("initial dose 0.048 ml/sec to result in A") and is counted into
+// today's total the same as any other second of ON-time.
+const STARTUP_PRIME_ML = DOSING_RATE_ML_SEC;
+
+// Storage keys
+const STORAGE_KEY = 'antiscalant_dosing_totals_v3';         // daily seconds + prime flag
+const MONTHLY_STORAGE_KEY = 'antiscalant_monthly_total_v1'; // running monthly ml
 
 // If the browser pauses timers (background tab / sleep), the next tick can
 // arrive late. We add the real elapsed time so no seconds are lost, but never
@@ -51,25 +56,28 @@ function toNum(raw, fallback = 0) {
 function loadStoredSeconds(today) {
   try {
     const raw = window.localStorage?.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && parsed.day === today && Number.isFinite(parsed.secondsOn)) {
-        return Math.max(0, parsed.secondsOn);
-      }
-      return 0;
-    }
-
-    // One-time migration from the old ml-based storage
-    const legacyRaw = window.localStorage?.getItem(LEGACY_STORAGE_KEY);
-    if (legacyRaw) {
-      const legacy = JSON.parse(legacyRaw);
-      if (legacy && legacy.day === today && typeof legacy.mlToday === 'number') {
-        return Math.max(0, legacy.mlToday / DOSING_RATE_ML_SEC);
-      }
+    if (!raw) return 0;
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.day === today && Number.isFinite(parsed.secondsOn)) {
+      return Math.max(0, parsed.secondsOn);
     }
     return 0;
   } catch {
     return 0;
+  }
+}
+
+function loadStoredPrime(today) {
+  try {
+    const raw = window.localStorage?.getItem(STORAGE_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.day === today && parsed.primedToday) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
   }
 }
 
@@ -78,6 +86,43 @@ function saveStoredSeconds(data) {
     window.localStorage?.setItem(STORAGE_KEY, JSON.stringify(data));
   } catch {
   }
+}
+
+// Monthly total storage — { month: 'YYYY-MM', mlDosed: number }
+function loadMonthlyTotal() {
+  try {
+    const raw = window.localStorage?.getItem(MONTHLY_STORAGE_KEY);
+    if (!raw) return { month: currentMonthKey(), mlDosed: 0 };
+    const parsed = JSON.parse(raw);
+    const thisMonth = currentMonthKey();
+    if (parsed && parsed.month === thisMonth && Number.isFinite(parsed.mlDosed)) {
+      return parsed;
+    }
+    // Month changed — archive last month and start fresh
+    if (parsed && parsed.month) {
+      try {
+        window.localStorage?.setItem(
+          `antiscalant_monthly_history_${parsed.month}`,
+          JSON.stringify(parsed)
+        );
+      } catch { /* ignore */ }
+    }
+    return { month: thisMonth, mlDosed: 0 };
+  } catch {
+    return { month: currentMonthKey(), mlDosed: 0 };
+  }
+}
+
+function saveMonthlyTotal(data) {
+  try {
+    window.localStorage?.setItem(MONTHLY_STORAGE_KEY, JSON.stringify(data));
+  } catch {
+  }
+}
+
+function currentMonthKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
 // 3725 -> "1h 02m 05s"
@@ -255,16 +300,25 @@ export function AntiscalantDosing() {
 
   // ─── Per-second dosing counter ─────────────────────────────────────────────
   // Every second the pump is ON, add 1 second of ON-time.
-  //   ml dosed = secondsOn × 0.045 ml/s   (0.045 = 2.7 ÷ 60)
+  //   ml dosed = secondsOn × 0.048 ml/s   (plus a one-time startup prime)
   // The running values live in refs so the timer never works with stale state
   // and never has side effects inside a state updater.
   const initialDay = format(new Date(), 'yyyy-MM-dd');
   const [secondsOnToday, setSecondsOnToday] = useState(() => loadStoredSeconds(initialDay));
+  const [primedToday, setPrimedToday] = useState(() => loadStoredPrime(initialDay));
+
   const secondsOnRef = useRef(secondsOnToday);
+  const primedTodayRef = useRef(primedToday);
   const dayRef = useRef(initialDay);
   const lastTickRef = useRef(Date.now());
   const isDosingActiveRef = useRef(isDosingActive);
+  const prevDosingActiveRef = useRef(isDosingActive);
   isDosingActiveRef.current = isDosingActive;
+
+  // Monthly running total — { month, mlDosed }
+  const [monthlyTotal, setMonthlyTotal] = useState(() => loadMonthlyTotal());
+  const monthlyTotalRef = useRef(monthlyTotal.mlDosed);
+  monthlyTotalRef.current = monthlyTotal.mlDosed;
 
   useEffect(() => {
     lastTickRef.current = Date.now();
@@ -277,26 +331,57 @@ export function AntiscalantDosing() {
       const elapsedS = Math.min(Math.max((now - lastTickRef.current) / 1000, 0), MAX_TICK_GAP_S);
       lastTickRef.current = now;
 
-      // New day -> reset the daily counter
+      // New day -> reset the daily counter and prime flag
       const todayStr = format(new Date(now), 'yyyy-MM-dd');
       if (todayStr !== dayRef.current) {
         dayRef.current = todayStr;
         secondsOnRef.current = 0;
+        primedTodayRef.current = false;
+        setPrimedToday(false);
       }
 
-      // Pump ON -> add this second (× 0.045 ml is applied when displaying)
-      if (isDosingActiveRef.current) {
+      const wasOn = prevDosingActiveRef.current;
+      const nowOn = isDosingActiveRef.current;
+
+      // Rising edge (OFF -> ON): emit one startup prime dose. This is the
+      // initial 0.048 ml shot, added on top of the continuous dosing.
+      if (!wasOn && nowOn) {
+        secondsOnRef.current += STARTUP_PRIME_ML / DOSING_RATE_ML_SEC; // == 1 second
+        primedTodayRef.current = true;
+        setPrimedToday(true);
+      }
+      prevDosingActiveRef.current = nowOn;
+
+      // Pump ON -> add this second of ON-time
+      if (nowOn) {
         secondsOnRef.current += elapsedS;
       }
 
       setSecondsOnToday(secondsOnRef.current);
-      saveStoredSeconds({ day: dayRef.current, secondsOn: secondsOnRef.current });
+      saveStoredSeconds({
+        day: dayRef.current,
+        secondsOn: secondsOnRef.current,
+        primedToday: primedTodayRef.current,
+      });
+
+      // Roll the monthly total forward by however many ml were added this tick.
+      if (nowOn) {
+        const mlAddedThisTick = elapsedS * DOSING_RATE_ML_SEC;
+        const nextMonthly = monthlyTotalRef.current + mlAddedThisTick;
+        monthlyTotalRef.current = nextMonthly;
+        setMonthlyTotal({ month: currentMonthKey(), mlDosed: nextMonthly });
+        saveMonthlyTotal({ month: currentMonthKey(), mlDosed: nextMonthly });
+      }
     }, 1000);
 
     return () => clearInterval(interval);
   }, []);
 
+  // Today's ml, computed from accumulated ON-time. The prime is already
+  // baked into secondsOnRef (as +1 second), so no double-counting.
   const dosedTodayMl = secondsOnToday * DOSING_RATE_ML_SEC;
+  const dosedThisMonthMl = monthlyTotal.mlDosed;
+  const dosedThisMonthL = dosedThisMonthMl / 1000;
 
   const dosingRateMlMin = isDosingActive ? DOSING_RATE_ML_MIN : 0;
 
@@ -365,7 +450,7 @@ export function AntiscalantDosing() {
       const monthIndex = (currentMonth - 11 + i + 12) % 12;
       const isCurrentMonth = i === 11;
       const baseConsumption = isCurrentMonth
-        ? monthlyConsumptionL
+        ? dosedThisMonthL
         : monthlyConsumptionL * (0.7 + Math.random() * 0.6);
       return {
         month: months[monthIndex],
@@ -374,7 +459,7 @@ export function AntiscalantDosing() {
         isCurrent: isCurrentMonth
       };
     });
-  }, [monthlyConsumptionL]);
+  }, [dosedThisMonthL, monthlyConsumptionL]);
 
   const alerts = useMemo(() => {
     const list = [];
@@ -583,7 +668,7 @@ export function AntiscalantDosing() {
           unit="ml"
           color="#0ea5e9"
           icon={Droplet}
-          sub={`${formatDuration(secondsOnToday)} ON · ${dailyConsumptionL.toFixed(3)} L`}
+          sub={`${formatDuration(secondsOnToday)} ON · ${dailyConsumptionL.toFixed(3)} L${primedToday ? ' · primed' : ''}`}
           isMobile={isMobile}
         />
         <MetricCard
@@ -605,12 +690,12 @@ export function AntiscalantDosing() {
           isMobile={isMobile}
         />
         <MetricCard
-          label="Monthly Usage (proj.)"
-          value={monthlyConsumptionL.toFixed(1)}
+          label="Month to Date"
+          value={dosedThisMonthL.toFixed(3)}
           unit="L"
           color="#06b6d4"
           icon={Calendar}
-          sub={`${yearlyConsumptionL.toFixed(0)} L/year`}
+          sub={`${dosedThisMonthMl.toFixed(1)} ml · ${monthlyTotal.month}`}
           isMobile={isMobile}
         />
         <MetricCard
@@ -713,7 +798,7 @@ export function AntiscalantDosing() {
               textTransform: "uppercase",
               letterSpacing: "0.08em"
             }}>
-              Monthly Consumption (proj.)
+              Monthly Consumption
             </span>
             <span style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>
               L
