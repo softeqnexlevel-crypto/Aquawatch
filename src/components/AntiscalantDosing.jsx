@@ -17,8 +17,8 @@ import { format, subHours, subDays, startOfDay, subMonths } from 'date-fns';
 // ─── Dosing pump constants ───────────────────────────────────────────────────
 // Per the shaded spec: 0.048 ml per second of pump ON-time.
 // (The previous 0.045 value was 2.7 ml/min ÷ 60, which was ~6.7% low.)
-const DOSING_RATE_ML_SEC = 0.048;                  // ml per second (spec)
-const DOSING_RATE_ML_MIN = DOSING_RATE_ML_SEC * 60; // 2.88 ml/min
+const DOSING_RATE_ML_MIN = 2.7;
+const DOSING_RATE_ML_SEC = DOSING_RATE_ML_MIN / 60; // 2.88 ml/min
 
 // Startup prime: an extra 0.048 ml is dosed the moment the pump goes ON,
 // on top of the continuous per-second dosing. This matches the operator
