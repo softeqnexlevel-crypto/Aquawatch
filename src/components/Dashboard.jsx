@@ -82,26 +82,46 @@ function formatHoursMinutes(ms) {
   return `${h}h ${m}m`;
 }
 
-// Daily run-time is accumulated client-side in localStorage, keyed to
-// today's date, so it survives page refreshes but is per-browser (not
-// synced across devices). A backend-tracked totalizer would be needed
-// for a value that's consistent everywhere.
+// ─── Antiscalant dosing run-time ─────────────────────────────────────────
+// Per operator spec:
+//   • On the rising edge (OFF → ON): add an INITIAL prime dose of 0.048 ml
+//     worth of pump-on time (i.e. exactly one 1-second pulse's worth).
+//   • While the pump is ON: add 1 second of pump-on time per second elapsed.
+//
+// We store `runMs` (milliseconds of accumulated pump ON-time) plus a
+// `primedToday` flag, both keyed to today's date so it resets at midnight
+// and survives page refreshes.
 const DAILY_RUN_STORAGE_KEY = 'ro5_daily_run_ms';
 
-function loadDailyRunMs() {
+// Dosing pump is rated at 2.7 ml/min → 0.045 ml/sec. The prime dose is
+// one second's worth, so the run-time addition is exactly 1000 ms.
+const DOSING_RATE_ML_SEC = 2.7 / 60; // 0.045 ml/s
+
+function todayKey() {
+  return new Date().toDateString();
+}
+
+function loadDailyRunState() {
   try {
     const raw = localStorage.getItem(DAILY_RUN_STORAGE_KEY);
-    if (!raw) return 0;
+    if (!raw) return { runMs: 0, primedToday: false };
     const parsed = JSON.parse(raw);
-    return parsed.date === new Date().toDateString() ? (parsed.ms || 0) : 0;
+    if (parsed.date !== todayKey()) return { runMs: 0, primedToday: false };
+    return {
+      runMs: Number.isFinite(parsed.runMs) ? parsed.runMs : 0,
+      primedToday: Boolean(parsed.primedToday),
+    };
   } catch {
-    return 0;
+    return { runMs: 0, primedToday: false };
   }
 }
 
-function saveDailyRunMs(ms) {
+function saveDailyRunState({ runMs, primedToday }) {
   try {
-    localStorage.setItem(DAILY_RUN_STORAGE_KEY, JSON.stringify({ date: new Date().toDateString(), ms }));
+    localStorage.setItem(
+      DAILY_RUN_STORAGE_KEY,
+      JSON.stringify({ date: todayKey(), runMs, primedToday })
+    );
   } catch {
     // ignore storage errors (e.g. private browsing)
   }
@@ -297,9 +317,7 @@ function TopStatusCard({ icon: Icon, iconBg, iconColor, title, value, valueColor
           </div>
         )}
         <div>
-          {/* Reduced: title 9.5 -> 8.5 desktop, 8 -> 7.5 mobile */}
           <div style={{ fontSize: isMobile ? 7.5 : 8.5, color: "var(--muted-foreground)", marginBottom: 2 }}>{title}</div>
-          {/* Reduced: value 18 -> 15 desktop, 15 -> 13 mobile */}
           <div style={{ fontFamily: "var(--font-mono)", fontSize: isMobile ? 13 : 15, fontWeight: 700, color: valueColor || "var(--foreground)", lineHeight: 1.1 }}>{value}</div>
           {sub && <div style={{ fontSize: isMobile ? 7.5 : 8.5, color: subColor || "var(--muted-foreground)", marginTop: 2 }}>{sub}</div>}
           {action}
@@ -459,7 +477,10 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     previousState: null,
   });
 
-  const [dailyRunMs, setDailyRunMs] = useState(() => loadDailyRunMs());
+  // Daily antiscalant run-time, persisted in localStorage.
+  //   runMs       — accumulated pump ON-time today, in ms.
+  //   primedToday — whether the initial prime dose has been applied today.
+  const [dailyRunMs, setDailyRunMs] = useState(() => loadDailyRunState().runMs);
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 640);
@@ -555,29 +576,67 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const highPressurePumpOn = operationMode === 'FILTER' && isSystemOn;
   const dosingPumpOn = operationMode === 'FILTER' && isDosingOn;
 
-  // Run-time accumulates while the DOSING pump is on (this matches the
-  // physical antiscalant dosing runtime, which is what the operator cares
-  // about). Resets to zero on date rollover; persists to localStorage so a
-  // page refresh doesn't lose today's total.
+  // ─── Antiscalant run-time accumulation ────────────────────────────────────
+  // Runs a 1-second pulse counter. Each tick:
+  //   1. Detect the OFF → ON transition of the dosing pump. On the rising
+  //      edge, add the initial prime (one extra second's worth) and mark
+  //      the day as primed.
+  //   2. While ON, add 1 second of runtime.
+  //   3. Roll over at midnight — reset runtime and prime flag.
+  //   4. Persist to localStorage on every tick.
+  //
+  // The pulse timer lives inside a single effect that runs for the whole
+  // component lifetime (not gated on `dosingPumpOn`) so it can observe the
+  // rising edge. It reads the current pump state via a ref, not a closure
+  // over a stale value.
+  const dosingPumpOnRef = React.useRef(dosingPumpOn);
+  const prevDosingPumpOnRef = React.useRef(dosingPumpOn);
+  dosingPumpOnRef.current = dosingPumpOn;
+
   useEffect(() => {
-    if (!dosingPumpOn) return;
+    let cancelled = false;
+
     const interval = setInterval(() => {
+      if (cancelled) return;
+
+      // Midnight rollover: reset today's counter and prime flag.
+      const stored = loadDailyRunState();
+      if (stored.runMs === 0 && stored.primedToday === false && dailyRunMs !== 0) {
+        // Cheap heuristic: if the loader says zero (new day) but our state
+        // isn't zero, snap to zero.
+        setDailyRunMs(0);
+      }
+
+      const nowOn = dosingPumpOnRef.current;
+      const wasOn = prevDosingPumpOnRef.current;
+
       setDailyRunMs((prev) => {
-        const todayKey = new Date().toDateString();
-        let base = prev;
-        try {
-          const stored = JSON.parse(localStorage.getItem(DAILY_RUN_STORAGE_KEY) || 'null');
-          if (!stored || stored.date !== todayKey) base = 0;
-        } catch {
-          // ignore parse errors, fall back to prev
+        let next = prev;
+        const state = loadDailyRunState();
+        const base = state.date === todayKey() ? state.runMs : 0;
+        const primedToday = state.primedToday;
+
+        // Rising edge (OFF → ON): apply the initial prime dose (1 s worth).
+        if (!wasOn && nowOn && !primedToday) {
+          next = base + 1000;
+          saveDailyRunState({ runMs: next, primedToday: true });
+        } else {
+          // Continuous: add one second of on-time per tick while ON.
+          next = nowOn ? base + 1000 : base;
+          saveDailyRunState({ runMs: next, primedToday });
         }
-        const next = base + 1000;
-        saveDailyRunMs(next);
         return next;
       });
+
+      prevDosingPumpOnRef.current = nowOn;
     }, 1000);
-    return () => clearInterval(interval);
-  }, [dosingPumpOn]);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const getOperationDisplay = () => {
     if (tankEmpty) {
@@ -939,7 +998,6 @@ export function Dashboard({ onViewAllAlerts } = {}) {
                   key={key}
                   onClick={() => setSelectedSensors([key])}
                   style={{
-                    // Reduced: filter pill font + padding
                     padding: isMobile ? '2px 7px' : '3px 9px',
                     borderRadius: isMobile ? 8 : 10,
                     background: isSelected ? sensor.color : 'var(--secondary)',
