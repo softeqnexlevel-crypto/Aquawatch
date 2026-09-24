@@ -1,4 +1,7 @@
 // components/FiltrationMonitoring.jsx - FULLY MOBILE RESPONSIVE
+//
+// Requires the updated DataContext (exposes `isLive` and `systemOn`).
+// If those are missing the page falls back to the old behaviour (always "live").
 
 import React, { useState, useMemo, useEffect } from 'react';
 import {
@@ -25,8 +28,6 @@ const MEDIA_DP_CRITICAL = 0.50;
 // Gauge max = 1.5× critical so the needle has visible travel past the red line.
 const GAUGE_MAX_RATIO = 1.5;
 
-// Build the band list for a sensor from its warning/critical thresholds.
-// Keeps the three-band scheme (normal / warning / critical) in one place.
 const buildBands = (warning, critical) => [
   { key: 'normal',   label: 'Normal',   min: 0,       max: warning,  color: '#22c55e' },
   { key: 'warning',  label: 'Warning',  min: warning, max: critical, color: '#eab308' },
@@ -35,34 +36,24 @@ const buildBands = (warning, critical) => [
 
 // ---------------------------------------------------------------------------
 // FILTERS config — the single source of truth for every monitored filter.
-//
-// Adding or renaming a filter is a one-line change here. The gauges, the
-// trend chart series, the summary cards, and the event checks all read from
-// this array, so they can't drift apart.
-//
-//   key      : sensor key in the DataContext
-//   label    : full human-readable name
-//   short    : legend label for the trend chart
-//   color    : line color on the trend chart
-//   warning  : warning threshold (bar)
-//   critical : critical threshold (bar)
 // ---------------------------------------------------------------------------
 const FILTERS = [
-  { key: 'RO5-Stage1Delta',      label: 'Stage 1 Differential Pressure',      short: 'Stage 1', color: '#0ea5e9', warning: STAGE_DP_WARNING, critical: STAGE_DP_CRITICAL },
-  { key: 'RO5-Stage2Delta',      label: 'Stage 2 Differential Pressure',      short: 'Stage 2', color: '#14b8a6', warning: STAGE_DP_WARNING, critical: STAGE_DP_CRITICAL },
+  { key: 'RO5-Stage1Delta',       label: 'Stage 1 Differential Pressure',      short: 'Stage 1', color: '#0ea5e9', warning: STAGE_DP_WARNING, critical: STAGE_DP_CRITICAL },
+  { key: 'RO5-Stage2Delta',       label: 'Stage 2 Differential Pressure',      short: 'Stage 2', color: '#14b8a6', warning: STAGE_DP_WARNING, critical: STAGE_DP_CRITICAL },
   { key: 'RO5-MediaFilterDeltaP', label: 'Media Filter Differential Pressure', short: 'Media',   color: '#a78bfa', warning: MEDIA_DP_WARNING, critical: MEDIA_DP_CRITICAL },
 ];
 
-// Precompute per-filter bands and gauge max once, so the render path is cheap.
 FILTERS.forEach((f) => {
   f.bands = buildBands(f.warning, f.critical);
   f.gaugeMax = f.critical * GAUGE_MAX_RATIO;
 });
 
-// Page / section headings, centralised so a rename touches one place.
 const PAGE_TITLE    = 'Stage 1 Differential Pressure Monitoring';
 const PAGE_SUBTITLE = 'Real-time monitoring';
 const TREND_TITLE   = 'Stage 1 Differential Pressure Trend';
+
+// Hex colour + alpha suffix, or a neutral border if the colour is a CSS variable.
+const tint = (c, alpha) => (typeof c === 'string' && c.startsWith('#') ? `${c}${alpha}` : 'var(--border)');
 
 // ===================== CUSTOM TOOLTIP =====================
 const CustomTooltip = ({ active, payload, label }) => {
@@ -80,36 +71,46 @@ const CustomTooltip = ({ active, payload, label }) => {
 };
 
 // ===================== FILTER GAUGE CARD =====================
-function FilterGaugeCard({ value, filter, lastUpdate, isMobile }) {
+// mode: 'live' | 'stopped' (plant reports not operating) | 'offline' (no live data)
+function FilterGaugeCard({ value, filter, lastUpdate, mode, isMobile }) {
   const { label, bands, gaugeMax, warning, critical } = filter;
 
-  const hasValue = Number.isFinite(value);
-  const band = classifyByBands(value, bands);
-  const color = !hasValue ? 'var(--muted-foreground)' : (band?.color ?? '#22c55e');
-  const statusLabel = !hasValue ? 'NO DATA' : (band?.label ?? 'NORMAL').toUpperCase();
+  const isLiveMode = mode === 'live';
+  const band = isLiveMode ? classifyByBands(value, bands) : null;
+  const color = !isLiveMode ? 'var(--muted-foreground)' : (band?.color ?? '#22c55e');
+  const statusLabel =
+    mode === 'offline' ? 'NO DATA' :
+    mode === 'stopped' ? 'STOPPED' :
+    (band?.label ?? 'NORMAL').toUpperCase();
 
-  // Health score: 100% at 0 bar, 0% at critical.
-  const pct = hasValue ? Math.min((value / critical) * 100, 100) : 0;
-  const healthScore = hasValue ? Math.max(0, Math.round(100 - pct)) : 0;
-  const healthColor = healthScore > 70 ? '#22c55e' : healthScore > 50 ? '#eab308' : '#ef4444';
+  // Health score: 100% at 0 bar, 0% at critical. Not meaningful unless running.
+  const healthScore = isLiveMode
+    ? Math.max(0, Math.round(100 - Math.min((value / critical) * 100, 100)))
+    : null;
+  const healthColor =
+    healthScore === null ? 'var(--muted-foreground)' :
+    healthScore > 70 ? '#22c55e' : healthScore > 50 ? '#eab308' : '#ef4444';
 
   const StatusIcon =
-    !hasValue ? AlertCircle :
+    !isLiveMode ? AlertCircle :
     value >= critical ? AlertTriangle :
     value >= warning ? AlertCircle :
     CheckCircle;
 
+  // Gauge: needle at 0 when stopped, blank when there is no data at all
+  const gaugeValue = mode === 'offline' ? undefined : (isLiveMode ? value : 0);
+
   const summaryItems = [
     { label: "Warning",      value: `${warning.toFixed(2)} bar`,  color: "#eab308" },
     { label: "Critical",     value: `${critical.toFixed(2)} bar`, color: "#ef4444" },
-    { label: "Health Score", value: `${healthScore}%`,            color: healthColor },
+    { label: "Health Score", value: healthScore === null ? '--' : `${healthScore}%`, color: healthColor },
     { label: "Last Update",  value: lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--', color: "var(--muted-foreground)" },
   ];
 
   return (
     <div
       className="rounded p-3 sm:p-4 flex flex-col gap-3 sm:gap-4"
-      style={{ background: "var(--card)", border: `1px solid ${color}30` }}
+      style={{ background: "var(--card)", border: `1px solid ${tint(color, '30')}` }}
     >
       {/* Header: name + status pill */}
       <div className="flex items-start justify-between gap-2">
@@ -130,7 +131,7 @@ function FilterGaugeCard({ value, filter, lastUpdate, isMobile }) {
         </div>
         <div
           className="flex items-center gap-1 rounded px-1.5 sm:px-2 py-0.5 sm:py-1"
-          style={{ background: `${color}15`, border: `1px solid ${color}40`, flexShrink: 0 }}
+          style={{ background: tint(color, '15'), border: `1px solid ${tint(color, '40')}`, flexShrink: 0 }}
         >
           <StatusIcon size={isMobile ? 10 : 12} style={{ color }} />
           <span style={{ fontSize: isMobile ? 8 : 10, fontWeight: 700, color, letterSpacing: "0.06em" }}>
@@ -140,9 +141,9 @@ function FilterGaugeCard({ value, filter, lastUpdate, isMobile }) {
       </div>
 
       {/* Gauge */}
-      <div style={{ display: 'flex', justifyContent: 'center' }}>
+      <div style={{ display: 'flex', justifyContent: 'center', opacity: isLiveMode ? 1 : 0.55 }}>
         <RadialGauge
-          value={hasValue ? value : undefined}
+          value={gaugeValue}
           unit="bar"
           label={label}
           size={isMobile ? 170 : 210}
@@ -171,10 +172,10 @@ function FilterGaugeCard({ value, filter, lastUpdate, isMobile }) {
         <span style={{ fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)" }}>Filter Health Score</span>
         <div className="flex items-center gap-2">
           <div style={{ width: isMobile ? 60 : 80, height: 4, background: "var(--secondary)", borderRadius: 2 }}>
-            <div style={{ width: `${healthScore}%`, height: "100%", background: healthColor, borderRadius: 2 }} />
+            <div style={{ width: `${healthScore ?? 0}%`, height: "100%", background: healthColor, borderRadius: 2 }} />
           </div>
           <span style={{ fontSize: isMobile ? 9 : 10, fontFamily: "var(--font-mono)", color: healthColor, fontWeight: 600 }}>
-            {healthScore}%
+            {healthScore === null ? '--' : `${healthScore}%`}
           </span>
         </div>
       </div>
@@ -184,7 +185,8 @@ function FilterGaugeCard({ value, filter, lastUpdate, isMobile }) {
 
 // ===================== MAIN COMPONENT =====================
 export function FiltrationMonitoring() {
-  const { getValue, getHistory, lastUpdate } = useData();
+  // isLive / systemOn come from the updated DataContext (defaults keep old behaviour)
+  const { getValue, getHistory, lastUpdate, isLive = true, systemOn = null } = useData();
   const [timeRange, setTimeRange] = useState('24h');
   const [isMobile, setIsMobile] = useState(false);
 
@@ -195,22 +197,35 @@ export function FiltrationMonitoring() {
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  // Pull current values and history for each configured filter.
+  // What is the plant actually doing right now?
+  const mode = !isLive ? 'offline' : (systemOn === false ? 'stopped' : 'live');
+  const running = mode === 'live';
+
+  const modeInfo = {
+    live:    { text: 'LIVE',          color: '#22c55e' },
+    stopped: { text: 'PLANT STOPPED', color: '#eab308' },
+    offline: { text: 'NO LIVE DATA',  color: '#ef4444' },
+  }[mode];
+  const systemText = systemOn === null ? 'unknown' : (systemOn ? 'ON' : 'OFF');
+
+  // Current values. Never fall back to chart history: history is old by definition.
   const filterData = useMemo(() => (
-    FILTERS.map((f) => ({
-      ...f,
-      value: getValue(f.key) || 0,
-      history: getHistory(f.key) || [],
-    }))
+    FILTERS.map((f) => {
+      const raw = Number(getValue(f.key));
+      return {
+        ...f,
+        value: running && Number.isFinite(raw) ? raw : 0,
+        history: getHistory(f.key) || [],
+      };
+    })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  ), [getValue, getHistory, lastUpdate]);
+  ), [getValue, getHistory, lastUpdate, running]);
 
   // Merge all series into a single time-aligned array for the trend chart.
   const chartData = useMemo(() => {
     const now = new Date();
     const startTime = timeRange === '24h' ? subHours(now, 24) : subHours(now, 1);
 
-    // Time-bucketed map: key = epoch ms, value = { time, [seriesKey]: value }
     const dataMap = new Map();
     filterData.forEach((f) => {
       f.history.forEach((d) => {
@@ -218,7 +233,6 @@ export function FiltrationMonitoring() {
         if (t < startTime) return;
         const k = t.getTime();
         if (!dataMap.has(k)) dataMap.set(k, { time: format(t, 'HH:mm'), _t: k });
-        // Use short name as the series key so legend labels map cleanly.
         dataMap.get(k)[f.short] = d.value;
       });
     });
@@ -228,19 +242,21 @@ export function FiltrationMonitoring() {
       .slice(-50);
   }, [filterData, timeRange]);
 
-  // Detect "recent average exceeds warning" events per filter.
+  // "Recent average exceeds warning" events — only while the plant is running.
   const filterEvents = useMemo(() => {
+    if (!running) return [];
     const events = [];
     filterData.forEach((f) => {
       if (f.history.length <= 10) return;
       const recent = f.history.slice(-10);
-      const avg = recent.reduce((sum, d) => sum + d.value, 0) / recent.length;
+      const values = recent.map((d) => Number(d.value) || 0);
+      const avg = values.reduce((sum, v) => sum + v, 0) / values.length;
       if (avg > f.warning) {
         events.push({
-          time: format(new Date(), 'yyyy-MM-dd HH:mm'),
+          time: format(new Date(recent[recent.length - 1].time), 'yyyy-MM-dd HH:mm'),
           filter: f.label,
           event: "High ΔP Warning",
-          before: recent[0]?.value?.toFixed(2) || '0.00',
+          before: values[0].toFixed(2),
           after: avg.toFixed(2),
           dur: "Monitoring",
           op: "System Auto",
@@ -248,24 +264,7 @@ export function FiltrationMonitoring() {
       }
     });
     return events.slice(0, 5);
-  }, [filterData]);
-
-  // Latest value for each filter — falls back to the sensor value when the
-  // chart window has no recent points (e.g. after a long outage).
-  const latestByKey = useMemo(() => {
-    const last = chartData[chartData.length - 1];
-    const out = {};
-    filterData.forEach((f) => {
-      out[f.key] = last?.[f.short] ?? f.value;
-    });
-    return out;
-  }, [chartData, filterData]);
-
-  const healthStatus = (value, warning, critical) => {
-    if (value >= critical) return { status: 'Critical', color: '#ef4444', icon: AlertTriangle };
-    if (value >= warning)  return { status: 'Warning',  color: '#eab308', icon: AlertCircle };
-    return { status: 'Normal', color: '#22c55e', icon: CheckCircle };
-  };
+  }, [filterData, running]);
 
   return (
     <div className="flex flex-col gap-3 sm:gap-4 p-2 sm:p-4 overflow-auto h-full">
@@ -278,10 +277,23 @@ export function FiltrationMonitoring() {
             {PAGE_TITLE}
           </div>
           <p style={{ fontSize: isMobile ? 10 : 12, color: "var(--muted-foreground)", marginTop: 2 }}>
-            {PAGE_SUBTITLE} • Last updated: {lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--'}
+            {PAGE_SUBTITLE} • Last live data: {lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--'}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Shows exactly what the page believes about the plant */}
+          <div
+            title="Feed status · value of RO5-SystemOperation"
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '3px 10px', borderRadius: 20,
+              background: `${modeInfo.color}18`, border: `1px solid ${modeInfo.color}40`,
+              fontSize: isMobile ? 9 : 10, fontWeight: 700, color: modeInfo.color, letterSpacing: '0.05em',
+            }}
+          >
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: modeInfo.color }} />
+            {modeInfo.text} · System: {systemText}
+          </div>
           {['1h', '24h'].map((range) => (
             <button
               key={range}
@@ -302,14 +314,33 @@ export function FiltrationMonitoring() {
         </div>
       </div>
 
+      {/* Banner when not running */}
+      {!running && (
+        <div
+          className="rounded p-2 sm:p-3"
+          style={{
+            background: `${modeInfo.color}10`,
+            border: `1px solid ${modeInfo.color}30`,
+            borderLeft: `4px solid ${modeInfo.color}`,
+            fontSize: isMobile ? 10 : 12,
+            color: modeInfo.color,
+          }}
+        >
+          {mode === 'offline'
+            ? 'No live data from the plant. Gauges are cleared; the trend below shows recorded history only.'
+            : 'The plant reports it is not operating. Gauges are at zero; the trend below shows recorded history only.'}
+        </div>
+      )}
+
       {/* Gauges — driven by FILTERS */}
       <div className="grid gap-3 sm:gap-4" style={{ gridTemplateColumns: isMobile ? "1fr" : `repeat(${FILTERS.length}, 1fr)` }}>
         {filterData.map((f) => (
           <FilterGaugeCard
             key={f.key}
-            value={latestByKey[f.key]}
+            value={f.value}
             filter={f}
             lastUpdate={lastUpdate}
+            mode={mode}
             isMobile={isMobile}
           />
         ))}
@@ -401,29 +432,6 @@ export function FiltrationMonitoring() {
         )}
       </div>
 
-      {/* Status summary — driven by FILTERS */}
-      {/* <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: isMobile ? "1fr 1fr" : `repeat(${FILTERS.length}, 1fr)` }}>
-        {filterData.map((f) => {
-          const value = latestByKey[f.key];
-          const status = healthStatus(value, f.warning, f.critical);
-          const StatusIcon = status.icon;
-          return (
-            <div key={f.key} className="rounded p-2 sm:p-3" style={{ background: "var(--card)", border: `1px solid ${status.color}30` }}>
-              <div style={{ fontSize: isMobile ? 8 : 10, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-                {f.label}
-              </div>
-              <div style={{ fontSize: isMobile ? 16 : 20, fontFamily: "var(--font-mono)", fontWeight: 700, color: "var(--foreground)", marginTop: 2 }}>
-                {value.toFixed(3)} <span style={{ fontSize: isMobile ? 10 : 12, color: "var(--muted-foreground)" }}>bar</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2, fontSize: isMobile ? 9 : 10, color: status.color }}>
-                <StatusIcon size={isMobile ? 10 : 12} />
-                {status.status}
-              </div>
-            </div>
-          );
-        })}
-      </div> */}
-
       {/* Events table */}
       <div className="rounded p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
         <div style={{ fontSize: isMobile ? 10 : 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>
@@ -433,7 +441,7 @@ export function FiltrationMonitoring() {
 
         {filterEvents.length === 0 ? (
           <div style={{ padding: "20px", textAlign: "center", color: "var(--muted-foreground)", fontSize: 10 }}>
-            No recent events. All filters operating normally.
+            {running ? 'No recent events. All filters operating normally.' : 'No live events while the plant is not running.'}
           </div>
         ) : isMobile ? (
           <div className="flex flex-col gap-2">
