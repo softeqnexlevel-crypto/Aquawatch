@@ -71,6 +71,10 @@ const RUN_GATED = new Set([
   'RO5-FEEDFlow',
   'RO5-Permeateflow',
   'RO5-ConcetrateFlow',
+  'RO5-SystemRecovery',
+  'RO5-Stage1Delta',
+  'RO5-Stage2Delta',
+  'RO5-MediaFilterDeltaP',
   'RO5-Feedpump',
   'RO5-AntiscalantDosingActive',
 ]);
@@ -252,9 +256,17 @@ export const DataProvider = ({ children }) => {
   // ── Derived state ────────────────────────────────────────────────────────
   const isLive = connected && liveFresh;
 
-  // null = the plant never sent a SystemOperation tag (unknown → don't gate on it)
+  // true / false when the plant reports it; otherwise, if the SystemOperation
+  // tag never arrives, an EMPTY FEED TANK is treated as "stopped" (nothing can
+  // run without feed water). null = genuinely unknown → no gating.
   const sysEntry = sensorData['RO5-SystemOperation'];
-  const systemOn = sysEntry === undefined ? null : isTruthyStatus(sysEntry.value);
+  const tankEntry = sensorData['RO5-FeedTankLevel'];
+  const tankEmpty = tankEntry !== undefined
+    && Number.isFinite(Number(tankEntry.value))
+    && Number(tankEntry.value) <= 0;
+  const systemOn = sysEntry !== undefined
+    ? isTruthyStatus(sysEntry.value)
+    : (tankEmpty ? false : null);
 
   const getValue = (key) => {
     const isDoser = key === 'RO5-AntiscalantDosingActive';
