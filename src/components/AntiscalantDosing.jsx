@@ -2,24 +2,28 @@
 //
 // Server-authoritative. This component never counts, never writes to
 // localStorage, and never invents data. It polls /api/dosing/* every 5 s
-// and interpolates the display between polls (cosmetic only).
+// and interpolates the display between polls (cosmetic only, and only while
+// the server itself reports that it is accruing).
 
 import React, { useState, useMemo, useEffect } from "react";
 import {
-  AreaChart, Area, LineChart, Line, BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
+  LineChart, Line, BarChart, Bar,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
 } from "recharts";
 import {
   AlertTriangle, CheckCircle, FlaskConical, Droplet,
-  TrendingUp, TrendingDown, Clock, Calendar, AlertCircle, Info
+  TrendingUp, Clock, Calendar, AlertCircle, Info
 } from "lucide-react";
 import { useData } from "../contexts/DataContext";
 import { API_BASE_URL } from "../config";
-import { format, subHours, subDays } from 'date-fns';
+import { format, subHours } from 'date-fns';
 
 // ─── Fallback constants (only used until the first server fetch returns) ────
 const FALLBACK_RATE_ML_MIN = 2.7;
 const FALLBACK_RATE_ML_SEC = FALLBACK_RATE_ML_MIN / 60;
+
+// Plant time = Africa/Nairobi (UTC+3, no DST). Must match the server.
+const PLANT_OFFSET_MS = 3 * 60 * 60 * 1000;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function toBool(raw) {
@@ -48,9 +52,14 @@ function formatDuration(totalSeconds) {
   return `${sec}s`;
 }
 
+// "Now" shifted to plant time; read it with the getUTC* methods.
+function plantDate() {
+  return new Date(Date.now() + PLANT_OFFSET_MS);
+}
+
 function monthKeyNow() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  const d = plantDate();
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
 // ─── Tooltip ────────────────────────────────────────────────────────────────
@@ -163,22 +172,31 @@ export function AntiscalantDosing() {
   // ── Poll /api/dosing/* every 5 s ─────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
-    const token = localStorage.getItem('accessToken');
-    const headers = { Authorization: `Bearer ${token}` };
 
     const fetchAll = async () => {
       try {
+        // Read the token on EVERY poll so refreshed/re-login tokens are picked up
+        const token = localStorage.getItem('accessToken');
+        const headers = { Authorization: `Bearer ${token}` };
+        const opts = { headers, cache: 'no-store' };
         const month = monthKeyNow();
+
         const [tRes, mRes, hRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/api/dosing/totals`, { headers }),
-          fetch(`${API_BASE_URL}/api/dosing/month`, { headers }),
-          fetch(`${API_BASE_URL}/api/dosing/history?month=${month}`, { headers }),
+          fetch(`${API_BASE_URL}/api/dosing/totals`, opts),
+          fetch(`${API_BASE_URL}/api/dosing/month`, opts),
+          fetch(`${API_BASE_URL}/api/dosing/history?month=${month}`, opts),
         ]);
         if (cancelled) return;
-        if (tRes.ok) setTotals(await tRes.json());
-        if (mRes.ok) setMonthSummary(await mRes.json());
-        if (hRes.ok) setMonthHistory(await hRes.json());
-        setFetchError(null);
+
+        // Apply whatever succeeded; surface the first failure instead of hiding it
+        let firstError = null;
+        const note = (res, name) => { if (!firstError) firstError = `${res.status} ${name}`; };
+
+        if (tRes.ok) setTotals(await tRes.json()); else note(tRes, '/api/dosing/totals');
+        if (mRes.ok) setMonthSummary(await mRes.json()); else note(mRes, '/api/dosing/month');
+        if (hRes.ok) setMonthHistory(await hRes.json()); else note(hRes, '/api/dosing/history');
+
+        if (!cancelled) setFetchError(firstError);
       } catch (err) {
         if (!cancelled) setFetchError(err.message);
       }
@@ -198,21 +216,23 @@ export function AntiscalantDosing() {
   const isDosingActive = toBool(getValue('RO5-AntiscalantDosingActive'));
 
   // ── Server-driven values ────────────────────────────────────────────────
+  const serverReady      = totals !== null;
   const rateMlPerSec     = totals?.rateMlPerSec ?? FALLBACK_RATE_ML_SEC;
   const rateMlPerMin     = totals?.rateMlPerMin ?? FALLBACK_RATE_ML_MIN;
   const secondsOnToday   = totals?.secondsOn ?? 0;
   const dosedTodayMl     = totals?.mlDosed ?? 0;
   const primedToday      = totals?.primedToday ?? false;
-  const dosedThisMonthMl = monthSummary?.mlDosed ?? 0;
-  const dosedThisMonthL  = dosedThisMonthMl / 1000;
+  const serverAccruing   = Boolean(totals?.accruing);
   const dosingRateMlMin  = isDosingActive ? rateMlPerMin : 0;
 
   // ── Cosmetic live interpolation between polls ───────────────────────────
+  // Only runs while the SERVER says it is accruing, so the screen can never
+  // count on its own when the server isn't.
   const [displayMl, setDisplayMl] = useState(0);
   const [displaySeconds, setDisplaySeconds] = useState(0);
 
   useEffect(() => {
-    if (!isDosingActive) {
+    if (!serverAccruing) {
       setDisplayMl(dosedTodayMl);
       setDisplaySeconds(secondsOnToday);
       return;
@@ -228,26 +248,34 @@ export function AntiscalantDosing() {
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [dosedTodayMl, secondsOnToday, isDosingActive, rateMlPerSec]);
+  }, [dosedTodayMl, secondsOnToday, serverAccruing, rateMlPerSec]);
 
   const dailyConsumptionL = displayMl / 1000;
 
+  // Month total = server month total + what accrued since the last poll
+  const monthDeltaMl     = Math.max(0, displayMl - dosedTodayMl);
+  const dosedThisMonthMl = (monthSummary?.mlDosed ?? 0) + (monthSummary ? monthDeltaMl : 0);
+  const dosedThisMonthL  = dosedThisMonthMl / 1000;
+
   // ── Chart: daily consumption for the current month (REAL) ───────────────
   const monthlyConsumptionData = useMemo(() => {
-    const now = new Date();
+    const p = plantDate();
+    const y = p.getUTCFullYear();
+    const mo = p.getUTCMonth();
+    const todayNum = p.getUTCDate();
     const thisMonth = monthKeyNow();
-    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const daysInMonth = new Date(Date.UTC(y, mo + 1, 0)).getUTCDate();
+
     const byDay = new Map();
     (monthHistory?.days ?? []).forEach((d) => {
       byDay.set(d.day, (Number(d.mlDosed) || 0) / 1000);
     });
+
     return Array.from({ length: daysInMonth }, (_, i) => {
       const day = i + 1;
       const key = `${thisMonth}-${String(day).padStart(2, '0')}`;
-      const isToday = day === now.getDate();
-      const consumption = byDay.has(key)
-        ? byDay.get(key)
-        : (isToday ? dailyConsumptionL : 0);
+      const isToday = day === todayNum;
+      const consumption = isToday ? dailyConsumptionL : (byDay.get(key) ?? 0);
       return { day: String(day), consumption, isToday };
     });
   }, [monthHistory, dailyConsumptionL]);
@@ -363,13 +391,15 @@ export function AntiscalantDosing() {
             Rate: {rateMlPerMin.toFixed(2)} ml/min ({rateMlPerSec.toFixed(3)} ml/s)
           </div>
           {fetchError && (
-            <div style={{
+            <div title={fetchError} style={{
               display: 'flex', alignItems: 'center', gap: 3, padding: '2px 10px',
               background: 'rgba(239,68,68,0.12)', borderRadius: 20,
               border: '1px solid rgba(239,68,68,0.2)'
             }}>
               <AlertCircle size={isMobile ? 10 : 14} style={{ color: '#ef4444' }} />
-              <span style={{ fontSize: isMobile ? 9 : 11, color: '#ef4444' }}>sync offline</span>
+              <span style={{ fontSize: isMobile ? 9 : 11, color: '#ef4444' }}>
+                sync offline · {fetchError}
+              </span>
             </div>
           )}
           {alerts.length > 0 && (
@@ -453,20 +483,22 @@ export function AntiscalantDosing() {
         />
         <MetricCard
           label="Dosed Today"
-          value={displayMl.toFixed(2)}
+          value={serverReady ? displayMl.toFixed(2) : '--'}
           unit="ml"
           color="#0ea5e9"
           icon={Droplet}
-          sub={`${formatDuration(displaySeconds)} ON · ${dailyConsumptionL.toFixed(3)} L${primedToday ? ' · primed' : ''}`}
+          sub={serverReady
+            ? `${formatDuration(displaySeconds)} ON · ${dailyConsumptionL.toFixed(3)} L${primedToday ? ' · primed' : ''}`
+            : 'waiting for server…'}
           isMobile={isMobile}
         />
         <MetricCard
           label="Month to Date"
-          value={dosedThisMonthL.toFixed(3)}
+          value={monthSummary ? dosedThisMonthL.toFixed(3) : '--'}
           unit="L"
           color="#06b6d4"
           icon={Calendar}
-          sub={`${dosedThisMonthMl.toFixed(1)} ml · ${monthSummary?.month ?? '—'}`}
+          sub={monthSummary ? `${dosedThisMonthMl.toFixed(1)} ml · ${monthSummary.month}` : 'waiting for server…'}
           isMobile={isMobile}
         />
         <MetricCard
