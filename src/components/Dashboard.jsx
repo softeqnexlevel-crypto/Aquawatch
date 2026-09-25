@@ -518,15 +518,15 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     fetchProductionSummary();
   };
 
-  const feedFlow = getNumber('RO5-FEEDFlow');
-  const permeateFlow = getNumber('RO5-Permeateflow');
-  const concentrateFlow = getNumber('RO5-ConcetrateFlow');
+  const feedFlowRaw = getNumber('RO5-FEEDFlow');
+  const permeateFlowRaw = getNumber('RO5-Permeateflow');
+  const concentrateFlowRaw = getNumber('RO5-ConcetrateFlow');
   const roPressureRaw = getNumber('RO5-ROPressure');
-  const systemRecovery = getNumber('RO5-SystemRecovery');
+  const systemRecoveryRaw = getNumber('RO5-SystemRecovery');
   const pureWaterEC = getNumber('RO5-PureWaterEc');
-  const stage1Delta = getNumber('RO5-Stage1Delta');
-  const stage2Delta = getNumber('RO5-Stage2Delta');
-  const filterDeltaP = getNumber('RO5-MediaFilterDeltaP');
+  const stage1DeltaRaw = getNumber('RO5-Stage1Delta');
+  const stage2DeltaRaw = getNumber('RO5-Stage2Delta');
+  const filterDeltaPRaw = getNumber('RO5-MediaFilterDeltaP');
 
   const systemOperation = getValue('RO5-SystemOperation');
   const systemMode = getValue('RO5-SystemMode');
@@ -545,6 +545,23 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     freshnessWindowMs: DATA_FRESHNESS_WINDOW_MS,
   });
 
+  const tankHasData = feedTankLevel !== null;
+  const tankEmpty = tankHasData && feedTankLevel <= TANK_EMPTY_THRESHOLD_PCT;
+
+  const isSystemOn = feedPumpOn && !tankEmpty;
+
+  // ── Single source of truth: everything that requires flow gates on isSystemOn ──
+  // (Pressure/tank already had their own gating helper; flow + recovery + the
+  // three differential-pressure sensors did not, which is what let the KPI
+  // row keep showing "running" numbers while the Operation card said OFF.)
+  const feedFlow = isSystemOn ? feedFlowRaw : 0;
+  const permeateFlow = isSystemOn ? permeateFlowRaw : 0;
+  const concentrateFlow = isSystemOn ? concentrateFlowRaw : 0;
+  const systemRecovery = isSystemOn ? systemRecoveryRaw : 0;
+  const stage1Delta = isSystemOn ? stage1DeltaRaw : 0;
+  const stage2Delta = isSystemOn ? stage2DeltaRaw : 0;
+  const filterDeltaP = isSystemOn ? filterDeltaPRaw : 0;
+
   const roPressure = getDisplayedPressure({
     rawPressure: roPressureRaw,
     lastUpdate,
@@ -553,12 +570,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     freshnessWindowMs: DATA_FRESHNESS_WINDOW_MS,
   });
 
-  const tankHasData = feedTankLevel !== null;
   const pressureHasData = roPressure !== null;
-
-  const tankEmpty = tankHasData && feedTankLevel <= TANK_EMPTY_THRESHOLD_PCT;
-
-  const isSystemOn = feedPumpOn && !tankEmpty;
 
   const isDosingOn = dosingActive === 'ON' || isActive(dosingActive);
 
@@ -811,29 +823,29 @@ export function Dashboard({ onViewAllAlerts } = {}) {
         <SectionTitle>Key Performance Indicators</SectionTitle>
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1.5 sm:gap-3">
           <KPICardV2 label="Feed Flow" unit="m³/h" icon={Droplets} value={safeFormat(feedFlow, 1)}
-            color={feedFlow > 40 ? COLORS.success : feedFlow > 0 ? COLORS.warning : COLORS.danger}
-            trend={getTrend(history, 'RO5-FEEDFlow')} statusText={feedFlow > 40 ? "Normal" : feedFlow > 0 ? "Check" : "No flow"} statusOk={feedFlow > 40} />
+            color={!isSystemOn ? COLORS.muted : feedFlow > 40 ? COLORS.success : feedFlow > 0 ? COLORS.warning : COLORS.danger}
+            trend={isSystemOn ? getTrend(history, 'RO5-FEEDFlow') : null} statusText={!isSystemOn ? 'Stopped' : feedFlow > 40 ? "Normal" : feedFlow > 0 ? "Check" : "No flow"} statusOk={isSystemOn && feedFlow > 40} />
           <KPICardV2 label="Permeate Flow" unit="m³/h" icon={Droplets} value={safeFormat(permeateFlow, 1)}
-            color={permeateFlow > 30 ? COLORS.success : permeateFlow > 0 ? COLORS.warning : COLORS.danger}
-            trend={getTrend(history, 'RO5-Permeateflow')} statusText={permeateFlow > 30 ? "Normal" : permeateFlow > 0 ? "Low" : "No flow"} statusOk={permeateFlow > 30} />
+            color={!isSystemOn ? COLORS.muted : permeateFlow > 30 ? COLORS.success : permeateFlow > 0 ? COLORS.warning : COLORS.danger}
+            trend={isSystemOn ? getTrend(history, 'RO5-Permeateflow') : null} statusText={!isSystemOn ? 'Stopped' : permeateFlow > 30 ? "Normal" : permeateFlow > 0 ? "Low" : "No flow"} statusOk={isSystemOn && permeateFlow > 30} />
           <KPICardV2 label="System Recovery" unit="%" icon={Activity} value={safeFormat(systemRecovery, 1)}
-            color={systemRecovery > 0 && systemRecovery < SYSTEM_RECOVERY_CRITICAL_PCT ? COLORS.danger : systemRecovery > 75 ? COLORS.success : systemRecovery > 0 ? COLORS.warning : COLORS.primary}
-            trend={getTrend(history, 'RO5-SystemRecovery')} statusText={systemRecovery > 0 && systemRecovery < SYSTEM_RECOVERY_CRITICAL_PCT ? "Critical" : systemRecovery > 75 ? "Good" : systemRecovery > 0 ? "Check" : "—"} statusOk={systemRecovery > 75} />
+            color={!isSystemOn ? COLORS.muted : systemRecovery > 0 && systemRecovery < SYSTEM_RECOVERY_CRITICAL_PCT ? COLORS.danger : systemRecovery > 75 ? COLORS.success : systemRecovery > 0 ? COLORS.warning : COLORS.primary}
+            trend={isSystemOn ? getTrend(history, 'RO5-SystemRecovery') : null} statusText={!isSystemOn ? 'Stopped' : systemRecovery > 0 && systemRecovery < SYSTEM_RECOVERY_CRITICAL_PCT ? "Critical" : systemRecovery > 75 ? "Good" : systemRecovery > 0 ? "Check" : "—"} statusOk={isSystemOn && systemRecovery > 75} />
           <KPICardV2 label="RO Pressure" unit="bar" icon={Gauge} value={pressureHasData ? safeFormat(roPressure, 1) : '--'}
             color={!pressureHasData ? COLORS.muted : roPressure >= 8 && roPressure <= 16 ? COLORS.success : roPressure > 16 ? COLORS.danger : roPressure > 0 ? COLORS.warning : COLORS.primary}
             trend={getTrend(history, 'RO5-ROPressure')} statusText={!pressureHasData ? 'No Data' : roPressure >= 8 && roPressure <= 16 ? "Normal" : roPressure > 0 ? "Check" : "—"} statusOk={pressureHasData && roPressure >= 8 && roPressure <= 16} />
           <KPICardV2 label="Concentrate Flow" unit="m³/h" icon={Activity} value={safeFormat(concentrateFlow, 1)}
-            color={concentrateFlow > 15 ? COLORS.success : COLORS.warning}
-            trend={getTrend(history, 'RO5-ConcetrateFlow')} statusText={concentrateFlow > 15 ? "Normal" : "Low"} statusOk={concentrateFlow > 15} />
+            color={!isSystemOn ? COLORS.muted : concentrateFlow > 15 ? COLORS.success : COLORS.warning}
+            trend={isSystemOn ? getTrend(history, 'RO5-ConcetrateFlow') : null} statusText={!isSystemOn ? 'Stopped' : concentrateFlow > 15 ? "Normal" : "Low"} statusOk={isSystemOn && concentrateFlow > 15} />
           <KPICardV2 label="Filter Delta P" unit="bar" icon={Filter} value={safeFormat(filterDeltaP, 2)}
-            color={filterDeltaP >= FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? COLORS.danger : filterDeltaP > 0 ? COLORS.success : COLORS.primary}
-            trend={getTrend(history, 'RO5-MediaFilterDeltaP')} statusText={filterDeltaP >= FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? "Critical" : filterDeltaP > 0 ? "Normal" : "—"} statusOk={filterDeltaP < FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR && filterDeltaP > 0} />
+            color={!isSystemOn ? COLORS.muted : filterDeltaP >= FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? COLORS.danger : filterDeltaP > 0 ? COLORS.success : COLORS.primary}
+            trend={isSystemOn ? getTrend(history, 'RO5-MediaFilterDeltaP') : null} statusText={!isSystemOn ? 'Stopped' : filterDeltaP >= FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? "Critical" : filterDeltaP > 0 ? "Normal" : "—"} statusOk={isSystemOn && filterDeltaP < FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR && filterDeltaP > 0} />
           <KPICardV2 label="Stage 1 Delta P" unit="bar" icon={Zap} value={safeFormat(stage1Delta, 2)}
-            color={stage1Delta >= MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? COLORS.danger : stage1Delta > 0 ? COLORS.success : COLORS.primary}
-            trend={getTrend(history, 'RO5-Stage1Delta')} statusText={stage1Delta >= MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? "Critical" : stage1Delta > 0 ? "Normal" : "—"} statusOk={stage1Delta < MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR && stage1Delta > 0} />
+            color={!isSystemOn ? COLORS.muted : stage1Delta >= MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? COLORS.danger : stage1Delta > 0 ? COLORS.success : COLORS.primary}
+            trend={isSystemOn ? getTrend(history, 'RO5-Stage1Delta') : null} statusText={!isSystemOn ? 'Stopped' : stage1Delta >= MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? "Critical" : stage1Delta > 0 ? "Normal" : "—"} statusOk={isSystemOn && stage1Delta < MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR && stage1Delta > 0} />
           <KPICardV2 label="Stage 2 Delta P" unit="bar" icon={Zap} value={safeFormat(stage2Delta, 2)}
-            color={stage2Delta >= MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? COLORS.danger : stage2Delta > 0 ? COLORS.success : COLORS.primary}
-            trend={getTrend(history, 'RO5-Stage2Delta')} statusText={stage2Delta >= MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? "Critical" : stage2Delta > 0 ? "Normal" : "—"} statusOk={stage2Delta < MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR && stage2Delta > 0} />
+            color={!isSystemOn ? COLORS.muted : stage2Delta >= MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? COLORS.danger : stage2Delta > 0 ? COLORS.success : COLORS.primary}
+            trend={isSystemOn ? getTrend(history, 'RO5-Stage2Delta') : null} statusText={!isSystemOn ? 'Stopped' : stage2Delta >= MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR ? "Critical" : stage2Delta > 0 ? "Normal" : "—"} statusOk={isSystemOn && stage2Delta < MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR && stage2Delta > 0} />
           <KPICardV2 label="Product Water EC" unit="µS/cm" icon={FlaskConical} value={safeFormat(pureWaterEC, 0)}
             color={pureWaterEC > 150 ? COLORS.danger : pureWaterEC > 0 ? COLORS.success : COLORS.primary}
             trend={getTrend(history, 'RO5-PureWaterEc')} statusText={pureWaterEC > 150 ? "High" : pureWaterEC > 0 ? "Within limits" : "—"} statusOk={pureWaterEC <= 150 && pureWaterEC > 0} />
@@ -908,10 +920,10 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             />
             <CircularGauge
               value={systemRecovery}
-              color={systemRecovery > 0 && systemRecovery < SYSTEM_RECOVERY_CRITICAL_PCT ? COLORS.danger : systemRecovery > 75 ? COLORS.success : COLORS.warning}
+              color={!isSystemOn ? COLORS.muted : systemRecovery > 0 && systemRecovery < SYSTEM_RECOVERY_CRITICAL_PCT ? COLORS.danger : systemRecovery > 75 ? COLORS.success : COLORS.warning}
               label="Recovery"
-              statusLabel={!hasFreshData ? "No Data" : systemRecovery > 0 && systemRecovery < SYSTEM_RECOVERY_CRITICAL_PCT ? "Critical" : systemRecovery > 75 ? "Good" : "Check"}
-              noData={!hasFreshData}
+              statusLabel={!isSystemOn ? 'Stopped' : !hasFreshData ? "No Data" : systemRecovery > 0 && systemRecovery < SYSTEM_RECOVERY_CRITICAL_PCT ? "Critical" : systemRecovery > 75 ? "Good" : "Check"}
+              noData={!isSystemOn || !hasFreshData}
             />
             <CircularGauge
               value={roHealthScore ?? 0}
@@ -1140,7 +1152,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
               </span>
               {connected && (
                 <span style={{ fontSize: 9, color: 'var(--muted-foreground)' }}>
-                  · {hasFreshData ? 'All systems online' : `${activeSensors}/${totalSensors} sensors reporting`}
+                  · {hasFreshData ? (isSystemOn ? 'All systems online' : 'Feed connected — plant not operating') : `${activeSensors}/${totalSensors} sensors reporting`}
                 </span>
               )}
             </div>
