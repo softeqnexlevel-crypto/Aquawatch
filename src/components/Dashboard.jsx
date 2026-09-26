@@ -750,7 +750,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             trend={getTrend(history, 'RO5-AntiscalantDaily')} statusText={antiscalantDaily > 0 ? "Dosed today" : "—"} statusOk={antiscalantDaily > 0} />
           <KPICardV2 label="System Run Hours" unit="hrs" icon={Clock} value={safeFormat(systemRunHrs, 1)}
             color={COLORS.primary} */}
-            trend={getTrend(history, 'RO5-SystemRunhrs')} statusText={systemRunHrs > 0 ? "Running total" : "—"} statusOk={true} />
+            {/* trend={getTrend(history, 'RO5-SystemRunhrs')} statusText={systemRunHrs > 0 ? "Running total" : "—"} statusOk={true} /> */}
         </div>
       </div>
     </div>
