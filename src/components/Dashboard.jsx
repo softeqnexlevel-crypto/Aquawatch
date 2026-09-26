@@ -490,7 +490,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const filterDeltaP = getNumber('RO5-MediaFilterDeltaP');
 
   // ✅ PLC-reported daily antiscalant total & lifetime system run-hours
-  const antiscalantDaily = getNumber('RO5-AntiscalantDaily');
+  // const antiscalantDaily = getNumber('RO5-AntiscalantDaily');
   const systemRunHrs = getNumber('RO5-SystemRunhrs');
 
   const systemOperation = getValue('RO5-SystemOperation');
