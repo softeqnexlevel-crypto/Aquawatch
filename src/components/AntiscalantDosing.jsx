@@ -168,7 +168,7 @@ export function AntiscalantDosing() {
 
   // PLC-reported tags
   const antiscalantDailyPLC = toNum(getValue('RO5-AntiscalantDaily'));   // ml, PLC's own running daily total
-  const systemRunHrs        = toNum(getValue('RO5-SystemRunhrs'));       // hrs, PLC's own running total
+  // const systemRunHrs        = toNum(getValue('RO5-SystemRunhrs'));       // hrs, PLC's own running total
 
   const dailyConsumptionL = antiscalantDailyPLC / 1000;
 
@@ -336,7 +336,7 @@ export function AntiscalantDosing() {
           sub={`${dailyConsumptionL.toFixed(3)} L`}
           isMobile={isMobile}
         />
-        <MetricCard
+        {/* <MetricCard
           label="System Run Hours"
           value={systemRunHrs.toFixed(1)}
           unit="hrs"
@@ -344,7 +344,7 @@ export function AntiscalantDosing() {
           icon={Clock}
           sub={`PLC running total · ${formatHours(systemRunHrs)}`}
           isMobile={isMobile}
-        />
+        /> */}
         <MetricCard
           label="Recovery"
           value={recovery.toFixed(1)}
