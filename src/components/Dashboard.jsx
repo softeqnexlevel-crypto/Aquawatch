@@ -548,7 +548,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     if (operationMode === 'OFF') {
       return { label: 'OFF', color: COLORS.danger, sub: 'System offline - Feed pump stopped' };
     } else if (operationMode === 'BACKWASH') {
-      return { label: 'BACKWASH', color: COLORS.warning, sub: 'Backwash in progress - Feed pump only' };
+      return { label: 'BACKWASH', color: COLORS.warning, sub: 'Backwash in progress - Feed pump running' };
     } else {
       return { label: 'FILTER', color: COLORS.success, sub: 'Filtering — all pumps running' };
     }
@@ -560,7 +560,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     if (tankEmpty) return { stage: 'Stopped', color: COLORS.danger, message: 'Feed tank empty - system stopped' };
     if (!feedPumpOn) return { stage: 'Stopped', color: COLORS.danger, message: 'System stopped' };
     if (feedPumpOn && !highPressurePumpOn && operationMode === 'BACKWASH') {
-      return { stage: 'Backwash', color: COLORS.warning, message: 'Backwash in progress - Feed pump only' };
+      return { stage: 'Backwash', color: COLORS.warning, message: 'Backwash in progress - Feed pump running' };
     }
     if (feedPumpOn && highPressurePumpOn && !dosingPumpOn && operationMode === 'FILTER') {
       return { stage: 'Starting', color: COLORS.warning, message: 'High pressure pump running - Waiting for dosing' };
@@ -745,11 +745,11 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             trend={getTrend(history, 'RO5-Permeateflow', 60 * 60 * 1000)} statusText={summaryLoading ? "Loading" : `${safeFormat(permeateFlow, 1)} m³/h now`} statusOk={true} />
 
           {/* ✅ PLC-reported totals */}
-          <KPICardV2 label="Antiscalant Daily" unit="ml" icon={FlaskConical} value={safeFormat(antiscalantDaily, 2)}
+          {/* <KPICardV2 label="Antiscalant Daily" unit="ml" icon={FlaskConical} value={safeFormat(antiscalantDaily, 2)}
             color={antiscalantDaily > 0 ? COLORS.purple : COLORS.primary}
             trend={getTrend(history, 'RO5-AntiscalantDaily')} statusText={antiscalantDaily > 0 ? "Dosed today" : "—"} statusOk={antiscalantDaily > 0} />
           <KPICardV2 label="System Run Hours" unit="hrs" icon={Clock} value={safeFormat(systemRunHrs, 1)}
-            color={COLORS.primary}
+            color={COLORS.primary} */}
             trend={getTrend(history, 'RO5-SystemRunhrs')} statusText={systemRunHrs > 0 ? "Running total" : "—"} statusOk={true} />
         </div>
       </div>
