@@ -3,6 +3,17 @@
 // Server-authoritative. This component never counts, never writes to
 // localStorage, and never invents data. It polls /api/dosing/* every 5 s
 // and interpolates the display between polls (cosmetic only).
+//
+// ✅ UPDATE: The PLC now also reports two tags directly over MQTT:
+//   - RO5-AntiscalantDaily  → PLC's own running daily dosed total (ml)
+//   - RO5-SystemRunhrs      → PLC's own running system run-hours total
+//
+// These are independent of the server-side totalizer (/api/dosing/totals),
+// which computes "ml dosed today" from observed ON-time × rate. We surface
+// the PLC-reported value alongside the server-computed one as a
+// cross-check: if they diverge significantly, something is wrong with
+// either the rate assumption, the totalizer, or the PLC tag itself, and
+// we should know about it — one is not silently replaced by the other.
 
 import React, { useState, useMemo, useEffect } from "react";
 import {
@@ -20,6 +31,11 @@ import { format, subHours, subDays } from 'date-fns';
 // ─── Fallback constants (only used until the first server fetch returns) ────
 const FALLBACK_RATE_ML_MIN = 2.7;
 const FALLBACK_RATE_ML_SEC = FALLBACK_RATE_ML_MIN / 60;
+
+// How far apart the PLC-reported daily total and the server-computed daily
+// total can drift (in ml) before we surface a cross-check alert. Tune this
+// to your dosing rate's realistic tolerance.
+const PLC_VS_SERVER_DIVERGENCE_THRESHOLD_ML = 5;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function toBool(raw) {
@@ -46,6 +62,14 @@ function formatDuration(totalSeconds) {
   if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m ${String(sec).padStart(2, '0')}s`;
   if (m > 0) return `${m}m ${String(sec).padStart(2, '0')}s`;
   return `${sec}s`;
+}
+
+function formatHours(hrs) {
+  if (!Number.isFinite(hrs) || hrs < 0) return '0h 0m';
+  const totalMinutes = Math.round(hrs * 60);
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return `${h}h ${String(m).padStart(2, '0')}m`;
 }
 
 function monthKeyNow() {
@@ -197,6 +221,10 @@ export function AntiscalantDosing() {
   const feedTankLevel  = toNum(getValue('RO5-FeedTankLevel'));
   const isDosingActive = toBool(getValue('RO5-AntiscalantDosingActive'));
 
+  // ✅ NEW: PLC-reported tags (independent of the server totalizer below)
+  const antiscalantDailyPLC = toNum(getValue('RO5-AntiscalantDaily'));   // ml, PLC's own running daily total
+  const systemRunHrs        = toNum(getValue('RO5-SystemRunhrs'));       // hrs, PLC's own running total
+
   // ── Server-driven values ────────────────────────────────────────────────
   const rateMlPerSec     = totals?.rateMlPerSec ?? FALLBACK_RATE_ML_SEC;
   const rateMlPerMin     = totals?.rateMlPerMin ?? FALLBACK_RATE_ML_MIN;
@@ -231,6 +259,12 @@ export function AntiscalantDosing() {
   }, [dosedTodayMl, secondsOnToday, isDosingActive, rateMlPerSec]);
 
   const dailyConsumptionL = displayMl / 1000;
+
+  // ── PLC vs server cross-check ────────────────────────────────────────────
+  // Positive = server total is ahead of the PLC's own reported total.
+  // Negative = PLC total is ahead of the server's computed total.
+  const plcVsServerDeltaMl = displayMl - antiscalantDailyPLC;
+  const plcVsServerDiverged = Math.abs(plcVsServerDeltaMl) > PLC_VS_SERVER_DIVERGENCE_THRESHOLD_ML;
 
   // ── Chart: daily consumption for the current month (REAL) ───────────────
   const monthlyConsumptionData = useMemo(() => {
@@ -328,8 +362,21 @@ export function AntiscalantDosing() {
       });
     }
 
+    // ✅ NEW: PLC-reported daily total vs server-computed daily total
+    if (plcVsServerDiverged) {
+      list.push({
+        id: 'ALERT-PLC-SERVER-MISMATCH',
+        type: 'Dosing Total Mismatch (PLC vs Server)',
+        description: 'PLC-reported daily antiscalant total disagrees with the server-computed total',
+        equipment: 'Antiscalant Pump',
+        value: `PLC ${antiscalantDailyPLC.toFixed(2)} ml · Server ${displayMl.toFixed(2)} ml`,
+        threshold: `± ${PLC_VS_SERVER_DIVERGENCE_THRESHOLD_ML} ml`,
+        severity: 'warning',
+      });
+    }
+
     return list;
-  }, [isDosingActive, permeateFlow, pureWaterEC, feedTankLevel, secondsOnToday, primedToday]);
+  }, [isDosingActive, permeateFlow, pureWaterEC, feedTankLevel, secondsOnToday, primedToday, plcVsServerDiverged, antiscalantDailyPLC, displayMl]);
 
   const criticalAlerts = alerts.filter(a => a.severity === 'critical');
 
@@ -452,12 +499,32 @@ export function AntiscalantDosing() {
           isMobile={isMobile}
         />
         <MetricCard
-          label="Dosed Today"
+          label="Dosed Today (Server)"
           value={displayMl.toFixed(2)}
           unit="ml"
           color="#0ea5e9"
           icon={Droplet}
           sub={`${formatDuration(displaySeconds)} ON · ${dailyConsumptionL.toFixed(3)} L${primedToday ? ' · primed' : ''}`}
+          isMobile={isMobile}
+        />
+        <MetricCard
+          label="Dosed Today (PLC)"
+          value={antiscalantDailyPLC.toFixed(2)}
+          unit="ml"
+          color={plcVsServerDiverged ? '#eab308' : '#22c55e'}
+          icon={FlaskConical}
+          sub={plcVsServerDiverged
+            ? `⚠️ Δ ${plcVsServerDeltaMl >= 0 ? '+' : ''}${plcVsServerDeltaMl.toFixed(2)} ml vs server`
+            : '✅ Matches server total'}
+          isMobile={isMobile}
+        />
+        <MetricCard
+          label="System Run Hours"
+          value={systemRunHrs.toFixed(1)}
+          unit="hrs"
+          color="#0ea5e9"
+          icon={Clock}
+          sub={`PLC running total · ${formatHours(systemRunHrs)}`}
           isMobile={isMobile}
         />
         <MetricCard

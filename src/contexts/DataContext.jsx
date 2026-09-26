@@ -22,7 +22,7 @@ const KEY_MAPPING = {
   'siemens200smart-RO5-PureWaterEc': 'RO5-PureWaterEc',
   'siemens200smart-RO5-FeedTankLevel': 'RO5-FeedTankLevel',
 
-  
+
 'RO5-Feedpump': 'RO5-Feedpump',
 'siemens200smart-RO5-Feedpump': 'RO5-Feedpump',
 
@@ -51,6 +51,16 @@ const KEY_MAPPING = {
   'AntiscalantDoser': 'RO5-AntiscalantDosingActive',
   'AntiscalantDosingActive': 'RO5-AntiscalantDosingActive',
   'RO5/AntiscalantDoser': 'RO5-AntiscalantDosingActive',
+
+  // ✅ ANTISCALANT DAILY TOTAL (PLC-reported)
+  'siemens200smart-RO5-AntiscalantDaily': 'RO5-AntiscalantDaily',
+  'RO5-AntiscalantDaily': 'RO5-AntiscalantDaily',
+  'AntiscalantDaily': 'RO5-AntiscalantDaily',
+
+  // ✅ SYSTEM RUN HOURS
+  'siemens200smart-RO5-SystemRunhrs': 'RO5-SystemRunhrs',
+  'RO5-SystemRunhrs': 'RO5-SystemRunhrs',
+  'SystemRunhrs': 'RO5-SystemRunhrs',
 
 
   'RO5-SystemActive': 'RO5-SystemOperation',
@@ -90,6 +100,9 @@ const getUnitForParameter = (param) => {
     'RO5-SystemOperation': '',
     'RO5-SystemMode': '',
     'RO5-AntiscalantDosingActive': '',
+    // ✅ new parameters
+    'RO5-AntiscalantDaily': 'ml',
+    'RO5-SystemRunhrs': 'hrs',
   };
   return units[param] || '';
 };
@@ -139,8 +152,12 @@ export const DataProvider = ({ children }) => {
 
         let finalValue = value;
         if (key === 'RO5-AntiscalantDosingActive' || rawKey.includes('Antiscalant')) {
-          finalValue = normalizeAntiscalantValue(value);
-          console.log(`🔍 Antiscalant normalized: ${rawKey} → ${key} = ${value} → ${finalValue}`);
+          // Only normalize the ON/OFF bit — not the daily total, which is
+          // a numeric ml value, not a boolean state.
+          if (key !== 'RO5-AntiscalantDaily') {
+            finalValue = normalizeAntiscalantValue(value);
+            console.log(`🔍 Antiscalant normalized: ${rawKey} → ${key} = ${value} → ${finalValue}`);
+          }
         }
 
         formattedData[key] = {
@@ -153,6 +170,8 @@ export const DataProvider = ({ children }) => {
       console.log('📊 Formatted sensor data keys:', Object.keys(formattedData));
       console.log('🔍 SystemOperation value:', formattedData['RO5-SystemOperation']?.value, '(undefined here means the raw key from your backend is not yet in KEY_MAPPING — check the raw keys list above)');
       console.log('🔍 Antiscalant value:', formattedData['RO5-AntiscalantDosingActive']?.value);
+      console.log('🔍 Antiscalant Daily value:', formattedData['RO5-AntiscalantDaily']?.value);
+      console.log('🔍 System Run Hours value:', formattedData['RO5-SystemRunhrs']?.value);
 
       setSensorData(formattedData);
       setLoading(false);
@@ -185,7 +204,7 @@ export const DataProvider = ({ children }) => {
       const timestamp = newData.timestamp || new Date().toISOString();
 
       let value = newData.value;
-      if (key === 'RO5-AntiscalantDosingActive' || rawKey.includes('Antiscalant')) {
+      if ((key === 'RO5-AntiscalantDosingActive' || rawKey.includes('Antiscalant')) && key !== 'RO5-AntiscalantDaily') {
         value = normalizeAntiscalantValue(newData.value);
       }
 

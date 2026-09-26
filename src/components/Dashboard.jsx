@@ -219,6 +219,16 @@ export const SENSOR_MAP = {
   'RO5-SystemOperation': { label: 'System Operation', unit: '', icon: Power, color: COLORS.success, shortName: 'SystemOperation' },
   'RO5-SystemMode': { label: 'System Mode', unit: '', icon: Power, color: COLORS.success, shortName: 'SystemMode' },
   'RO5-AntiscalantDosingActive': { label: 'Dosing Active', unit: '', icon: FlaskConical, color: COLORS.purple, shortName: 'DosingActive' },
+
+  // ✅ NEW PARAMETERS
+  'RO5-AntiscalantDaily': {
+    label: 'Antiscalant Daily', unit: 'ml', icon: FlaskConical,
+    color: COLORS.purple, shortName: 'AntiscalantDaily'
+  },
+  'RO5-SystemRunhrs': {
+    label: 'System Run Hours', unit: 'hrs', icon: Clock,
+    color: COLORS.primary, shortName: 'SystemRunhrs'
+  },
 };
 
 const MAX_HISTORY_POINTS = 500;
@@ -527,6 +537,10 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const stage1Delta = getNumber('RO5-Stage1Delta');
   const stage2Delta = getNumber('RO5-Stage2Delta');
   const filterDeltaP = getNumber('RO5-MediaFilterDeltaP');
+
+  // ✅ NEW: PLC-reported daily antiscalant total & system run hours
+  const antiscalantDaily = getNumber('RO5-AntiscalantDaily');
+  const systemRunHrs = getNumber('RO5-SystemRunhrs');
 
   const systemOperation = getValue('RO5-SystemOperation');
   const systemMode = getValue('RO5-SystemMode');
@@ -840,6 +854,14 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           <KPICardV2 label="Daily Production" unit="m³" icon={TrendingUp} value={dailyProdDisplay}
             color={dailyProduction > 0 ? COLORS.success : COLORS.primary}
             trend={getTrend(history, 'RO5-Permeateflow', 60 * 60 * 1000)} statusText={summaryLoading ? "Loading" : `${safeFormat(permeateFlow, 1)} m³/h now`} statusOk={true} />
+
+          {/* ✅ NEW KPI CARDS */}
+          <KPICardV2 label="Antiscalant Daily" unit="ml" icon={FlaskConical} value={safeFormat(antiscalantDaily, 2)}
+            color={antiscalantDaily > 0 ? COLORS.purple : COLORS.primary}
+            trend={getTrend(history, 'RO5-AntiscalantDaily')} statusText={antiscalantDaily > 0 ? "Dosed today" : "—"} statusOk={antiscalantDaily > 0} />
+          <KPICardV2 label="System Run Hours" unit="hrs" icon={Clock} value={safeFormat(systemRunHrs, 1)}
+            color={COLORS.primary}
+            trend={getTrend(history, 'RO5-SystemRunhrs')} statusText={systemRunHrs > 0 ? "Running total" : "—"} statusOk={true} />
         </div>
       </div>
     </div>
@@ -990,7 +1012,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             Select Sensor for Comparison
           </span>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: isMobile ? 4 : 6, marginBottom: 12 }}>
-            {Object.keys(SENSOR_MAP).slice(0, isMobile ? 15 : 15).map(key => {
+            {Object.keys(SENSOR_MAP).slice(0, isMobile ? 17 : 17).map(key => {
               const sensor = SENSOR_MAP[key];
               const isSelected = selectedSensors.includes(key);
               return (
