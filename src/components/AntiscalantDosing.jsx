@@ -1,23 +1,18 @@
 // components/AntiscalantDosing.jsx - FULLY MOBILE RESPONSIVE
 //
-// Server-authoritative. This component never counts, never writes to
-// localStorage, and never invents data. It polls /api/dosing/* every 5 s
-// and interpolates the display between polls (cosmetic only).
+// Server-independent. This component never counts, never writes to
+// localStorage, and never invents data. It reads PLC-reported tags
+// directly from the live data context (WebSocket-fed).
 //
-// ✅ UPDATE: The PLC now also reports two tags directly over MQTT:
 //   - RO5-AntiscalantDaily  → PLC's own running daily dosed total (ml)
 //   - RO5-SystemRunhrs      → PLC's own running system run-hours total
 //
-// These are independent of the server-side totalizer (/api/dosing/totals),
-// which computes "ml dosed today" from observed ON-time × rate. We surface
-// the PLC-reported value alongside the server-computed one as a
-// cross-check: if they diverge significantly, something is wrong with
-// either the rate assumption, the totalizer, or the PLC tag itself, and
-// we should know about it — one is not silently replaced by the other.
+// The server-side totalizer has been removed from this view. All dosing
+// figures shown here come straight from the PLC tags above.
 
 import React, { useState, useMemo, useEffect } from "react";
 import {
-  AreaChart, Area, LineChart, Line, BarChart, Bar,
+  AreaChart, Area, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
 } from "recharts";
 import {
@@ -25,17 +20,7 @@ import {
   TrendingUp, TrendingDown, Clock, Calendar, AlertCircle, Info
 } from "lucide-react";
 import { useData } from "../contexts/DataContext";
-import { API_BASE_URL } from "../config";
 import { format, subHours, subDays } from 'date-fns';
-
-// ─── Fallback constants (only used until the first server fetch returns) ────
-const FALLBACK_RATE_ML_MIN = 2.7;
-const FALLBACK_RATE_ML_SEC = FALLBACK_RATE_ML_MIN / 60;
-
-// How far apart the PLC-reported daily total and the server-computed daily
-// total can drift (in ml) before we surface a cross-check alert. Tune this
-// to your dosing rate's realistic tolerance.
-const PLC_VS_SERVER_DIVERGENCE_THRESHOLD_ML = 5;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function toBool(raw) {
@@ -70,11 +55,6 @@ function formatHours(hrs) {
   const h = Math.floor(totalMinutes / 60);
   const m = totalMinutes % 60;
   return `${h}h ${String(m).padStart(2, '0')}m`;
-}
-
-function monthKeyNow() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
 // ─── Tooltip ────────────────────────────────────────────────────────────────
@@ -171,46 +151,11 @@ export function AntiscalantDosing() {
   const [showAlerts, setShowAlerts] = useState(true);
   const [timeRange, setTimeRange] = useState('24h');
 
-  // Server state
-  const [totals, setTotals] = useState(null);
-  const [monthSummary, setMonthSummary] = useState(null);
-  const [monthHistory, setMonthHistory] = useState(null);
-  const [fetchError, setFetchError] = useState(null);
-
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
     checkMobile();
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
-  }, []);
-
-  // ── Poll /api/dosing/* every 5 s ─────────────────────────────────────────
-  useEffect(() => {
-    let cancelled = false;
-    const token = localStorage.getItem('accessToken');
-    const headers = { Authorization: `Bearer ${token}` };
-
-    const fetchAll = async () => {
-      try {
-        const month = monthKeyNow();
-        const [tRes, mRes, hRes] = await Promise.all([
-          fetch(`${API_BASE_URL}/api/dosing/totals`, { headers }),
-          fetch(`${API_BASE_URL}/api/dosing/month`, { headers }),
-          fetch(`${API_BASE_URL}/api/dosing/history?month=${month}`, { headers }),
-        ]);
-        if (cancelled) return;
-        if (tRes.ok) setTotals(await tRes.json());
-        if (mRes.ok) setMonthSummary(await mRes.json());
-        if (hRes.ok) setMonthHistory(await hRes.json());
-        setFetchError(null);
-      } catch (err) {
-        if (!cancelled) setFetchError(err.message);
-      }
-    };
-
-    fetchAll();
-    const id = setInterval(fetchAll, 5000);
-    return () => { cancelled = true; clearInterval(id); };
   }, []);
 
   // ── Live plant signals from DataContext (WebSocket-fed) ──────────────────
@@ -221,70 +166,11 @@ export function AntiscalantDosing() {
   const feedTankLevel  = toNum(getValue('RO5-FeedTankLevel'));
   const isDosingActive = toBool(getValue('RO5-AntiscalantDosingActive'));
 
-  // ✅ NEW: PLC-reported tags (independent of the server totalizer below)
+  // PLC-reported tags
   const antiscalantDailyPLC = toNum(getValue('RO5-AntiscalantDaily'));   // ml, PLC's own running daily total
   const systemRunHrs        = toNum(getValue('RO5-SystemRunhrs'));       // hrs, PLC's own running total
 
-  // ── Server-driven values ────────────────────────────────────────────────
-  const rateMlPerSec     = totals?.rateMlPerSec ?? FALLBACK_RATE_ML_SEC;
-  const rateMlPerMin     = totals?.rateMlPerMin ?? FALLBACK_RATE_ML_MIN;
-  const secondsOnToday   = totals?.secondsOn ?? 0;
-  const dosedTodayMl     = totals?.mlDosed ?? 0;
-  const primedToday      = totals?.primedToday ?? false;
-  const dosedThisMonthMl = monthSummary?.mlDosed ?? 0;
-  const dosedThisMonthL  = dosedThisMonthMl / 1000;
-  const dosingRateMlMin  = isDosingActive ? rateMlPerMin : 0;
-
-  // ── Cosmetic live interpolation between polls ───────────────────────────
-  const [displayMl, setDisplayMl] = useState(0);
-  const [displaySeconds, setDisplaySeconds] = useState(0);
-
-  useEffect(() => {
-    if (!isDosingActive) {
-      setDisplayMl(dosedTodayMl);
-      setDisplaySeconds(secondsOnToday);
-      return;
-    }
-    const baseMl = dosedTodayMl;
-    const baseSec = secondsOnToday;
-    const startedAt = Date.now();
-    const tick = () => {
-      const elapsed = (Date.now() - startedAt) / 1000;
-      setDisplayMl(baseMl + elapsed * rateMlPerSec);
-      setDisplaySeconds(baseSec + elapsed);
-    };
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [dosedTodayMl, secondsOnToday, isDosingActive, rateMlPerSec]);
-
-  const dailyConsumptionL = displayMl / 1000;
-
-  // ── PLC vs server cross-check ────────────────────────────────────────────
-  // Positive = server total is ahead of the PLC's own reported total.
-  // Negative = PLC total is ahead of the server's computed total.
-  const plcVsServerDeltaMl = displayMl - antiscalantDailyPLC;
-  const plcVsServerDiverged = Math.abs(plcVsServerDeltaMl) > PLC_VS_SERVER_DIVERGENCE_THRESHOLD_ML;
-
-  // ── Chart: daily consumption for the current month (REAL) ───────────────
-  const monthlyConsumptionData = useMemo(() => {
-    const now = new Date();
-    const thisMonth = monthKeyNow();
-    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-    const byDay = new Map();
-    (monthHistory?.days ?? []).forEach((d) => {
-      byDay.set(d.day, (Number(d.mlDosed) || 0) / 1000);
-    });
-    return Array.from({ length: daysInMonth }, (_, i) => {
-      const day = i + 1;
-      const key = `${thisMonth}-${String(day).padStart(2, '0')}`;
-      const isToday = day === now.getDate();
-      const consumption = byDay.has(key)
-        ? byDay.get(key)
-        : (isToday ? dailyConsumptionL : 0);
-      return { day: String(day), consumption, isToday };
-    });
-  }, [monthHistory, dailyConsumptionL]);
+  const dailyConsumptionL = antiscalantDailyPLC / 1000;
 
   // ── Chart: hourly feed flow over selected range (from client-side ring buffer) ──
   const feedHistory = getHistory('RO5-FEEDFlow');
@@ -305,11 +191,6 @@ export function AntiscalantDosing() {
       .sort((a, b) => a.hour.localeCompare(b.hour));
   }, [feedHistory, timeRange]);
 
-  // ── Projections (only meaningful if the plant runs 24/7) ────────────────
-  const projectedDailyL = (rateMlPerSec * 86400) / 1000;
-  const monthlyProjectedL = projectedDailyL * 30;
-  const yearlyProjectedL = projectedDailyL * 365;
-
   // ── Alerts derived from real signals ────────────────────────────────────
   const alerts = useMemo(() => {
     const list = [];
@@ -323,18 +204,6 @@ export function AntiscalantDosing() {
         value: 'OFF',
         threshold: 'ON required',
         severity: 'critical',
-      });
-    }
-
-    if (secondsOnToday > 60 && !primedToday) {
-      list.push({
-        id: 'ALERT-NO-PRIME',
-        type: 'Startup Prime Missing',
-        description: 'Pump has run today but the startup prime has not been recorded',
-        equipment: 'Antiscalant Pump',
-        value: `${Math.round(secondsOnToday)} s ON`,
-        threshold: 'prime expected on first ON',
-        severity: 'warning',
       });
     }
 
@@ -362,21 +231,8 @@ export function AntiscalantDosing() {
       });
     }
 
-    // ✅ NEW: PLC-reported daily total vs server-computed daily total
-    if (plcVsServerDiverged) {
-      list.push({
-        id: 'ALERT-PLC-SERVER-MISMATCH',
-        type: 'Dosing Total Mismatch (PLC vs Server)',
-        description: 'PLC-reported daily antiscalant total disagrees with the server-computed total',
-        equipment: 'Antiscalant Pump',
-        value: `PLC ${antiscalantDailyPLC.toFixed(2)} ml · Server ${displayMl.toFixed(2)} ml`,
-        threshold: `± ${PLC_VS_SERVER_DIVERGENCE_THRESHOLD_ML} ml`,
-        severity: 'warning',
-      });
-    }
-
     return list;
-  }, [isDosingActive, permeateFlow, pureWaterEC, feedTankLevel, secondsOnToday, primedToday, plcVsServerDiverged, antiscalantDailyPLC, displayMl]);
+  }, [isDosingActive, permeateFlow, pureWaterEC, feedTankLevel]);
 
   const criticalAlerts = alerts.filter(a => a.severity === 'critical');
 
@@ -395,30 +251,12 @@ export function AntiscalantDosing() {
             Antiscalant Dosing
           </h2>
           <p style={{ fontSize: isMobile ? 10 : 12, color: "var(--muted-foreground)", marginTop: 2 }}>
-            {connected ? '✅ Connected' : '⚠️ Disconnected'} · server totalizer · Last updated:{' '}
+            {connected ? '✅ Connected' : '⚠️ Disconnected'} · PLC-reported · Last updated:{' '}
             {lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--'}
           </p>
         </div>
         <div className="flex items-center gap-2 sm:gap-4 flex-wrap">
           <StatusBadge isActive={isDosingActive} size="lg" isMobile={isMobile} />
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 4, padding: '2px 10px',
-            background: 'var(--secondary)', borderRadius: 20,
-            fontSize: isMobile ? 9 : 11, color: 'var(--muted-foreground)'
-          }}>
-            <Clock size={isMobile ? 10 : 14} />
-            Rate: {rateMlPerMin.toFixed(2)} ml/min ({rateMlPerSec.toFixed(3)} ml/s)
-          </div>
-          {fetchError && (
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 3, padding: '2px 10px',
-              background: 'rgba(239,68,68,0.12)', borderRadius: 20,
-              border: '1px solid rgba(239,68,68,0.2)'
-            }}>
-              <AlertCircle size={isMobile ? 10 : 14} style={{ color: '#ef4444' }} />
-              <span style={{ fontSize: isMobile ? 9 : 11, color: '#ef4444' }}>sync offline</span>
-            </div>
-          )}
           {alerts.length > 0 && (
             <div style={{
               display: 'flex', alignItems: 'center', gap: 3, padding: '2px 10px',
@@ -487,35 +325,15 @@ export function AntiscalantDosing() {
         </div>
       )}
 
-      {/* KPI cards — all from server / live context */}
+      {/* KPI cards — all from PLC / live context */}
       <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(auto-fit, minmax(180px, 1fr))" }}>
-        <MetricCard
-          label="Dosing Rate"
-          value={dosingRateMlMin.toFixed(2)}
-          unit="ml/min"
-          color="#a78bfa"
-          icon={FlaskConical}
-          sub={isDosingActive ? `✅ Active · ${rateMlPerSec.toFixed(3)} ml/s` : '⛔ Stopped'}
-          isMobile={isMobile}
-        />
-        <MetricCard
-          label="Dosed Today (Server)"
-          value={displayMl.toFixed(2)}
-          unit="ml"
-          color="#0ea5e9"
-          icon={Droplet}
-          sub={`${formatDuration(displaySeconds)} ON · ${dailyConsumptionL.toFixed(3)} L${primedToday ? ' · primed' : ''}`}
-          isMobile={isMobile}
-        />
         <MetricCard
           label="Dosed Today (PLC)"
           value={antiscalantDailyPLC.toFixed(2)}
           unit="ml"
-          color={plcVsServerDiverged ? '#eab308' : '#22c55e'}
-          icon={FlaskConical}
-          sub={plcVsServerDiverged
-            ? `⚠️ Δ ${plcVsServerDeltaMl >= 0 ? '+' : ''}${plcVsServerDeltaMl.toFixed(2)} ml vs server`
-            : '✅ Matches server total'}
+          color="#0ea5e9"
+          icon={Droplet}
+          sub={`${dailyConsumptionL.toFixed(3)} L`}
           isMobile={isMobile}
         />
         <MetricCard
@@ -525,24 +343,6 @@ export function AntiscalantDosing() {
           color="#0ea5e9"
           icon={Clock}
           sub={`PLC running total · ${formatHours(systemRunHrs)}`}
-          isMobile={isMobile}
-        />
-        <MetricCard
-          label="Month to Date"
-          value={dosedThisMonthL.toFixed(3)}
-          unit="L"
-          color="#06b6d4"
-          icon={Calendar}
-          sub={`${dosedThisMonthMl.toFixed(1)} ml · ${monthSummary?.month ?? '—'}`}
-          isMobile={isMobile}
-        />
-        <MetricCard
-          label="Projected Month"
-          value={monthlyProjectedL.toFixed(1)}
-          unit="L"
-          color="#22c55e"
-          icon={TrendingUp}
-          sub={`at 24/7 · ${yearlyProjectedL.toFixed(0)} L/yr`}
           isMobile={isMobile}
         />
         <MetricCard
@@ -565,52 +365,38 @@ export function AntiscalantDosing() {
         />
       </div>
 
-      {/* Row: Daily consumption chart + System status */}
-      <div className="grid gap-3 sm:gap-4" style={{ gridTemplateColumns: isMobile ? "1fr" : "1.5fr 1fr" }}>
-        <ChartPanel title="Daily Consumption" meta={`${monthSummary?.month ?? monthKeyNow()} · L/day`} isMobile={isMobile}>
-          <ResponsiveContainer width="100%" height={isMobile ? 180 : 220}>
-            <BarChart data={monthlyConsumptionData} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" vertical={false} />
-              <XAxis dataKey="day" tick={{ fontSize: isMobile ? 7 : 9, fill: "#4d7a9e" }} axisLine={false} tickLine={false} interval={isMobile ? 2 : 0} />
-              <YAxis tick={{ fontSize: isMobile ? 7 : 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} axisLine={false} tickLine={false} />
-              <Tooltip content={<CustomTooltip />} />
-              <Bar dataKey="consumption" fill="#a78bfa" radius={[3, 3, 0, 0]} name="Consumption (L)" />
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartPanel>
-
-        <ChartPanel title="System Status" meta="live" isMobile={isMobile}>
-          <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
-            <div style={{ padding: isMobile ? '6px' : '10px', background: 'var(--secondary)', borderRadius: 6, textAlign: 'center' }}>
-              <div style={{ fontSize: isMobile ? 8 : 9, color: 'var(--muted-foreground)' }}>Dosing Pump</div>
-              <div style={{
-                fontSize: isMobile ? 14 : 16, fontWeight: 700,
-                color: isDosingActive ? '#22c55e' : '#ef4444', marginTop: 2
-              }}>{isDosingActive ? 'ON' : 'OFF'}</div>
-            </div>
-            <div style={{ padding: isMobile ? '6px' : '10px', background: 'var(--secondary)', borderRadius: 6, textAlign: 'center' }}>
-              <div style={{ fontSize: isMobile ? 8 : 9, color: 'var(--muted-foreground)' }}>Product EC</div>
-              <div style={{
-                fontSize: isMobile ? 14 : 16, fontWeight: 700,
-                color: pureWaterEC < 30 ? '#22c55e' : pureWaterEC < 50 ? '#eab308' : '#ef4444',
-                marginTop: 2
-              }}>{pureWaterEC.toFixed(1)}</div>
-            </div>
-            <div style={{ padding: isMobile ? '6px' : '10px', background: 'var(--secondary)', borderRadius: 6, textAlign: 'center' }}>
-              <div style={{ fontSize: isMobile ? 8 : 9, color: 'var(--muted-foreground)' }}>Feed Flow</div>
-              <div style={{ fontSize: isMobile ? 14 : 16, fontWeight: 700, color: '#0ea5e9', marginTop: 2 }}>
-                {feedFlow.toFixed(1)}
-              </div>
-            </div>
-            <div style={{ padding: isMobile ? '6px' : '10px', background: 'var(--secondary)', borderRadius: 6, textAlign: 'center' }}>
-              <div style={{ fontSize: isMobile ? 8 : 9, color: 'var(--muted-foreground)' }}>Permeate</div>
-              <div style={{ fontSize: isMobile ? 14 : 16, fontWeight: 700, color: '#22c55e', marginTop: 2 }}>
-                {permeateFlow.toFixed(1)}
-              </div>
+      {/* Row: System status */}
+      <ChartPanel title="System Status" meta="live" isMobile={isMobile}>
+        <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
+          <div style={{ padding: isMobile ? '6px' : '10px', background: 'var(--secondary)', borderRadius: 6, textAlign: 'center' }}>
+            <div style={{ fontSize: isMobile ? 8 : 9, color: 'var(--muted-foreground)' }}>Dosing Pump</div>
+            <div style={{
+              fontSize: isMobile ? 14 : 16, fontWeight: 700,
+              color: isDosingActive ? '#22c55e' : '#ef4444', marginTop: 2
+            }}>{isDosingActive ? 'ON' : 'OFF'}</div>
+          </div>
+          <div style={{ padding: isMobile ? '6px' : '10px', background: 'var(--secondary)', borderRadius: 6, textAlign: 'center' }}>
+            <div style={{ fontSize: isMobile ? 8 : 9, color: 'var(--muted-foreground)' }}>Product EC</div>
+            <div style={{
+              fontSize: isMobile ? 14 : 16, fontWeight: 700,
+              color: pureWaterEC < 30 ? '#22c55e' : pureWaterEC < 50 ? '#eab308' : '#ef4444',
+              marginTop: 2
+            }}>{pureWaterEC.toFixed(1)}</div>
+          </div>
+          <div style={{ padding: isMobile ? '6px' : '10px', background: 'var(--secondary)', borderRadius: 6, textAlign: 'center' }}>
+            <div style={{ fontSize: isMobile ? 8 : 9, color: 'var(--muted-foreground)' }}>Feed Flow</div>
+            <div style={{ fontSize: isMobile ? 14 : 16, fontWeight: 700, color: '#0ea5e9', marginTop: 2 }}>
+              {feedFlow.toFixed(1)}
             </div>
           </div>
-        </ChartPanel>
-      </div>
+          <div style={{ padding: isMobile ? '6px' : '10px', background: 'var(--secondary)', borderRadius: 6, textAlign: 'center' }}>
+            <div style={{ fontSize: isMobile ? 8 : 9, color: 'var(--muted-foreground)' }}>Permeate</div>
+            <div style={{ fontSize: isMobile ? 14 : 16, fontWeight: 700, color: '#22c55e', marginTop: 2 }}>
+              {permeateFlow.toFixed(1)}
+            </div>
+          </div>
+        </div>
+      </ChartPanel>
 
       {/* Row: Feed flow (last N hours) */}
       <ChartPanel
@@ -652,81 +438,6 @@ export function AntiscalantDosing() {
           </ResponsiveContainer>
         )}
       </ChartPanel>
-
-      {/* Daily records table — real data from /api/dosing/history */}
-      <div className="rounded-lg p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-        <div style={{
-          fontSize: isMobile ? 10 : 12, fontWeight: 600, color: "var(--muted-foreground)",
-          textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10
-        }}>
-          Daily Dosing Records — {monthSummary?.month ?? monthKeyNow()}
-        </div>
-
-        {!monthHistory || monthHistory.days.length === 0 ? (
-          <div style={{
-            padding: '20px', textAlign: 'center',
-            color: 'var(--muted-foreground)', fontSize: isMobile ? 10 : 11
-          }}>
-            No dosing records yet for this month.
-          </div>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: isMobile ? 11 : 12 }}>
-              <thead>
-                <tr>
-                  {[
-                    { key: 'date', label: 'Date', showMobile: true },
-                    { key: 'on', label: 'ON Time', showMobile: false },
-                    { key: 'ml', label: 'Volume (ml)', showMobile: true },
-                    { key: 'l', label: 'Volume (L)', showMobile: false },
-                    { key: 'primed', label: 'Primed', showMobile: true },
-                  ].filter(c => !isMobile || c.showMobile).map(col => (
-                    <th key={col.key} style={{
-                      padding: isMobile ? "6px 8px" : "8px 12px", textAlign: "left",
-                      fontSize: isMobile ? 8 : 10, fontWeight: 600,
-                      color: "var(--muted-foreground)", letterSpacing: "0.06em",
-                      textTransform: "uppercase", borderBottom: "1px solid var(--border)"
-                    }}>{col.label}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {[...monthHistory.days].reverse().map((r, i) => (
-                  <tr key={r.day} style={{ background: i % 2 === 0 ? "var(--card)" : "var(--secondary)" }}>
-                    <td style={{
-                      padding: isMobile ? "6px 8px" : "8px 12px",
-                      fontFamily: "var(--font-mono)", color: "var(--foreground)",
-                      borderBottom: "1px solid var(--border)"
-                    }}>{r.day}</td>
-                    {!isMobile && (
-                      <td style={{
-                        padding: "8px 12px", fontFamily: "var(--font-mono)",
-                        color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)"
-                      }}>{formatDuration(r.secondsOn)}</td>
-                    )}
-                    <td style={{
-                      padding: isMobile ? "6px 8px" : "8px 12px",
-                      fontFamily: "var(--font-mono)", color: "#a78bfa",
-                      borderBottom: "1px solid var(--border)"
-                    }}>{Number(r.mlDosed).toFixed(2)}</td>
-                    {!isMobile && (
-                      <td style={{
-                        padding: "8px 12px", fontFamily: "var(--font-mono)",
-                        color: "#0ea5e9", borderBottom: "1px solid var(--border)"
-                      }}>{(Number(r.mlDosed) / 1000).toFixed(4)}</td>
-                    )}
-                    <td style={{ padding: isMobile ? "6px 8px" : "8px 12px", borderBottom: "1px solid var(--border)" }}>
-                      {r.primedToday
-                        ? <CheckCircle size={isMobile ? 11 : 13} style={{ color: '#22c55e' }} />
-                        : <span style={{ fontSize: isMobile ? 9 : 10, color: 'var(--muted-foreground)' }}>—</span>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
 
       {!showAlerts && alerts.length > 0 && (
         <button
