@@ -553,7 +553,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
       return { label: 'FILTER', color: COLORS.success, sub: 'Filtering — all pumps running' };
     }
   };
-
+  
   const opStatus = getOperationDisplay();
 
   const getStartupStatus = () => {
