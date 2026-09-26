@@ -74,57 +74,13 @@ const safeNumber = (value, fallback = 0) => {
   return (isNaN(num) || !isFinite(num)) ? fallback : num;
 };
 
-function formatHoursMinutes(ms) {
-  if (!ms || ms < 0) return '0h 0m';
-  const totalMinutes = Math.floor(ms / 60000);
+// Formats a duration given in HOURS (float, PLC-reported) as "Xh Ym".
+function formatHoursFromHours(hrs) {
+  if (!Number.isFinite(hrs) || hrs < 0) return '0h 0m';
+  const totalMinutes = Math.round(hrs * 60);
   const h = Math.floor(totalMinutes / 60);
   const m = totalMinutes % 60;
-  return `${h}h ${m}m`;
-}
-
-// ─── Antiscalant dosing run-time ─────────────────────────────────────────
-// Per operator spec:
-//   • On the rising edge (OFF → ON): add an INITIAL prime dose of 0.048 ml
-//     worth of pump-on time (i.e. exactly one 1-second pulse's worth).
-//   • While the pump is ON: add 1 second of pump-on time per second elapsed.
-//
-// We store `runMs` (milliseconds of accumulated pump ON-time) plus a
-// `primedToday` flag, both keyed to today's date so it resets at midnight
-// and survives page refreshes.
-const DAILY_RUN_STORAGE_KEY = 'ro5_daily_run_ms';
-
-// Dosing pump is rated at 2.7 ml/min → 0.045 ml/sec. The prime dose is
-// one second's worth, so the run-time addition is exactly 1000 ms.
-const DOSING_RATE_ML_SEC = 2.7 / 60; // 0.045 ml/s
-
-function todayKey() {
-  return new Date().toDateString();
-}
-
-function loadDailyRunState() {
-  try {
-    const raw = localStorage.getItem(DAILY_RUN_STORAGE_KEY);
-    if (!raw) return { runMs: 0, primedToday: false };
-    const parsed = JSON.parse(raw);
-    if (parsed.date !== todayKey()) return { runMs: 0, primedToday: false };
-    return {
-      runMs: Number.isFinite(parsed.runMs) ? parsed.runMs : 0,
-      primedToday: Boolean(parsed.primedToday),
-    };
-  } catch {
-    return { runMs: 0, primedToday: false };
-  }
-}
-
-function saveDailyRunState({ runMs, primedToday }) {
-  try {
-    localStorage.setItem(
-      DAILY_RUN_STORAGE_KEY,
-      JSON.stringify({ date: todayKey(), runMs, primedToday })
-    );
-  } catch {
-    // ignore storage errors (e.g. private browsing)
-  }
+  return `${h}h ${String(m).padStart(2, '0')}m`;
 }
 
 // Critical thresholds (defined here, above SENSOR_MAP, so gauge configs
@@ -220,7 +176,7 @@ export const SENSOR_MAP = {
   'RO5-SystemMode': { label: 'System Mode', unit: '', icon: Power, color: COLORS.success, shortName: 'SystemMode' },
   'RO5-AntiscalantDosingActive': { label: 'Dosing Active', unit: '', icon: FlaskConical, color: COLORS.purple, shortName: 'DosingActive' },
 
-  // ✅ NEW PARAMETERS
+  // ✅ PLC-reported totals
   'RO5-AntiscalantDaily': {
     label: 'Antiscalant Daily', unit: 'ml', icon: FlaskConical,
     color: COLORS.purple, shortName: 'AntiscalantDaily'
@@ -487,11 +443,6 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     previousState: null,
   });
 
-  // Daily antiscalant run-time, persisted in localStorage.
-  //   runMs       — accumulated pump ON-time today, in ms.
-  //   primedToday — whether the initial prime dose has been applied today.
-  const [dailyRunMs, setDailyRunMs] = useState(() => loadDailyRunState().runMs);
-
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 640);
     checkMobile();
@@ -538,7 +489,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const stage2Delta = getNumber('RO5-Stage2Delta');
   const filterDeltaP = getNumber('RO5-MediaFilterDeltaP');
 
-  // ✅ NEW: PLC-reported daily antiscalant total & system run hours
+  // ✅ PLC-reported daily antiscalant total & lifetime system run-hours
   const antiscalantDaily = getNumber('RO5-AntiscalantDaily');
   const systemRunHrs = getNumber('RO5-SystemRunhrs');
 
@@ -589,68 +540,6 @@ export function Dashboard({ onViewAllAlerts } = {}) {
 
   const highPressurePumpOn = operationMode === 'FILTER' && isSystemOn;
   const dosingPumpOn = operationMode === 'FILTER' && isDosingOn;
-
-  // ─── Antiscalant run-time accumulation ────────────────────────────────────
-  // Runs a 1-second pulse counter. Each tick:
-  //   1. Detect the OFF → ON transition of the dosing pump. On the rising
-  //      edge, add the initial prime (one extra second's worth) and mark
-  //      the day as primed.
-  //   2. While ON, add 1 second of runtime.
-  //   3. Roll over at midnight — reset runtime and prime flag.
-  //   4. Persist to localStorage on every tick.
-  //
-  // The pulse timer lives inside a single effect that runs for the whole
-  // component lifetime (not gated on `dosingPumpOn`) so it can observe the
-  // rising edge. It reads the current pump state via a ref, not a closure
-  // over a stale value.
-  const dosingPumpOnRef = React.useRef(dosingPumpOn);
-  const prevDosingPumpOnRef = React.useRef(dosingPumpOn);
-  dosingPumpOnRef.current = dosingPumpOn;
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const interval = setInterval(() => {
-      if (cancelled) return;
-
-      // Midnight rollover: reset today's counter and prime flag.
-      const stored = loadDailyRunState();
-      if (stored.runMs === 0 && stored.primedToday === false && dailyRunMs !== 0) {
-        // Cheap heuristic: if the loader says zero (new day) but our state
-        // isn't zero, snap to zero.
-        setDailyRunMs(0);
-      }
-
-      const nowOn = dosingPumpOnRef.current;
-      const wasOn = prevDosingPumpOnRef.current;
-
-      setDailyRunMs((prev) => {
-        let next = prev;
-        const state = loadDailyRunState();
-        const base = state.date === todayKey() ? state.runMs : 0;
-        const primedToday = state.primedToday;
-
-        // Rising edge (OFF → ON): apply the initial prime dose (1 s worth).
-        if (!wasOn && nowOn && !primedToday) {
-          next = base + 1000;
-          saveDailyRunState({ runMs: next, primedToday: true });
-        } else {
-          // Continuous: add one second of on-time per tick while ON.
-          next = nowOn ? base + 1000 : base;
-          saveDailyRunState({ runMs: next, primedToday });
-        }
-        return next;
-      });
-
-      prevDosingPumpOnRef.current = nowOn;
-    }, 1000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const getOperationDisplay = () => {
     if (tankEmpty) {
@@ -774,10 +663,10 @@ export function Dashboard({ onViewAllAlerts } = {}) {
         />
         <TopStatusCard
           icon={Clock} iconBg="rgba(34,197,94,0.12)" iconColor={dosingPumpOn ? COLORS.success : COLORS.muted}
-          title="Run Time Today"
-          value={formatHoursMinutes(dailyRunMs)}
-          valueColor={dosingPumpOn ? COLORS.success : 'var(--muted-foreground)'}
-          sub={dosingPumpOn ? 'Antiscalant dosing active' : 'Antiscalant dosing stopped'}
+          title="Run Hours"
+          value={`${systemRunHrs.toFixed(1)} hrs`}
+          valueColor={dosingPumpOn ? COLORS.success : 'var(--foreground)'}
+          sub={`PLC lifetime total · ${formatHoursFromHours(systemRunHrs)}`}
           subColor="var(--muted-foreground)"
         />
         <TopStatusCard
@@ -855,7 +744,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             color={dailyProduction > 0 ? COLORS.success : COLORS.primary}
             trend={getTrend(history, 'RO5-Permeateflow', 60 * 60 * 1000)} statusText={summaryLoading ? "Loading" : `${safeFormat(permeateFlow, 1)} m³/h now`} statusOk={true} />
 
-          {/* ✅ NEW KPI CARDS */}
+          {/* ✅ PLC-reported totals */}
           <KPICardV2 label="Antiscalant Daily" unit="ml" icon={FlaskConical} value={safeFormat(antiscalantDaily, 2)}
             color={antiscalantDaily > 0 ? COLORS.purple : COLORS.primary}
             trend={getTrend(history, 'RO5-AntiscalantDaily')} statusText={antiscalantDaily > 0 ? "Dosed today" : "—"} statusOk={antiscalantDaily > 0} />
