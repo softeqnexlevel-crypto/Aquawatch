@@ -63,8 +63,15 @@ const KEY_MAPPING = {
   'SystemRunhrs': 'RO5-SystemRunhrs',
 
 
-  'RO5-SystemActive': 'RO5-SystemOperation',
-'siemens200smart-RO5-SystemActive': 'RO5-SystemOperation',
+  // ✅ SYSTEM ACTIVE (master ON/OFF signal — must NOT be collapsed into
+  // RO5-SystemOperation. It was previously mapped to that key, which meant
+  // getValue('RO5-SystemActive') in Dashboard.jsx always fell back to 0
+  // (undefined -> isActive(0) -> false), forcing the dashboard to show
+  // "OFF" permanently regardless of the PLC's real state, and the two
+  // tags silently overwrote each other in sensorData on every message.
+  'RO5-SystemActive': 'RO5-SystemActive',
+  'siemens200smart-RO5-SystemActive': 'RO5-SystemActive',
+  'SystemActive': 'RO5-SystemActive',
 
 'RO5-Feedpump': 'RO5-Feedpump',
 'siemens200smart-RO5-Feedpump': 'RO5-Feedpump',
@@ -97,6 +104,7 @@ const getUnitForParameter = (param) => {
     'RO5-SystemRecovery': '%',
     'RO5-PureWaterEc': 'µS/cm',
     'RO5-FeedTankLevel': '%',
+    'RO5-SystemActive': '',
     'RO5-SystemOperation': '',
     'RO5-SystemMode': '',
     'RO5-AntiscalantDosingActive': '',

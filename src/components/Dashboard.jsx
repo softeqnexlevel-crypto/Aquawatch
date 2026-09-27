@@ -184,13 +184,13 @@ export const SENSOR_MAP = {
   'RO5-PureWaterEc': { label: 'Product Water EC', unit: 'µS/cm', icon: FlaskConical, color: COLORS.purple, shortName: 'PureWaterEC' },
   'RO5-FeedTankLevel': { label: 'Feed Tank Level', unit: '%', icon: Droplets, color: '#14b8a6', shortName: 'FeedTankLevel' },
 
-  // ✅ Master ON/OFF + PLC mode + status flags
+  // Master ON/OFF + PLC mode + status flags
   'RO5-SystemActive': { label: 'System Active', unit: '', icon: Power, color: COLORS.success, shortName: 'SystemActive' },
   'RO5-SystemOperation': { label: 'System Operation', unit: '', icon: Power, color: COLORS.success, shortName: 'SystemOperation' },
   'RO5-SystemMode': { label: 'System Mode', unit: '', icon: Power, color: COLORS.success, shortName: 'SystemMode' },
   'RO5-AntiscalantDosingActive': { label: 'Dosing Active', unit: '', icon: FlaskConical, color: COLORS.purple, shortName: 'DosingActive' },
 
-  // ✅ PLC-reported totals
+  // PLC-reported totals
   'RO5-AntiscalantDaily': {
     label: 'Antiscalant Daily', unit: 'ml', icon: FlaskConical,
     color: COLORS.purple, shortName: 'AntiscalantDaily'
@@ -503,7 +503,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const stage2Delta = getNumber('RO5-Stage2Delta');
   const filterDeltaP = getNumber('RO5-MediaFilterDeltaP');
 
-  // ✅ PLC-reported daily antiscalant total & lifetime system run-hours
+  // PLC-reported daily antiscalant total & lifetime system run-hours
   const systemRunHrs = getNumber('RO5-SystemRunhrs');
 
   const systemOperation = getValue('RO5-SystemOperation');
@@ -566,6 +566,10 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           ? 'PLC reports standby'
           : null;
 
+  // AUTO / MANUAL is the PLC's *control* mode (who is allowed to command
+  // the system), which is a different concept from operationMode (what
+  // the system is *physically doing* right now: FILTER/BACKWASH/STANDBY/OFF).
+  // Kept as its own card so the two aren't conflated.
   const isAutoMode = typeof systemMode === 'string' && systemMode.toLowerCase().trim() === 'auto';
   const systemModeDisplay = isAutoMode ? 'AUTO' : 'MANUAL';
 
@@ -576,6 +580,10 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const highPressurePumpOn = operationMode === 'FILTER' && systemActiveOn;
   const dosingPumpOn = operationMode === 'FILTER' && systemActiveOn && isDosingOn;
 
+  // ── System Operation display (FILTER / BACKWASH / STANDBY / OFF) ───────
+  // This is the single source of truth for "what is the system doing right
+  // now" and drives both the top "System Operation" status card and the
+  // detailed startup-status panel on the System tab, so they always agree.
   const getOperationDisplay = () => {
     if (!systemActiveOn) {
       return {
@@ -708,30 +716,33 @@ export function Dashboard({ onViewAllAlerts } = {}) {
 
       {/* Top Status Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
+        {/* "System Operation" now shows the actual operating state —
+             FILTER / BACKWASH / STANDBY / OFF — instead of a plain ON/OFF,
+             using the same opStatus object the System tab's startup panel
+             already relies on, so both views always agree. */}
         <TopStatusCard
           icon={Settings}
+          iconBg={`${opStatus.color}1F`}
+          iconColor={opStatus.color}
+          title="System Operation"
+          value={opStatus.label}
+          valueColor={opStatus.color}
+          sub={opStatus.sub}
+          subColor="var(--muted-foreground)"
+        />
+        {/* "System Active" shows the master ON/OFF signal — the single
+             switch that forces operationMode to OFF regardless of what the
+             PLC's mode/pumps report. Kept separate from the "System
+             Operation" card above, which shows the resolved operating
+             state (FILTER/BACKWASH/STANDBY/OFF). */}
+        <TopStatusCard
+          icon={Power}
           iconBg={systemActiveOn ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)"}
           iconColor={systemActiveOn ? COLORS.success : COLORS.danger}
           title="System Active"
           value={systemActiveOn ? "ON" : "OFF"}
           valueColor={systemActiveOn ? COLORS.success : COLORS.danger}
-          sub={
-            !systemActiveOn
-              ? (tankEmpty ? 'Feed tank empty - system stopped' : 'Master switch is OFF')
-              : operationMode === 'STANDBY'
-                ? (standbyReason ? `Standby — ${standbyReason}` : 'Standby')
-                : operationMode === 'BACKWASH'
-                  ? 'Backwash in progress'
-                  : 'All systems running'
-          }
-          subColor="var(--muted-foreground)"
-        />
-        <TopStatusCard
-          icon={Settings} iconBg="rgba(14,165,233,0.12)" iconColor={opStatus.color}
-          title="System Mode"
-          value={opStatus.label}
-          valueColor={opStatus.color}
-          sub={opStatus.sub}
+          sub={systemActiveOn ? 'Master switch is ON' : 'Master switch is OFF'}
           subColor="var(--muted-foreground)"
         />
         <TopStatusCard
