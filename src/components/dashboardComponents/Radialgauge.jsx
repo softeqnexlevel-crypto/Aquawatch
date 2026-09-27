@@ -1,9 +1,4 @@
 // components/dashboardComponents/RadialGauge.jsx
-//
-// Generic 270° radial gauge for any single-scale reading with color bands
-// (e.g. Delta P sensors). Same visual language as PressureGauge, but
-// parameterized by `max` and `bands` instead of a fixed 0–16 bar dial, so
-// it can represent small ranges (e.g. 0–0.6 bar) legibly.
 import React, { useRef } from 'react';
 
 const CX = 100;
@@ -26,8 +21,6 @@ const arcPath = (r, startDeg, endDeg) => {
   return `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2}`;
 };
 
-// Returns the matching band ({key, label, min, max, color}) for a value,
-// clamping to the outer bands if the value is out of range.
 export function classifyByBands(value, bands) {
   if (!Number.isFinite(value) || !bands || bands.length === 0) return null;
   for (const b of bands) {
@@ -45,7 +38,7 @@ export function RadialGauge({
   label = '',
   size = 160,
   max = 1,
-  bands = [], // [{ min, max, color, label, key }]
+  bands = [],
   precision = 2,
   showReadout = true,
 }) {
@@ -97,10 +90,8 @@ export function RadialGauge({
           </filter>
         </defs>
 
-        {/* Dial face */}
         <circle cx={CX} cy={CY} r="60" fill={`url(#${id}-dial)`} />
 
-        {/* Printed colour arc */}
         {bands.map((b) => (
           <path
             key={`${b.min}-${b.max}`}
@@ -112,7 +103,6 @@ export function RadialGauge({
           />
         ))}
 
-        {/* Tick marks */}
         {ticks.map((t) => (
           <line
             key={t.val}
@@ -122,7 +112,6 @@ export function RadialGauge({
           />
         ))}
 
-        {/* Numeric labels */}
         {numberLabels.map((l, i) => (
           <text
             key={i}
@@ -135,7 +124,6 @@ export function RadialGauge({
           </text>
         ))}
 
-        {/* Dial printing */}
         <text
           x={CX} y="85" textAnchor="middle"
           fontSize="4" letterSpacing="0.4" fill="#333"
@@ -151,7 +139,6 @@ export function RadialGauge({
           {unit}
         </text>
 
-        {/* Needle */}
         <g
           style={{
             transformOrigin: `${CX}px ${CY}px`,
@@ -165,11 +152,9 @@ export function RadialGauge({
           <path d={`M ${CX + 50} ${CY} L ${CX + 3} ${CY - 2.3} L ${CX - 14} ${CY - 1.4} L ${CX - 14} ${CY + 1.4} L ${CX + 3} ${CY + 2.3} Z`} fill="#141618" />
         </g>
 
-        {/* Hub */}
         <circle cx={CX} cy={CY} r="5.6" fill={`url(#${id}-hub)`} />
         <circle cx={CX} cy={CY} r="1.8" fill="#d8dce0" />
 
-        {/* Thin dark rim */}
         <circle cx={CX} cy={CY} r="60" fill="none" stroke="#334155" strokeWidth="2" />
       </svg>
 

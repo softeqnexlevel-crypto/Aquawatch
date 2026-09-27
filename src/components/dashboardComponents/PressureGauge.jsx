@@ -3,27 +3,20 @@ import React, { useRef } from 'react';
 
 export const PRESSURE_UNIT_DISPLAY = 'bar';
 
-// ── Physical dial ───────────────────────────────────────────────────────────
 export const DIAL_MAX_BAR = 16;
 
-// Single source of truth: label/key drive status logic (used by Dashboard's
-// legend + pressureStatusTone), color/min/max drive both the dial arc and
-// the legend range text.
 export const PRESSURE_BANDS_BAR = [
   { key: 'normal',   label: 'Normal',   min: 0,  max: 8,  color: '#2e9e4f' },
   { key: 'warning',  label: 'Warning',  min: 8,  max: 12, color: '#f2c318' },
   { key: 'critical', label: 'Critical', min: 12, max: 16, color: '#dc2626' },
 ];
 
-// Back-compat alias + shape the SVG arc code already expects ({from, to}).
 export const DIAL_BANDS_BAR = PRESSURE_BANDS_BAR.map(b => ({
   from: b.min,
   to: b.max,
   color: b.color,
 }));
 
-// Returns the matching band object ({key, label, min, max, color}) for a
-// given pressure value, clamping to the outer bands if out of range.
 export function classifyPressure(value, bands = PRESSURE_BANDS_BAR) {
   if (!Number.isFinite(value)) return null;
   for (const b of bands) {
@@ -55,7 +48,6 @@ const arcPath = (r, startDeg, endDeg) => {
   return `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2}`;
 };
 
-// ── Static dial artwork ─────────────────────────────────────────────────────
 const TICKS = Array.from({ length: 33 }, (_, i) => {
   const bar = i * 0.5;
   const major = i % 4 === 0;
@@ -82,15 +74,14 @@ export function PressureGauge({
   value,
   unit = PRESSURE_UNIT_DISPLAY,
   size = 180,
-  bands,        // preferred: array of {min, max, color}
-  dialBands,    // back-compat: array of {from, to, color}
+  bands,
+  dialBands,
   showReadout = true,
 }) {
   const idRef = useRef(null);
   if (idRef.current === null) idRef.current = `pg${++gaugeInstance}`;
   const id = idRef.current;
 
-  // Normalize whichever prop was passed into {from, to, color} for the arc.
   const resolvedBands = bands
     ? bands.map(b => ({ from: b.min, to: b.max, color: b.color }))
     : dialBands || DIAL_BANDS_BAR;
@@ -137,10 +128,8 @@ export function PressureGauge({
           </filter>
         </defs>
 
-        {/* Dial face */}
         <circle cx={CX} cy={CY} r="60" fill={`url(#${id}-dial)`} />
 
-        {/* Printed colour arc */}
         {resolvedBands.map((b) => (
           <path
             key={`${b.from}-${b.to}`}
@@ -152,7 +141,6 @@ export function PressureGauge({
           />
         ))}
 
-        {/* Tick marks */}
         {TICKS.map((t) => (
           <line
             key={t.bar}
@@ -162,7 +150,6 @@ export function PressureGauge({
           />
         ))}
 
-        {/* MPa numbers (outer, black) */}
         {MPA_LABELS.map((l) => (
           <text
             key={`mpa-${l.text}`}
@@ -175,7 +162,6 @@ export function PressureGauge({
           </text>
         ))}
 
-        {/* bar numbers (inner, red) */}
         {BAR_LABELS.map((l) => (
           <text
             key={`bar-${l.text}`}
@@ -188,7 +174,6 @@ export function PressureGauge({
           </text>
         ))}
 
-        {/* Dial printing */}
         <text
           x={CX} y="85" textAnchor="middle"
           fontSize="3.4" letterSpacing="0.5" fill="#333"
@@ -211,7 +196,6 @@ export function PressureGauge({
           MPa
         </text>
 
-        {/* Needle */}
         <g
           style={{
             transformOrigin: `${CX}px ${CY}px`,
@@ -225,11 +209,9 @@ export function PressureGauge({
           <path d={`M ${CX + 50} ${CY} L ${CX + 3} ${CY - 2.3} L ${CX - 14} ${CY - 1.4} L ${CX - 14} ${CY + 1.4} L ${CX + 3} ${CY + 2.3} Z`} fill="#141618" />
         </g>
 
-        {/* Hub */}
         <circle cx={CX} cy={CY} r="5.6" fill={`url(#${id}-hub)`} />
         <circle cx={CX} cy={CY} r="1.8" fill="#d8dce0" />
 
-        {/* Glass reflection */}
         <g clipPath={`url(#${id}-clip)`} style={{ pointerEvents: 'none' }}>
           <ellipse
             cx="80" cy="66" rx="40" ry="20"
@@ -238,7 +220,6 @@ export function PressureGauge({
           />
         </g>
 
-        {/* Thin dark rim */}
         <circle cx={CX} cy={CY} r="60" fill="none" stroke="#334155" strokeWidth="2" />
       </svg>
 

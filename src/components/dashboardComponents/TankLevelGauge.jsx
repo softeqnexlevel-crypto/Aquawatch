@@ -14,12 +14,10 @@ export function classifyTankLevel(value) {
   return TANK_BANDS[2];
 }
 
-// Vertical gradient endpoints for the bright water fill, derived from the
-// band color so the fill matches the current classification (red / yellow / green).
 const WATER_GRADIENTS = {
-  '#ef4444': 'linear-gradient(180deg, #f87171 0%, #b91c1c 100%)', // red
-  '#eab308': 'linear-gradient(180deg, #facc15 0%, #a16207 100%)', // yellow
-  '#22c55e': 'linear-gradient(180deg, #4ade80 0%, #15803d 100%)', // green
+  '#ef4444': 'linear-gradient(180deg, #f87171 0%, #b91c1c 100%)',
+  '#eab308': 'linear-gradient(180deg, #facc15 0%, #a16207 100%)',
+  '#22c55e': 'linear-gradient(180deg, #4ade80 0%, #15803d 100%)',
 };
 
 export function TankLevelGauge({ value, height = 200, width = 120 }) {
@@ -39,14 +37,9 @@ export function TankLevelGauge({ value, height = 200, width = 120 }) {
         borderRadius: 12,
         overflow: 'hidden',
         border: '2px solid #0f172a',
-        // Whole-container backdrop now follows the CURRENT band (muted),
-        // so an empty/off tank reads as fully red, a full tank reads as
-        // fully green, and a partial tank shows the same hue above the
-        // bright fill instead of unrelated static zone stripes.
         backgroundColor: fillColor,
         opacity: 1,
       }}>
-        {/* Muted backdrop tint across the whole container, current band */}
         <div style={{
           position: 'absolute',
           inset: 0,
@@ -55,7 +48,6 @@ export function TankLevelGauge({ value, height = 200, width = 120 }) {
           transition: 'background 0.6s ease',
         }} />
 
-        {/* Bright water fill — colored by the current band, height = value% */}
         <div style={{
           position: 'absolute',
           left: 0, right: 0, bottom: 0,
@@ -65,7 +57,6 @@ export function TankLevelGauge({ value, height = 200, width = 120 }) {
           boxShadow: `inset 0 0 12px rgba(0,0,0,0.35), 0 0 12px ${fillColor}80`,
         }} />
 
-        {/* Percentage overlay */}
         <div style={{
           position: 'absolute', inset: 0,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -77,7 +68,6 @@ export function TankLevelGauge({ value, height = 200, width = 120 }) {
         </div>
       </div>
 
-      {/* Readout below the tank */}
       <div style={{ textAlign: 'center' }}>
         <div style={{
           fontFamily: 'var(--font-mono)', fontSize: 24, fontWeight: 700,
@@ -93,4 +83,4 @@ export function TankLevelGauge({ value, height = 200, width = 120 }) {
   );
 }
 
-export default TankLevelGauge;
+export default TankLevelGauge;                    
