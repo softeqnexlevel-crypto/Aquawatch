@@ -21,6 +21,11 @@ const KEY_MAPPING = {
   'siemens200smart-RO5-SystemRecovery': 'RO5-SystemRecovery',
   'siemens200smart-RO5-PureWaterEc': 'RO5-PureWaterEc',
   'siemens200smart-RO5-FeedTankLevel': 'RO5-FeedTankLevel',
+  // Raw (uncalibrated) transmitter signal, 4.9-10.0. The correct
+  // percentage is derived from this on the frontend via
+  // dashboardComponents/feedTankCalibration.js — see that file for why.
+  'siemens200smart-RO5-FeedTankLevelRaw': 'RO5-FeedTankLevelRaw',
+  'RO5-FeedTankLevelRaw': 'RO5-FeedTankLevelRaw',
 
 
 'RO5-Feedpump': 'RO5-Feedpump',
@@ -104,6 +109,7 @@ const getUnitForParameter = (param) => {
     'RO5-SystemRecovery': '%',
     'RO5-PureWaterEc': 'µS/cm',
     'RO5-FeedTankLevel': '%',
+    'RO5-FeedTankLevelRaw': '',
     'RO5-SystemActive': '',
     'RO5-SystemOperation': '',
     'RO5-SystemMode': '',

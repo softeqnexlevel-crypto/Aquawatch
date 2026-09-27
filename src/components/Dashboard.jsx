@@ -31,6 +31,7 @@ import {
   getDisplayedPressure,
   DATA_FRESHNESS_WINDOW_MS,
 } from './dashboardComponents/instrumentUtils';
+import { rawToPercent } from './dashboardComponents/feedTankCalibration';
 
 
 export const COLORS = {
@@ -183,6 +184,7 @@ export const SENSOR_MAP = {
   'RO5-SystemRecovery': { label: 'System Recovery', unit: '%', icon: Activity, color: COLORS.success, shortName: 'SystemRecovery' },
   'RO5-PureWaterEc': { label: 'Product Water EC', unit: 'µS/cm', icon: FlaskConical, color: COLORS.purple, shortName: 'PureWaterEC' },
   'RO5-FeedTankLevel': { label: 'Feed Tank Level', unit: '%', icon: Droplets, color: '#14b8a6', shortName: 'FeedTankLevel' },
+  'RO5-FeedTankLevelRaw': { label: 'Feed Tank Raw', unit: '', icon: Droplets, color: COLORS.muted, shortName: 'FeedTankRaw' },
 
   // Master ON/OFF + PLC mode + status flags
   'RO5-SystemActive': { label: 'System Active', unit: '', icon: Power, color: COLORS.success, shortName: 'SystemActive' },
@@ -511,6 +513,10 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const dosingActive = getValue('RO5-AntiscalantDosingActive');
   const feedPumpRaw = getValue('RO5-Feedpump');
   const backwashRaw = getValue('RO5-PrefilterBackwash');
+  // High filter differential-pressure alarm bit — the PLC signal that
+  // actually triggers/justifies a backwash cycle. Surfaced specifically
+  // while the system is in BACKWASH mode (see renderSystemTab).
+  const highPrefilterDeltaPRaw = getValue('RO5-HighPrefilterDeltaP');
 
   // ── MASTER SIGNAL ──────────────────────────────────────────────────────
   const systemActiveRaw = getValue('RO5-SystemActive');
@@ -519,8 +525,24 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const feedPumpOn = isActive(feedPumpRaw);
   const backwashOn = isActive(backwashRaw);
 
+  // ── Feed tank level: recomputed from the RAW transmitter signal ────────
+  // The backend (plcService.js) scales RO5-FeedTankLevel by a flat 7.83
+  // factor, which does not match the transmitter's actual calibration
+  // curve (4.9 -> 10%, 10.0 -> 100%, per the Abox Calibrator tool). Rather
+  // than trust that pre-scaled value, we read the raw signal directly and
+  // apply the correct linear mapping here. If the raw tag hasn't arrived
+  // yet (e.g. just after connecting, before the first MQTT message),
+  // we fall back to the old backend-scaled value so the gauge doesn't
+  // sit blank.
+  const feedTankLevelRawValue = getValue('RO5-FeedTankLevelRaw');
+  const feedTankLevelRawNum = typeof feedTankLevelRawValue === 'number'
+    ? feedTankLevelRawValue
+    : parseFloat(feedTankLevelRawValue);
+  const hasRawTankReading = Number.isFinite(feedTankLevelRawNum);
+  const calibratedFeedTankPct = hasRawTankReading ? rawToPercent(feedTankLevelRawNum) : null;
+
   const feedTankLevel = getDisplayedTankLevelPct({
-    rawTankLevel: getValue('RO5-FeedTankLevel'),
+    rawTankLevel: hasRawTankReading ? calibratedFeedTankPct : getValue('RO5-FeedTankLevel'),
     lastUpdate,
     systemOperationRaw: systemOperation,
     feedPumpRaw,
@@ -789,6 +811,15 @@ export function Dashboard({ onViewAllAlerts } = {}) {
               width={isMobile ? 80 : 120}
               height={isMobile ? 130 : 200}
             />
+            {/* Raw transmitter signal + the calibrated % it maps to,
+                using the corrected 4.9->10% / 10.0->100% curve. */}
+            <div style={{ marginTop: 6, textAlign: 'center' }}>
+              <div style={{ fontSize: isMobile ? 8 : 9, color: 'var(--muted-foreground)', fontFamily: 'var(--font-mono)' }}>
+                {hasRawTankReading
+                  ? `Raw: ${feedTankLevelRawNum.toFixed(3)} → ${calibratedFeedTankPct.toFixed(1)}%`
+                  : 'Raw: no reading yet'}
+              </div>
+            </div>
           </InstrumentCard>
         </div>
       </div>
@@ -827,6 +858,11 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           <KPICardV2 label="Daily Production" unit="m³" icon={TrendingUp} value={dailyProdDisplay}
             color={dailyProduction > 0 ? COLORS.success : COLORS.primary}
             trend={getTrend(history, 'RO5-Permeateflow', 60 * 60 * 1000)} statusText={summaryLoading ? "Loading" : `${safeFormat(permeateFlow, 1)} m³/h now`} statusOk={true} />
+          <KPICardV2 label="Feed Tank Raw" unit="" icon={Droplets} value={hasRawTankReading ? feedTankLevelRawNum.toFixed(3) : '--'}
+            color={COLORS.muted}
+            trend={getTrend(history, 'RO5-FeedTankLevelRaw')}
+            statusText={hasRawTankReading ? `≈ ${calibratedFeedTankPct.toFixed(1)}%` : 'No reading'}
+            statusOk={hasRawTankReading} />
         </div>
       </div>
     </div>
