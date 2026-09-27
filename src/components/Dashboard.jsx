@@ -789,22 +789,20 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           <InstrumentCard
             title="Pressure"
             subtitle="System Pressure Gauge"
-            status={!pressureHasData ? 'No Data' : pressureBand?.label}
-            statusTone={pressureStatusTone}
+           
           >
             <PressureGauge
               value={pressureHasData ? roPressure : undefined}
               unit={PRESSURE_UNIT_DISPLAY}
               size={isMobile ? 110 : 180}
-              bands={PRESSURE_BANDS_BAR}
+              // bands={PRESSURE_BANDS_BAR}
             />
           </InstrumentCard>
 
           <InstrumentCard
             title="Feed Tank"
             subtitle="Tank Level"
-            status={!tankHasData ? 'No Data' : tankBand?.statusLabel}
-            statusTone={tankStatusTone}
+            
           >
             <TankLevelGauge
               value={tankHasData ? feedTankLevel : undefined}
