@@ -812,11 +812,11 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             {/* Raw transmitter signal + the calibrated % it maps to,
                 using the corrected 4.9->10% / 10.0->100% curve. */}
             <div style={{ marginTop: 6, textAlign: 'center' }}>
-              <div style={{ fontSize: isMobile ? 8 : 9, color: 'var(--muted-foreground)', fontFamily: 'var(--font-mono)' }}>
+              {/* <div style={{ fontSize: isMobile ? 8 : 9, color: 'var(--muted-foreground)', fontFamily: 'var(--font-mono)' }}>
                 {hasRawTankReading
                   ? `Raw: ${feedTankLevelRawNum.toFixed(3)} → ${calibratedFeedTankPct.toFixed(1)}%`
                   : 'Raw: no reading yet'}
-              </div>
+              </div> */}
             </div>
           </InstrumentCard>
         </div>
