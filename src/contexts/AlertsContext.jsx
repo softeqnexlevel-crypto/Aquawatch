@@ -2,7 +2,10 @@
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { useData } from './DataContext';
 import { evaluateSensorAlerts, mergeAlerts } from '../utils/alertEngine';
-import { evaluateBackwashFilterDpAlert } from '../utils/backwashAlert';
+import {
+  evaluateBackwashFilterDpAlert,
+  evaluateBackwashModeAlert,
+} from '../utils/backwashAlert';
 
 const AlertsContext = createContext();
 
@@ -155,8 +158,12 @@ export function AlertsProvider({ children }) {
 
   const recompute = useCallback(() => {
     const sensorCandidates = evaluateSensorAlerts(getValue, activeIdsRef.current);
-    // Alerts derived from combined system state (not a single raw sensor)
-    const derivedCandidates = [evaluateBackwashFilterDpAlert(getValue)];
+    // Alerts derived from combined system state (not a single raw sensor).
+    // Both of these fire together while the system is in backwash mode.
+    const derivedCandidates = [
+      evaluateBackwashModeAlert(getValue),
+      evaluateBackwashFilterDpAlert(getValue),
+    ];
     const extraCandidates = Object.values(extraSourcesRef.current).flat();
     const allCandidates = applyAlertRules([
       ...sensorCandidates,
