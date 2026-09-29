@@ -8,7 +8,16 @@ import {
   Plus, X, Eye, EyeOff, Maximize2, Minimize2
 } from "lucide-react";
 import { useData } from '../contexts/DataContext';
+import { useAuth } from '../contexts/AuthContext';
+import { API_BASE_URL } from '../config';
 import { format, subDays, subWeeks, subMonths } from 'date-fns';
+import {
+  buildSensorRows,
+  buildKpis,
+  buildReportHtml,
+  openReportWindow,
+  presentReport,
+} from '../utils/plantReport';
 
 // ===================== NUMBER FORMATTING =====================
 // Every measurement in the reports (on screen and in the CSV export)
@@ -83,7 +92,7 @@ function Toast({ toast }) {
           {toast.title}
         </div>
         <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 2 }}>
-          {toast.done ? "✓ Download complete" : toast.sub}
+          {toast.done ? toast.doneText : toast.sub}
         </div>
         <div style={{ 
           height: 3, 
@@ -105,7 +114,7 @@ function Toast({ toast }) {
   );
 }
 
-// ===================== REPORT GENERATION FUNCTIONS =====================
+// ===================== CSV GENERATION =====================
 
 // Numbers (and numeric strings) are written with 2 decimals, e.g. 45.1 -> 45.10.
 // Text such as dates or IDs is left untouched.
@@ -140,9 +149,28 @@ function downloadCSV(filename, content) {
   URL.revokeObjectURL(url);
 }
 
+// ===================== PRODUCTION SUMMARY (for the PDF KPI strip) =====================
+// Same endpoint the Dashboard uses. Never throws: if it fails the KPI cards show "—".
+async function fetchProductionSummary() {
+  try {
+    const token = localStorage.getItem('accessToken');
+    const response = await fetch(`${API_BASE_URL}/api/production-summary`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return await response.json();
+  } catch (err) {
+    console.error('Report: failed to fetch production summary:', err);
+    return null;
+  }
+}
+
 // ===================== MAIN COMPONENT =====================
 export function Reports() {
   const { sensorData, history, getValue, getHistory, lastUpdate } = useData();
+  const auth = useAuth();
+  const userName = auth?.user?.name || auth?.user?.username || auth?.user?.email || 'User';
+
   const [toast, setToast] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
@@ -158,6 +186,12 @@ export function Reports() {
     checkMobile();
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
+  }, []);
+
+  // Clear toast timers on unmount
+  useEffect(() => () => {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (intervalRef.current) clearInterval(intervalRef.current);
   }, []);
 
   // ===================== GENERATE REAL REPORTS FROM DATA =====================
@@ -320,11 +354,11 @@ export function Reports() {
   const categories = ['All', 'Production', 'Performance', 'Quality', 'Maintenance', 'Chemical', 'Operations'];
 
   // ===================== TOAST FUNCTIONS =====================
-  function showToast(title, sub, iconColor, onComplete) {
+  function showToast(title, sub, iconColor, onComplete, doneText = '✓ Download complete') {
     if (timerRef.current) clearTimeout(timerRef.current);
     if (intervalRef.current) clearInterval(intervalRef.current);
 
-    setToast({ title, sub, iconColor, progress: 0, done: false, visible: true });
+    setToast({ title, sub, iconColor, doneText, progress: 0, done: false, visible: true });
 
     let progress = 0;
     intervalRef.current = setInterval(() => {
@@ -339,14 +373,49 @@ export function Reports() {
     }, 30);
   }
 
+  // ===================== PDF REPORT (client layout) =====================
+  // The report window is opened synchronously inside the click (otherwise the
+  // browser blocks the popup); the content is written in once the data is ready.
+  function startPdfReport({ reportName, category, filename, iconColor }) {
+    const win = openReportWindow();
+    const summaryPromise = fetchProductionSummary();
+
+    showToast(
+      `Generating ${reportName}`,
+      "Preparing PDF...",
+      iconColor,
+      async () => {
+        const summary = await summaryPromise;
+        const html = buildReportHtml({
+          generatedAt: new Date(),
+          userName,
+          reportName,
+          kpis: buildKpis({ summary, getValue }),
+          rows: buildSensorRows({ getValue, getHistory, lastUpdate, category }),
+        });
+        presentReport(win, html, filename);
+      },
+      '✓ Report ready — use Save as PDF'
+    );
+  }
+
   // ===================== DOWNLOAD HANDLERS =====================
   function handleDownload(report) {
+    startPdfReport({
+      reportName: report.title,
+      category: report.category,
+      filename: `${report.id}_${report.title.replace(/\s+/g, '_')}.pdf`,
+      iconColor: "#0ea5e9",
+    });
+  }
+
+  function handleDownloadCsv(report) {
     const filename = `${report.id}_${report.title.replace(/\s+/g, '_')}.csv`;
-    
+
     showToast(
-      `Downloading ${report.title}`, 
-      report.size, 
-      "#0ea5e9", 
+      `Downloading ${report.title}`,
+      "CSV export",
+      "#0ea5e9",
       () => {
         const content = generateCSV([report.data], report.title);
         downloadCSV(filename, content);
@@ -354,19 +423,14 @@ export function Reports() {
     );
   }
 
+  // Quick-generate buttons produce the full report (every sensor).
   function handleGenerateReport(type, label) {
-    const report = generateReportsFromData.find(r => r.type === type) || generateReportsFromData[0];
-    const filename = `${type.toLowerCase()}_report_${format(new Date(), 'yyyy-MM-dd')}.csv`;
-    
-    showToast(
-      `Generating ${label}`, 
-      "Preparing export...", 
-      "#a78bfa",
-      () => {
-        const content = generateCSV([report.data], label);
-        downloadCSV(filename, content);
-      }
-    );
+    startPdfReport({
+      reportName: label,
+      category: 'Operations',
+      filename: `${type.toLowerCase()}_report_${format(new Date(), 'yyyy-MM-dd')}.pdf`,
+      iconColor: "#a78bfa",
+    });
   }
 
   // ===================== GENERATE BUTTONS =====================
@@ -404,6 +468,14 @@ export function Reports() {
       size: "—"     
     },
   ];
+
+  const secondaryBtnStyle = {
+    fontSize: isMobile ? 8 : 9,
+    color: "var(--muted-foreground)",
+    background: "var(--secondary)",
+    border: "1px solid var(--border)",
+    cursor: "pointer",
+  };
 
   return (
     <div className="flex flex-col gap-3 sm:gap-4 p-2 sm:p-4 overflow-auto h-full">
@@ -474,7 +546,7 @@ export function Reports() {
             </div>
             <div style={{ fontSize: isMobile ? 8 : 10, color: "var(--muted-foreground)" }}>{r.desc}</div>
             <div className="mt-1 sm:mt-2 flex items-center gap-1" style={{ fontSize: isMobile ? 8 : 9, color: r.color }}>
-              <Download size={isMobile ? 8 : 10} /> Generate
+              <Download size={isMobile ? 8 : 10} /> Generate PDF
             </div>
           </button>
         ))}
@@ -580,20 +652,30 @@ export function Reports() {
                           {r.category}
                         </td>
                         <td style={{ padding: "6px 8px", textAlign: "center", borderBottom: "1px solid var(--border)" }}>
-                          <button
-                            onClick={() => handleDownload(r)}
-                            style={{ 
-                              fontSize: 8, 
-                              color: "#0ea5e9", 
-                              background: "rgba(14,165,233,0.08)", 
-                              border: "1px solid rgba(14,165,233,0.15)", 
-                              cursor: "pointer",
-                              padding: "2px 6px",
-                              borderRadius: 3
-                            }}
-                          >
-                            <Download size={8} />
-                          </button>
+                          <div style={{ display: "inline-flex", gap: 4 }}>
+                            <button
+                              onClick={() => handleDownload(r)}
+                              title="Download PDF"
+                              style={{ 
+                                fontSize: 8, 
+                                color: "#0ea5e9", 
+                                background: "rgba(14,165,233,0.08)", 
+                                border: "1px solid rgba(14,165,233,0.15)", 
+                                cursor: "pointer",
+                                padding: "2px 6px",
+                                borderRadius: 3
+                              }}
+                            >
+                              <Download size={8} />
+                            </button>
+                            <button
+                              onClick={() => handleDownloadCsv(r)}
+                              title="Download CSV"
+                              style={{ ...secondaryBtnStyle, padding: "2px 6px", borderRadius: 3 }}
+                            >
+                              CSV
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -628,20 +710,29 @@ export function Reports() {
                         {r.size}
                       </td>
                       <td style={{ padding: "8px 10px", textAlign: "center", borderBottom: "1px solid var(--border)" }}>
-                        <button
-                          onClick={() => handleDownload(r)}
-                          className="flex items-center gap-1 px-2 py-1 rounded transition-colors hover:bg-cyan-500/20"
-                          style={{ 
-                            fontSize: 9, 
-                            color: "#0ea5e9", 
-                            background: "rgba(14,165,233,0.08)", 
-                            border: "1px solid rgba(14,165,233,0.15)", 
-                            cursor: "pointer",
-                            display: 'inline-flex'
-                          }}
-                        >
-                          <Download size={10} /> Download
-                        </button>
+                        <div style={{ display: "inline-flex", gap: 6 }}>
+                          <button
+                            onClick={() => handleDownload(r)}
+                            className="flex items-center gap-1 px-2 py-1 rounded transition-colors hover:bg-cyan-500/20"
+                            style={{ 
+                              fontSize: 9, 
+                              color: "#0ea5e9", 
+                              background: "rgba(14,165,233,0.08)", 
+                              border: "1px solid rgba(14,165,233,0.15)", 
+                              cursor: "pointer",
+                              display: 'inline-flex'
+                            }}
+                          >
+                            <Download size={10} /> PDF
+                          </button>
+                          <button
+                            onClick={() => handleDownloadCsv(r)}
+                            className="flex items-center gap-1 px-2 py-1 rounded"
+                            style={{ ...secondaryBtnStyle, display: 'inline-flex' }}
+                          >
+                            CSV
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -709,22 +800,34 @@ export function Reports() {
                   <span style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)" }}>
                     {r.category} • {r.size}
                   </span>
-                  <button
-                    className="flex items-center gap-1 px-2 py-1 rounded transition-colors hover:bg-cyan-500/20"
-                    style={{ 
-                      fontSize: isMobile ? 8 : 9, 
-                      color: "#0ea5e9", 
-                      background: "rgba(14,165,233,0.08)", 
-                      border: "1px solid rgba(14,165,233,0.15)", 
-                      cursor: "pointer" 
-                    }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDownload(r);
-                    }}
-                  >
-                    <Download size={isMobile ? 8 : 10} /> Download
-                  </button>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button
+                      className="flex items-center gap-1 px-2 py-1 rounded transition-colors hover:bg-cyan-500/20"
+                      style={{ 
+                        fontSize: isMobile ? 8 : 9, 
+                        color: "#0ea5e9", 
+                        background: "rgba(14,165,233,0.08)", 
+                        border: "1px solid rgba(14,165,233,0.15)", 
+                        cursor: "pointer" 
+                      }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDownload(r);
+                      }}
+                    >
+                      <Download size={isMobile ? 8 : 10} /> PDF
+                    </button>
+                    <button
+                      className="flex items-center gap-1 px-2 py-1 rounded"
+                      style={secondaryBtnStyle}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDownloadCsv(r);
+                      }}
+                    >
+                      CSV
+                    </button>
+                  </div>
                 </div>
               </div>
             );
@@ -747,4 +850,4 @@ export function Reports() {
   );
 }
 
-export default Reports; 
+export default Reports;
