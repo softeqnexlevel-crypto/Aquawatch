@@ -4,8 +4,12 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { MapPin, ChevronRight, Activity, Clock, Wrench, Droplet, Filter, AlertCircle, ChevronLeft } from "lucide-react";
 import { useData } from "../contexts/DataContext";
 import { format, subDays } from 'date-fns';
-import { getDisplayedTankLevelPct, DATA_FRESHNESS_WINDOW_MS } from './dashboardComponents/instrumentUtils';
-import { isActive } from './Dashboard';
+import {
+  isActive,
+  getDisplayedTankLevelPct,
+  DATA_FRESHNESS_WINDOW_MS,
+} from './dashboardComponents/instrumentUtils';
+import { rawToPercent } from './dashboardComponents/feedTankCalibration';
 
 const StatusBadge = ({ status }) => {
   const cfg = {
@@ -71,18 +75,23 @@ export function FeedTankManagement() {
   const stage1Delta = getValue('RO5-Stage1Delta') || 0;
 
   // ---------------------------------------------------------------
-  // DECISION: client rule. System OFF => tank 0%. Stale tag with
-  // system ON => No Data. Falls back to null, and the UI must render
-  // "No Data" for null — never a phantom percentage.
+  // Same rules as the Dashboard:
+  //  - The master RO5-SystemActive signal gates the reading
+  //    (OFF => tank 0%, stale tag with system ON => No Data / null).
+  //  - The level comes from the calibrated RAW transmitter signal,
+  //    falling back to the backend-scaled value until the raw tag arrives.
   // ---------------------------------------------------------------
-  const systemOperation = getValue('RO5-SystemOperation');
-  const feedPumpRaw = getValue('RO5-Feedpump');
+  const systemActiveOn = isActive(getValue('RO5-SystemActive'));
+
+  const rawTankValue = getValue('RO5-FeedTankLevelRaw');
+  const rawTankNum = typeof rawTankValue === 'number' ? rawTankValue : parseFloat(rawTankValue);
+  const hasRawTankReading = Number.isFinite(rawTankNum);
+  const calibratedPct = hasRawTankReading ? rawToPercent(rawTankNum) : null;
 
   const displayLevel = getDisplayedTankLevelPct({
-    rawTankLevel: getValue('RO5-FeedTankLevel'),
+    rawTankLevel: hasRawTankReading ? calibratedPct : getValue('RO5-FeedTankLevel'),
     lastUpdate,
-    systemOperationRaw: systemOperation,
-    feedPumpRaw,
+    systemOn: systemActiveOn,
     freshnessWindowMs: DATA_FRESHNESS_WINDOW_MS,
   });
 
@@ -94,8 +103,8 @@ export function FeedTankManagement() {
   const feedTanks = useMemo(() => {
     const now = new Date();
 
-    // Only Tank A is a real sensor. Flush Tank (B) is derived placeholder.
-    // When system is OFF (scaledTankLevel === 0), derived tank is also 0.
+    // Only Tank A is a real sensor. Flush Tank (B) is a derived placeholder.
+    // When the system is OFF (scaledTankLevel === 0), the derived tank is also 0.
     const tankALevel = scaledTankLevel;
     const tankBLevel = scaledTankLevel === 0 ? 0 : Math.min(100, Math.max(0, scaledTankLevel * 0.85 + 2));
 
@@ -126,7 +135,6 @@ export function FeedTankManagement() {
         volume: (tankALevel / 100) * 500,
         dailyConsumption: tankHasData ? feedFlow * 24 * 0.4 : 0,
         monthlyConsumption: tankHasData ? feedFlow * 24 * 30 * 0.4 : 0,
-        // runtimeHours: 22.5,
         health: getHealth(tankALevel, tankHasData),
         lastMaintenance: format(subDays(now, 45), 'yyyy-MM-dd'),
         nextMaintenance: format(subDays(now, -15), 'yyyy-MM-dd'),
@@ -141,7 +149,6 @@ export function FeedTankManagement() {
         volume: (tankBLevel / 100) * 400,
         dailyConsumption: tankHasData ? feedFlow * 24 * 0.35 : 0,
         monthlyConsumption: tankHasData ? feedFlow * 24 * 30 * 0.35 : 0,
-        // runtimeHours: 18.2,
         health: getHealth(tankBLevel, tankHasData),
         lastMaintenance: format(subDays(now, 30), 'yyyy-MM-dd'),
         nextMaintenance: format(subDays(now, -20), 'yyyy-MM-dd'),
@@ -220,7 +227,7 @@ export function FeedTankManagement() {
               </span>
               {!isMobile && (
                 <span style={{ fontSize: 9, color: "var(--muted-foreground)", marginLeft: 8 }}>
-                  (PLC Value: {typeof getValue('RO5-FeedTankLevel') === 'number' ? getValue('RO5-FeedTankLevel').toFixed(2) : '--'}%)
+                  (Raw: {hasRawTankReading ? rawTankNum.toFixed(3) : '--'} → {hasRawTankReading ? calibratedPct.toFixed(1) : '--'}%)
                 </span>
               )}
             </div>
@@ -468,7 +475,6 @@ export function FeedTankManagement() {
           <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
             {[
               { label: "Daily Consumption", value: tankHasData ? `${selected.dailyConsumption.toFixed(0)} m³` : '--' },
-              // { label: "Runtime", value: `${selected.runtimeHours}h` },
               { label: "Monthly Usage", value: tankHasData ? `${Math.round(selected.monthlyConsumption).toLocaleString()} m³` : '--' },
               { label: "Health Score", value: tankHasData ? `${Math.round(selected.health)}%` : '--' },
             ].map(m => (

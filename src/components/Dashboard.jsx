@@ -519,8 +519,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   // console.log({ systemActiveRaw, systemOperation, systemMode, feedPumpRaw, backwashRaw });
 
   // ── Feed tank level: recomputed from the RAW transmitter signal ────────
-  // Uses the corrected 4.9 -> 10% / 10.0 -> 100% calibration. Falls back to
-  // the backend-scaled value until the raw tag arrives.
+  // Uses the corrected 4.9 -> 10% / 10.0 -> 
   const feedTankLevelRawValue = getValue('RO5-FeedTankLevelRaw');
   const feedTankLevelRawNum = typeof feedTankLevelRawValue === 'number'
     ? feedTankLevelRawValue
@@ -606,12 +605,12 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     }
     switch (operationMode) {
       case 'FILTER':
-        return { label: 'FILTER', color: COLORS.success, sub: 'Filtering' };
+        return { label: 'FILTER MODE', color: COLORS.success};
       case 'BACKWASH':
-        return { label: 'BACKWASH', color: COLORS.warning, sub: 'Backwash in progress' };
+        return { label: 'BACKWASH MODE', color: COLORS.warning};
       case 'STANDBY':
         return {
-          label: 'STANDBY',
+          label: 'STANDBY MODE',
           color: COLORS.warning,
           sub: standbyReason ? `Standby — ${standbyReason}` : 'System Active ON, not filtering',
         };
@@ -745,7 +744,6 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           title="System Active"
           value={systemActiveOn ? "ON" : "OFF"}
           valueColor={systemActiveOn ? COLORS.success : COLORS.danger}
-          sub={systemActiveOn ? 'Master switch is ON' : 'Master switch is OFF'}
           subColor="var(--muted-foreground)"
         />
         <TopStatusCard
@@ -753,7 +751,6 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           title="Run Hours"
           value={`${systemRunHrs.toFixed(1)} hrs`}
           valueColor={dosingPumpOn ? COLORS.success : 'var(--foreground)'}
-          sub={`PLC lifetime total · ${formatHoursFromHours(systemRunHrs)}`}
           subColor="var(--muted-foreground)"
         />
         <TopStatusCard
@@ -780,7 +777,6 @@ export function Dashboard({ onViewAllAlerts } = {}) {
 
           <InstrumentCard
             title="Feed Tank"
-            subtitle="Tank Level"
           >
             <TankLevelGauge
               value={tankHasData ? feedTankLevel : undefined}
