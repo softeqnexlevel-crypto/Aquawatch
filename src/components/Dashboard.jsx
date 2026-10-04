@@ -27,12 +27,16 @@ import { TankLevelGauge, TANK_BANDS, classifyTankLevel }
 import { InstrumentCard } from './dashboardComponents/InstrumentCard';
 import { RadialGauge, classifyByBands } from './dashboardComponents/Radialgauge';
 import {
+  isActive,
   getDisplayedTankLevelPct,
   getDisplayedPressure,
   DATA_FRESHNESS_WINDOW_MS,
 } from './dashboardComponents/instrumentUtils';
 import { rawToPercent } from './dashboardComponents/feedTankCalibration';
 
+// isActive now lives in instrumentUtils (avoids a circular import).
+// Re-exported so other files importing it from Dashboard keep working.
+export { isActive };
 
 export const COLORS = {
   primary: '#0ea5e9',
@@ -49,17 +53,6 @@ export const COLORS = {
   card: '#1e293b',
   border: '#334155',
   muted: '#64748b',
-};
-
-export const isActive = (value) => {
-  if (value === undefined || value === null) return false;
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'number') return value === 1;
-  if (typeof value === 'string') {
-    const normalized = value.toLowerCase().trim();
-    return ['1', 'true', 'on', 'active', 'yes', 'running', 'enabled', 'online'].includes(normalized);
-  }
-  return !!value;
 };
 
 const safeFormat = (value, decimals = 1, fallback = '0.0') => {
@@ -97,8 +90,7 @@ function normalizeSystemMode(raw) {
   return 'UNKNOWN';
 }
 
-// Critical thresholds (defined here, above SENSOR_MAP, so gauge configs
-// below can reference them directly).
+// Critical thresholds (defined above SENSOR_MAP so gauge configs can use them).
 const MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR = 2.0;
 const FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR = 0.40;
 
@@ -505,7 +497,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const stage2Delta = getNumber('RO5-Stage2Delta');
   const filterDeltaP = getNumber('RO5-MediaFilterDeltaP');
 
-  // PLC-reported daily antiscalant total & lifetime system run-hours
+  // PLC-reported lifetime system run-hours
   const systemRunHrs = getNumber('RO5-SystemRunhrs');
 
   const systemOperation = getValue('RO5-SystemOperation');
@@ -513,9 +505,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const dosingActive = getValue('RO5-AntiscalantDosingActive');
   const feedPumpRaw = getValue('RO5-Feedpump');
   const backwashRaw = getValue('RO5-PrefilterBackwash');
-  // High filter differential-pressure alarm bit — the PLC signal that
-  // actually triggers/justifies a backwash cycle. Surfaced specifically
-  // while the system is in BACKWASH mode (see renderSystemTab).
+  // High filter differential-pressure alarm bit.
   const highPrefilterDeltaPRaw = getValue('RO5-HighPrefilterDeltaP');
 
   // ── MASTER SIGNAL ──────────────────────────────────────────────────────
@@ -525,15 +515,12 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const feedPumpOn = isActive(feedPumpRaw);
   const backwashOn = isActive(backwashRaw);
 
+  // DEBUG: uncomment to verify tag names/values coming from the backend.
+  // console.log({ systemActiveRaw, systemOperation, systemMode, feedPumpRaw, backwashRaw });
+
   // ── Feed tank level: recomputed from the RAW transmitter signal ────────
-  // The backend (plcService.js) scales RO5-FeedTankLevel by a flat 7.83
-  // factor, which does not match the transmitter's actual calibration
-  // curve (4.9 -> 10%, 10.0 -> 100%, per the Abox Calibrator tool). Rather
-  // than trust that pre-scaled value, we read the raw signal directly and
-  // apply the correct linear mapping here. If the raw tag hasn't arrived
-  // yet (e.g. just after connecting, before the first MQTT message),
-  // we fall back to the old backend-scaled value so the gauge doesn't
-  // sit blank.
+  // Uses the corrected 4.9 -> 10% / 10.0 -> 100% calibration. Falls back to
+  // the backend-scaled value until the raw tag arrives.
   const feedTankLevelRawValue = getValue('RO5-FeedTankLevelRaw');
   const feedTankLevelRawNum = typeof feedTankLevelRawValue === 'number'
     ? feedTankLevelRawValue
@@ -541,19 +528,20 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const hasRawTankReading = Number.isFinite(feedTankLevelRawNum);
   const calibratedFeedTankPct = hasRawTankReading ? rawToPercent(feedTankLevelRawNum) : null;
 
+  // FIX: gate on the master SystemActive signal (`systemOn`) instead of
+  // SystemOperation + Feedpump, which could be misread as OFF and force the
+  // gauges to 0 while the KPI cards still showed live data.
   const feedTankLevel = getDisplayedTankLevelPct({
     rawTankLevel: hasRawTankReading ? calibratedFeedTankPct : getValue('RO5-FeedTankLevel'),
     lastUpdate,
-    systemOperationRaw: systemOperation,
-    feedPumpRaw,
+    systemOn: systemActiveOn,
     freshnessWindowMs: DATA_FRESHNESS_WINDOW_MS,
   });
 
   const roPressure = getDisplayedPressure({
     rawPressure: roPressureRaw,
     lastUpdate,
-    systemOperationRaw: systemOperation,
-    feedPumpRaw,
+    systemOn: systemActiveOn,
     freshnessWindowMs: DATA_FRESHNESS_WINDOW_MS,
   });
 
@@ -566,13 +554,19 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const criticalAlarmsPresent = criticalAlarmsCount > 0;
 
   // ── MODE RESOLUTION ────────────────────────────────────────────────────
+  // Priority: physical backwash signal > explicit PLC mode > inferred.
+  //   backwash active          -> BACKWASH
+  //   PLC reports a known mode -> that mode
+  //   feed pump running        -> FILTER
+  //   otherwise                -> STANDBY (system active but idle)
   const plcMode = normalizeSystemMode(systemMode);
-  const inferredMode = !feedPumpOn
-    ? 'OFF'
-    : backwashOn
-      ? 'BACKWASH'
-      : 'FILTER';
-  const rawMode = plcMode !== 'UNKNOWN' ? plcMode : inferredMode;
+  const rawMode = backwashOn
+    ? 'BACKWASH'
+    : plcMode !== 'UNKNOWN'
+      ? plcMode
+      : feedPumpOn
+        ? 'FILTER'
+        : 'STANDBY';
 
   // SystemActive is master. If OFF → force OFF.
   const operationMode = systemActiveOn ? rawMode : 'OFF';
@@ -588,10 +582,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           ? 'PLC reports standby'
           : null;
 
-  // AUTO / MANUAL is the PLC's *control* mode (who is allowed to command
-  // the system), which is a different concept from operationMode (what
-  // the system is *physically doing* right now: FILTER/BACKWASH/STANDBY/OFF).
-  // Kept as its own card so the two aren't conflated.
+  // AUTO / MANUAL is the PLC's *control* mode, separate from operationMode.
   const isAutoMode = typeof systemMode === 'string' && systemMode.toLowerCase().trim() === 'auto';
   const systemModeDisplay = isAutoMode ? 'AUTO' : 'MANUAL';
 
@@ -603,9 +594,6 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const dosingPumpOn = operationMode === 'FILTER' && systemActiveOn && isDosingOn;
 
   // ── System Operation display (FILTER / BACKWASH / STANDBY / OFF) ───────
-  // This is the single source of truth for "what is the system doing right
-  // now" and drives both the top "System Operation" status card and the
-  // detailed startup-status panel on the System tab, so they always agree.
   const getOperationDisplay = () => {
     if (!systemActiveOn) {
       return {
@@ -618,7 +606,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     }
     switch (operationMode) {
       case 'FILTER':
-        return { label: 'FILTER', color: COLORS.success, sub: 'Filtering — all pumps running' };
+        return { label: 'FILTER', color: COLORS.success, sub: 'Filtering' };
       case 'BACKWASH':
         return { label: 'BACKWASH', color: COLORS.warning, sub: 'Backwash in progress' };
       case 'STANDBY':
@@ -738,10 +726,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
 
       {/* Top Status Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
-        {/* "System Operation" now shows the actual operating state —
-             FILTER / BACKWASH / STANDBY / OFF — instead of a plain ON/OFF,
-             using the same opStatus object the System tab's startup panel
-             already relies on, so both views always agree. */}
+        {/* System Operation: FILTER / BACKWASH / STANDBY / OFF */}
         <TopStatusCard
           icon={Settings}
           iconBg={`${opStatus.color}1F`}
@@ -752,11 +737,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           sub={opStatus.sub}
           subColor="var(--muted-foreground)"
         />
-        {/* "System Active" shows the master ON/OFF signal — the single
-             switch that forces operationMode to OFF regardless of what the
-             PLC's mode/pumps report. Kept separate from the "System
-             Operation" card above, which shows the resolved operating
-             state (FILTER/BACKWASH/STANDBY/OFF). */}
+        {/* System Active: master ON/OFF signal */}
         <TopStatusCard
           icon={Power}
           iconBg={systemActiveOn ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)"}
@@ -789,35 +770,23 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           <InstrumentCard
             title="Pressure"
             subtitle="System Pressure Gauge"
-           
           >
             <PressureGauge
               value={pressureHasData ? roPressure : undefined}
               unit={PRESSURE_UNIT_DISPLAY}
               size={isMobile ? 110 : 180}
-              // bands={PRESSURE_BANDS_BAR}
             />
           </InstrumentCard>
 
           <InstrumentCard
             title="Feed Tank"
             subtitle="Tank Level"
-            
           >
             <TankLevelGauge
               value={tankHasData ? feedTankLevel : undefined}
               width={isMobile ? 80 : 120}
               height={isMobile ? 130 : 200}
             />
-            {/* Raw transmitter signal + the calibrated % it maps to,
-                using the corrected 4.9->10% / 10.0->100% curve. */}
-            <div style={{ marginTop: 6, textAlign: 'center' }}>
-              {/* <div style={{ fontSize: isMobile ? 8 : 9, color: 'var(--muted-foreground)', fontFamily: 'var(--font-mono)' }}>
-                {hasRawTankReading
-                  ? `Raw: ${feedTankLevelRawNum.toFixed(3)} → ${calibratedFeedTankPct.toFixed(1)}%`
-                  : 'Raw: no reading yet'}
-              </div> */}
-            </div>
           </InstrumentCard>
         </div>
       </div>

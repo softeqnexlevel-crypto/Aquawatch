@@ -55,20 +55,22 @@ export const REPORT_TAGS = [
 // ───────────────────────── Helpers ─────────────────────────
 export const DECIMALS = 2;
 
-function readNumber(getValue, key) {
-  const raw = getValue(key);
+// Reads from sensorData (not getValue): DataContext.getValue returns 0 for a
+// missing tag, which would hide "No data" and show a fake 0.00 reading.
+function readNumber(sensorData, key) {
+  const raw = sensorData?.[key]?.value;
   if (raw === undefined || raw === null || raw === '') return null;
   const n = typeof raw === 'number' ? raw : parseFloat(raw);
   return Number.isFinite(n) ? n : null;
 }
 
 // Feed tank uses the calibrated raw signal, exactly like the dashboard.
-function readTagValue(getValue, tag) {
+function readTagValue(sensorData, tag) {
   if (tag.key === 'FEED_TANK_LEVEL') {
-    const raw = readNumber(getValue, 'RO5-FeedTankLevelRaw');
-    return raw !== null ? rawToPercent(raw) : readNumber(getValue, 'RO5-FeedTankLevel');
+    const raw = readNumber(sensorData, 'RO5-FeedTankLevelRaw');
+    return raw !== null ? rawToPercent(raw) : readNumber(sensorData, 'RO5-FeedTankLevel');
   }
-  return readNumber(getValue, tag.key);
+  return readNumber(sensorData, tag.key);
 }
 
 function statusFor(tag, v) {
@@ -91,13 +93,13 @@ function lastUpdateOf(tag, getHistory, fallback) {
 }
 
 // Rows for one report. "Operations" (or an unknown category) = every sensor.
-export function buildSensorRows({ getValue, getHistory, lastUpdate, category = 'Operations' }) {
+export function buildSensorRows({ sensorData, getHistory, lastUpdate, category = 'Operations' }) {
   const tags = category === 'Operations' || !REPORT_TAGS.some((t) => t.groups.includes(category))
     ? REPORT_TAGS
     : REPORT_TAGS.filter((t) => t.groups.includes(category));
 
   return tags.map((tag) => {
-    const v = readTagValue(getValue, tag);
+    const v = readTagValue(sensorData, tag);
     return {
       label: tag.label,
       topic: tag.topic,
@@ -112,9 +114,9 @@ export function buildSensorRows({ getValue, getHistory, lastUpdate, category = '
 
 // Production strip. `summary` is the /api/production-summary response.
 // Missing figures show "—" instead of a made-up number.
-export function buildKpis({ summary, getValue }) {
+export function buildKpis({ summary, sensorData }) {
   const vol = (v) => (Number.isFinite(Number(v)) && v !== null && v !== undefined ? `${Number(v).toFixed(1)} m³` : '—');
-  const recovery = readNumber(getValue, 'RO5-SystemRecovery');
+  const recovery = readNumber(sensorData, 'RO5-SystemRecovery');
   return [
     { value: vol(summary?.permeate?.daily), label: 'Daily Production' },
     { value: vol(summary?.permeate?.weekly), label: 'Weekly Production' },

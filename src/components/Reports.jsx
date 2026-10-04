@@ -137,17 +137,17 @@ function generateCSV(reportData, title) {
   return content;
 }
 
-// function downloadCSV(filename, content) {
-//   const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
-//   const url = URL.createObjectURL(blob);
-//   const link = document.createElement("a");
-//   link.href = url;
-//   link.download = filename;
-//   document.body.appendChild(link);
-//   link.click();
-//   document.body.removeChild(link);
-//   URL.revokeObjectURL(url);
-// }
+function downloadCSV(filename, content) {
+  const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
 
 // ===================== PRODUCTION SUMMARY (for the PDF KPI strip) =====================
 // Same endpoint the Dashboard uses. Never throws: if it fails the KPI cards show "—".
@@ -390,8 +390,8 @@ export function Reports() {
           generatedAt: new Date(),
           userName,
           reportName,
-          kpis: buildKpis({ summary, getValue }),
-          rows: buildSensorRows({ getValue, getHistory, lastUpdate, category }),
+          kpis: buildKpis({ summary, sensorData }),
+          rows: buildSensorRows({ sensorData, getHistory, lastUpdate, category }),
         });
         presentReport(win, html, filename);
       },
@@ -409,19 +409,19 @@ export function Reports() {
     });
   }
 
-  // function handleDownloadCsv(report) {
-  //   const filename = `${report.id}_${report.title.replace(/\s+/g, '_')}.csv`;
+  function handleDownloadCsv(report) {
+    const filename = `${report.id}_${report.title.replace(/\s+/g, '_')}.csv`;
 
-  //   showToast(
-  //     `Downloading ${report.title}`,
-  //     "CSV export",
-  //     "#0ea5e9",
-  //     () => {
-  //       const content = generateCSV([report.data], report.title);
-  //       downloadCSV(filename, content);
-  //     }
-  //   );
-  // }
+    showToast(
+      `Downloading ${report.title}`,
+      "CSV export",
+      "#0ea5e9",
+      () => {
+        const content = generateCSV([report.data], report.title);
+        downloadCSV(filename, content);
+      }
+    );
+  }
 
   // Quick-generate buttons produce the full report (every sensor).
   function handleGenerateReport(type, label) {
@@ -668,13 +668,13 @@ export function Reports() {
                             >
                               <Download size={8} />
                             </button>
-                            {/* <button
+                            <button
                               onClick={() => handleDownloadCsv(r)}
                               title="Download CSV"
                               style={{ ...secondaryBtnStyle, padding: "2px 6px", borderRadius: 3 }}
                             >
                               CSV
-                            </button> */}
+                            </button>
                           </div>
                         </td>
                       </tr>
@@ -725,13 +725,13 @@ export function Reports() {
                           >
                             <Download size={10} /> PDF
                           </button>
-                          {/* <button
+                          <button
                             onClick={() => handleDownloadCsv(r)}
                             className="flex items-center gap-1 px-2 py-1 rounded"
                             style={{ ...secondaryBtnStyle, display: 'inline-flex' }}
                           >
                             CSV
-                          </button> */}
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -817,7 +817,7 @@ export function Reports() {
                     >
                       <Download size={isMobile ? 8 : 10} /> PDF
                     </button>
-                    {/* <button
+                    <button
                       className="flex items-center gap-1 px-2 py-1 rounded"
                       style={secondaryBtnStyle}
                       onClick={(e) => {
@@ -826,7 +826,7 @@ export function Reports() {
                       }}
                     >
                       CSV
-                    </button> */}
+                    </button>
                   </div>
                 </div>
               </div>
