@@ -1,14 +1,4 @@
-// components/AntiscalantDosing.jsx - FULLY MOBILE RESPONSIVE
-//
-// Server-independent. This component never counts, never writes to
-// localStorage, and never invents data. It reads PLC-reported tags
-// directly from the live data context (WebSocket-fed).
-//
-//   - RO5-AntiscalantDaily  → PLC's own running daily dosed total (ml)
-//   - RO5-SystemRunhrs      → PLC's own running system run-hours total
-//
-// The server-side totalizer has been removed from this view. All dosing
-// figures shown here come straight from the PLC tags above.
+
 
 import React, { useState, useMemo, useEffect } from "react";
 import {
@@ -20,6 +10,7 @@ import {
   TrendingUp, TrendingDown, Clock, Calendar, AlertCircle, Info
 } from "lucide-react";
 import { useData } from "../contexts/DataContext";
+import { rawToPercent } from "./dashboardComponents/feedTankCalibration";
 import { format, subHours, subDays } from 'date-fns';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -163,8 +154,19 @@ export function AntiscalantDosing() {
   const permeateFlow   = toNum(getValue('RO5-Permeateflow'));
   const recovery       = toNum(getValue('RO5-SystemRecovery'));
   const pureWaterEC    = toNum(getValue('RO5-PureWaterEc'));
-  const feedTankLevel  = toNum(getValue('RO5-FeedTankLevel'));
   const isDosingActive = toBool(getValue('RO5-AntiscalantDosingActive'));
+
+  // Feed tank: calibrate from the raw transmitter signal (same as Dashboard).
+  // Falls back to the backend-scaled value only if the raw tag hasn't arrived.
+  const feedTankRawValue = getValue('RO5-FeedTankLevelRaw');
+  const feedTankRawNum = typeof feedTankRawValue === 'number'
+    ? feedTankRawValue
+    : parseFloat(feedTankRawValue);
+  const calibratedTankPct = Number.isFinite(feedTankRawNum) ? rawToPercent(feedTankRawNum) : null;
+  const hasTankReading = calibratedTankPct !== null;
+  const feedTankLevel = hasTankReading
+    ? calibratedTankPct
+    : toNum(getValue('RO5-FeedTankLevel'));
 
   // PLC-reported tags
   const antiscalantDailyPLC = toNum(getValue('RO5-AntiscalantDaily'));   // ml, PLC's own running daily total
@@ -219,20 +221,21 @@ export function AntiscalantDosing() {
       });
     }
 
-    if (feedTankLevel > 0 && feedTankLevel < 20) {
+    // 4.9 raw now maps to exactly 0%, so also alert when a real reading exists
+    if ((hasTankReading || feedTankLevel > 0) && feedTankLevel < 20) {
       list.push({
         id: 'ALERT-LOW-TANK',
         type: 'Feed Tank Low',
         description: 'Feed tank level is low; system may stop shortly',
         equipment: 'Feed Tank',
-        value: `${feedTankLevel.toFixed(0)} %`,
+        value: `${feedTankLevel.toFixed(1)} %`,
         threshold: '20 %',
         severity: 'warning',
       });
     }
 
     return list;
-  }, [isDosingActive, permeateFlow, pureWaterEC, feedTankLevel]);
+  }, [isDosingActive, permeateFlow, pureWaterEC, feedTankLevel, hasTankReading]);
 
   const criticalAlerts = alerts.filter(a => a.severity === 'critical');
 
@@ -356,11 +359,11 @@ export function AntiscalantDosing() {
         />
         <MetricCard
           label="Feed Tank"
-          value={feedTankLevel.toFixed(0)}
+          value={feedTankLevel.toFixed(1)}
           unit="%"
           color={feedTankLevel > 30 ? '#22c55e' : feedTankLevel > 20 ? '#eab308' : '#ef4444'}
           icon={Info}
-          sub={feedTankLevel > 30 ? 'Normal' : 'Low'}
+          sub={feedTankLevel > 30 ? 'Normal' : feedTankLevel > 20 ? 'Low' : 'Critical'}
           isMobile={isMobile}
         />
       </div>
