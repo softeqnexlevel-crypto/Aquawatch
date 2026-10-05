@@ -38,59 +38,15 @@ function saveHistory(history) {
   }
 }
 
-// ==================== ALERT RULE OVERRIDES ====================
-// Applied on top of alertEngine's candidates, matched by the alert's `type`
-// text (the same text shown in the Alerts Center).
+// ==================== ALERT ALLOWLIST ====================
+// Only the alert types listed here are shown. Everything else is suppressed,
+// including any new rules added to alertEngine later, until added here.
+// Matched against the candidate's `message` (the text shown as the alert type).
+const ALLOWED_ALERT_TYPES = ['Low Feed Tank Level'];
 
-// Alerts that are switched off completely.
-// Alerts that are switched off completely.
-// Only "Low Feed Tank Level" is kept; everything else is suppressed.
-const REMOVED_ALERT_TYPES = [
-  'Antiscalant Dosing Stopped',
-  'Low System Recovery',
-  'Low RO Pressure',
-  'Low Feed Flow',
-  'Low Concentrate Flow',
-  'High RO Pressure',
-  'High Differential Pressure - Stage 1',
-  'High Differential Pressure - Stage 2',
-  'High Filter Delta P',
-  'High Prefilter Delta P',
-  'High Media Filter Delta P',
-  'High Product Water EC',
-  'Mass Balance Error',
-  'Low Permeate Production',
-  'Power Problem',
-];
-
-// Alerts that only count while the pumps are running, and optionally only
-// after the condition has stayed true for `delayMs` without a break.
-//
-// Rationale: flow/pressure/recovery readings are all naturally low when the
-// system is OFF, BACKWASHING, or starting up. Firing alarms during those
-// windows just trains operators to ignore them. The PLC's own bits are
-// left alone (skipSources: ['plc']) because the PLC has its own interlock
-// logic and reports a hardware-truth state, not a derived one.
-const GATED_ALERTS = [
-  // Low pressure is expected when the pumps are stopped or backwashing.
-  { type: 'Low RO Pressure',        skipSources: ['plc'], requirePumpsRunning: true, delayMs: 0 },
-  // Recovery reads low while the system starts up, so wait 1 minute.
-  { type: 'Low System Recovery',    skipSources: ['plc'], requirePumpsRunning: true, delayMs: 60 * 1000 },
-  // Feed/concentrate flows are zero when the feed pump is off.
-  { type: 'Low Feed Flow',          skipSources: ['plc'], requirePumpsRunning: true, delayMs: 0 },
-  { type: 'Low Concentrate Flow',   skipSources: ['plc'], requirePumpsRunning: true, delayMs: 0 },
-];
+const SEVERITY_RANK = { Critical: 0, High: 1, Medium: 2, Low: 3, Info: 4 };
 
 const norm = (s) => String(s ?? '').trim().toLowerCase();
-
-function isOn(raw) {
-  if (raw === true) return true;
-  if (typeof raw === 'number') return raw === 1;
-  if (typeof raw === 'string') {
-    return ['1', 'true', 'on', 'active', 'yes', 'running', 'enabled', 'online'].includes(raw.trim().toLowerCase());
-  }
-  return false;
-}
 
 export function AlertsProvider({ children }) {
   const { sensorData, getValue } = useData();
@@ -101,13 +57,8 @@ export function AlertsProvider({ children }) {
   // Tracks which rule IDs were active last evaluation, for hysteresis.
   const activeIdsRef = useRef(new Set());
   // Lets other pages (e.g. AntiscalantDosing) report page-local derived
-  // alerts (not backed by one raw sensor key, e.g. "dosing rate too high")
-  // into this same ledger so they get IDs/acknowledgment/history too.
+  // alerts into this same ledger so they get IDs/acknowledgment/history too.
   const extraSourcesRef = useRef({});
-  // When each delayed alert's condition first became true (id -> ms)
-  const pendingSinceRef = useRef({});
-  const delayTimerRef = useRef(null);
-  const recomputeRef = useRef(null);
 
   const pushHistory = useCallback((events) => {
     if (!events.length) return;
@@ -119,67 +70,38 @@ export function AlertsProvider({ children }) {
     saveHistory(history);
   }, [history]);
 
-  useEffect(() => () => {
-    if (delayTimerRef.current) clearTimeout(delayTimerRef.current);
-  }, []);
-
-  // Removes / gates / delays alerts according to the rules above
+  // Keeps only allowed alert types. If several rules of the same type are
+  // active at once (e.g. critical + warning tiers), only the most severe
+  // stays active so the operator sees one row, not duplicates.
   const applyAlertRules = useCallback((candidates) => {
-    const now = Date.now();
-    const pumpsRunning = isOn(getValue('RO5-Feedpump')) && !isOn(getValue('RO5-PrefilterBackwash'));
-    const removed = new Set(REMOVED_ALERT_TYPES.map(norm));
-    let soonestDeadline = null;
-    const out = [];
+    const allowed = new Set(ALLOWED_ALERT_TYPES.map(norm));
+    // Candidates carry `message`; `type` only exists after mergeAlerts.
+    const typeOf = (c) => norm(c.type ?? c.message);
 
-    for (const c of candidates) {
-      const type = norm(c.type);
-      if (removed.has(type)) continue;
+    const kept = candidates.filter((c) => allowed.has(typeOf(c)));
 
-      const rule = GATED_ALERTS.find(
-        (r) => norm(r.type) === type && !(r.skipSources || []).map(norm).includes(norm(c.source))
-      );
-      if (!rule) {
-        out.push(c);
-        continue;
-      }
+    // Find the winning (most severe) active candidate per type
+    const winners = new Map();
+    kept.forEach((c) => {
+      if (!c.active) return;
+      const t = typeOf(c);
+      const cur = winners.get(t);
+      const rank = SEVERITY_RANK[c.severity] ?? 99;
+      if (!cur || rank < (SEVERITY_RANK[cur.severity] ?? 99)) winners.set(t, c);
+    });
 
-      // Condition gone, or pumps not running: reset and treat as not active
-      if (!c.active || (rule.requirePumpsRunning && !pumpsRunning)) {
-        delete pendingSinceRef.current[c.id];
-        out.push(c.active ? { ...c, active: false } : c);
-        continue;
-      }
-
-      // Condition true and pumps running: wait out the delay, if any
-      if (rule.delayMs > 0) {
-        if (pendingSinceRef.current[c.id] === undefined) pendingSinceRef.current[c.id] = now;
-        const remaining = rule.delayMs - (now - pendingSinceRef.current[c.id]);
-        if (remaining > 0) {
-          out.push({ ...c, active: false });
-          soonestDeadline = soonestDeadline === null ? remaining : Math.min(soonestDeadline, remaining);
-          continue;
-        }
-      }
-      out.push(c);
-    }
-
-    // Re-check right when the soonest delay ends, even if no new sensor data arrives
-    if (delayTimerRef.current) clearTimeout(delayTimerRef.current);
-    delayTimerRef.current = soonestDeadline === null
-      ? null
-      : setTimeout(() => recomputeRef.current?.(), soonestDeadline + 50);
-
-    return out;
-  }, [getValue]);
+    return kept.map((c) =>
+      c.active && winners.get(typeOf(c)) !== c ? { ...c, active: false } : c
+    );
+  }, []);
 
   const recompute = useCallback(() => {
     const sensorCandidates = evaluateSensorAlerts(getValue, activeIdsRef.current);
     // Alerts derived from combined system state (not a single raw sensor).
-    // Both of these fire together while the system is in backwash mode.
     const derivedCandidates = [
       evaluateBackwashModeAlert(getValue),
       evaluateBackwashFilterDpAlert(getValue),
-    ];
+    ].filter(Boolean);
     const extraCandidates = Object.values(extraSourcesRef.current).flat();
     const allCandidates = applyAlertRules([
       ...sensorCandidates,
@@ -195,7 +117,6 @@ export function AlertsProvider({ children }) {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [getValue, pushHistory, applyAlertRules]);
-  recomputeRef.current = recompute;
 
   useEffect(() => {
     if (Object.keys(sensorData).length > 0) recompute();
@@ -205,17 +126,19 @@ export function AlertsProvider({ children }) {
   // ==================== ACTIONS ====================
 
   const acknowledgeAlert = useCallback((id) => {
+    const nowIso = new Date().toISOString();
     setAlerts((prev) =>
-      prev.map((a) => (a.id === id && a.status === 'Active' ? { ...a, status: 'Acknowledged' } : a))
+      prev.map((a) =>
+        a.id === id && a.status === 'Active'
+          ? { ...a, status: 'Acknowledged', acknowledgedAt: nowIso }
+          : a
+      )
     );
-    pushHistory([{ id: `${id}-ack-${Date.now()}`, alertId: id, kind: 'acknowledged', time: new Date().toISOString() }]);
+    pushHistory([{ id: `${id}-ack-${Date.now()}`, alertId: id, kind: 'acknowledged', time: nowIso }]);
   }, [pushHistory]);
 
-  // Manually removes an alert from the live list — for clearing stale or
-  // handled items. If the underlying condition is still actually true,
-  // it will simply re-trigger on the next evaluation (by design: you
-  // can't permanently silence a real, ongoing critical condition this
-  // way, only dismiss the current notification for it).
+  // Manually removes an alert from the live list. If the underlying condition
+  // is still true, it will re-trigger on the next evaluation (by design).
   const clearAlert = useCallback((id) => {
     setAlerts((prev) => prev.filter((a) => a.id !== id));
     activeIdsRef.current.delete(id);

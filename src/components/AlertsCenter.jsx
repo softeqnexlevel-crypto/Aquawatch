@@ -1,7 +1,7 @@
 // pages/AlertsCenter.jsx
 import React, { useState, useMemo } from "react";
 import {
-  AlertTriangle, CheckCircle, Bell, BellOff, Clock, Filter,
+  AlertTriangle, CheckCircle, Bell, BellOff, Clock,
   Search, X, ChevronDown, ChevronUp, Trash2, History as HistoryIcon,
   Activity, ShieldAlert, Info,
 } from "lucide-react";
@@ -28,31 +28,37 @@ const SEVERITY_ICON = {
 const SEVERITY_ORDER = { Critical: 0, High: 1, Medium: 2, Low: 3, Info: 4 };
 
 // ── Small helpers ─────────────────────────────────────────────────────────
+
+// The engine stores the ISO timestamp in `firstTriggered`. `time` is only a
+// locale string (not parseable as a date), so it is a last-resort fallback.
+const raisedAt = (a) => a.firstTriggered || a.createdAt || a.time;
+
+function toDate(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 function formatTime(iso) {
-  if (!iso) return "--";
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString([], {
-      month: "short", day: "2-digit",
-      hour: "2-digit", minute: "2-digit", second: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
+  const d = toDate(iso);
+  if (!d) return "--";
+  return d.toLocaleString([], {
+    month: "short", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  });
 }
 
 function relativeTime(iso) {
-  if (!iso) return "--";
-  const ms = Date.now() - new Date(iso).getTime();
-  if (!Number.isFinite(ms)) return "--";
-  const s = Math.floor(ms / 1000);
+  const d = toDate(iso);
+  if (!d) return "--";
+  const s = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000));
   if (s < 60)    return `${s}s ago`;
   const m = Math.floor(s / 60);
   if (m < 60)    return `${m}m ago`;
   const h = Math.floor(m / 60);
   if (h < 24)    return `${h}h ago`;
-  const d = Math.floor(h / 24);
-  return `${d}d ago`;
+  const days = Math.floor(h / 24);
+  return `${days}d ago`;
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────
@@ -87,6 +93,7 @@ function AlertRow({ alert, onAck, onClear, expanded, onToggleExpand }) {
   const color = SEVERITY_COLOR[alert.severity] || COLORS.primary;
   const Icon  = SEVERITY_ICON[alert.severity]  || AlertTriangle;
   const isAcknowledged = alert.status === "Acknowledged";
+  const raised = raisedAt(alert);
 
   return (
     <div
@@ -141,7 +148,7 @@ function AlertRow({ alert, onAck, onClear, expanded, onToggleExpand }) {
           </div>
 
           <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 3 }}>
-            {alert.message || alert.equipment || "—"}
+            {alert.description || alert.message || alert.equipment || "—"}
           </div>
 
           <div style={{
@@ -149,7 +156,7 @@ function AlertRow({ alert, onAck, onClear, expanded, onToggleExpand }) {
             display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
           }}>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
-              <Clock size={10} /> {relativeTime(alert.time || alert.createdAt)}
+              <Clock size={10} /> {relativeTime(raised)}
             </span>
             {alert.value != null && (
               <span style={{ fontFamily: "var(--font-mono)" }}>
@@ -182,8 +189,15 @@ function AlertRow({ alert, onAck, onClear, expanded, onToggleExpand }) {
             <span style={{ color: "var(--muted-foreground)" }}>Source</span>
             <span style={{ fontFamily: "var(--font-mono)", color: "var(--foreground)" }}>{alert.source || "—"}</span>
 
+            {alert.threshold && (
+              <>
+                <span style={{ color: "var(--muted-foreground)" }}>Threshold</span>
+                <span style={{ fontFamily: "var(--font-mono)", color: "var(--foreground)" }}>{alert.threshold}</span>
+              </>
+            )}
+
             <span style={{ color: "var(--muted-foreground)" }}>Raised</span>
-            <span style={{ color: "var(--foreground)" }}>{formatTime(alert.time || alert.createdAt)}</span>
+            <span style={{ color: "var(--foreground)" }}>{formatTime(raised)}</span>
 
             {alert.acknowledgedAt && (
               <>
@@ -265,7 +279,9 @@ export function AlertsCenter({ onBack } = {}) {
       const sa = SEVERITY_ORDER[a.severity] ?? 99;
       const sb = SEVERITY_ORDER[b.severity] ?? 99;
       if (sa !== sb) return sa - sb;
-      return new Date(b.time || b.createdAt || 0) - new Date(a.time || a.createdAt || 0);
+      const tb = toDate(raisedAt(b))?.getTime() ?? 0;
+      const ta = toDate(raisedAt(a))?.getTime() ?? 0;
+      return tb - ta;
     });
   }, [alerts, severityFilter, search]);
 
@@ -493,9 +509,11 @@ export function AlertsCenter({ onBack } = {}) {
             ) : (
               filteredHistory.slice(0, 500).map((h) => {
                 const color = SEVERITY_COLOR[h.severity] || COLORS.muted;
-                const Icon  = h.kind === "activated" ? Bell
+                // Event kinds produced by the engine/context:
+                // triggered, cleared, acknowledged, dismissed
+                const Icon  = h.kind === "triggered" ? Bell
                             : h.kind === "acknowledged" ? CheckCircle
-                            : h.kind === "resolved" ? CheckCircle
+                            : h.kind === "cleared" ? CheckCircle
                             : h.kind === "dismissed" ? BellOff
                             : Clock;
 
