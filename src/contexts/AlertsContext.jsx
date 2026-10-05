@@ -43,8 +43,24 @@ function saveHistory(history) {
 // text (the same text shown in the Alerts Center).
 
 // Alerts that are switched off completely.
+// Alerts that are switched off completely.
+// Only "Low Feed Tank Level" is kept; everything else is suppressed.
 const REMOVED_ALERT_TYPES = [
   'Antiscalant Dosing Stopped',
+  'Low System Recovery',
+  'Low RO Pressure',
+  'Low Feed Flow',
+  'Low Concentrate Flow',
+  'High RO Pressure',
+  'High Differential Pressure - Stage 1',
+  'High Differential Pressure - Stage 2',
+  'High Filter Delta P',
+  'High Prefilter Delta P',
+  'High Media Filter Delta P',
+  'High Product Water EC',
+  'Mass Balance Error',
+  'Low Permeate Production',
+  'Power Problem',
 ];
 
 // Alerts that only count while the pumps are running, and optionally only

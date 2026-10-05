@@ -612,7 +612,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
         return {
           label: 'STANDBY MODE',
           color: COLORS.warning,
-          sub: standbyReason ? `Standby — ${standbyReason}` : 'System Active ON, not filtering',
+        
         };
       case 'OFF':
       default:
@@ -879,7 +879,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
 
           {systemStateHistory.lastChanged && (
             <div style={{ fontSize: 8, color: 'var(--muted-foreground)', marginTop: 6, textAlign: 'center' }}>
-              Last state change: {new Date(systemStateHistory.lastChanged).toLocaleTimeString()}
+              {/* Last state change: {new Date(systemStateHistory.lastChanged).toLocaleTimeString()} */}
               {systemStateHistory.previousState && ` (was ${systemStateHistory.previousState})`}
             </div>
           )}

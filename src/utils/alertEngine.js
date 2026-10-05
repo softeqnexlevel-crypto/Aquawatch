@@ -138,12 +138,7 @@ export const THRESHOLDS = {
   // ✅ REMOVED per client request: RO5-ConcetratePress (High Concentrate Pressure)
 };
 
-// ==================== PLC BIT ALARMS ====================
-// These are alarm conditions sent directly by the PLC as ON/OFF bits over
-// MQTT (see plcService.js — bit-type records get converted to 'ON'/'OFF'
-// strings). They're the authoritative source for these specific
-// conditions, since the PLC itself already knows when they're true rather
-// than us re-deriving it from a raw numeric threshold on the frontend.
+
 const BIT_ALARMS = [
   { key: 'RO5-HighPrefilterDeltaP', message: 'High Prefilter Delta P', equipment: 'RO5 - Prefilter', severity: 'High', description: 'Prefilter is clogged and needs backwashing or replacement.' },
   { key: 'RO5-PowerProblem', message: 'Power Problem', equipment: 'RO5 - Power Supply', severity: 'Critical', description: 'PLC reports a power supply fault. Check incoming power and control panel.' },
@@ -151,7 +146,7 @@ const BIT_ALARMS = [
   { key: 'RO5-S2DeltaHigh', message: 'High Differential Pressure - Stage 2', equipment: 'RO5 - Stage 2', severity: 'High', description: 'Stage 2 membrane differential pressure has exceeded the PLC-set limit.' },
   { key: 'RO5-S1DeltaHigh', message: 'High Differential Pressure - Stage 1', equipment: 'RO5 - Stage 1', severity: 'Critical', description: 'Stage 1 membrane differential pressure has exceeded the PLC-set limit.' },
   { key: 'RO5-HighROPressure', message: 'High RO Pressure', equipment: 'RO5 - RO Pressure', severity: 'Critical', description: 'RO system pressure has exceeded the PLC-set limit.' },
-  { key: 'RO5-FeedTankLow', message: 'Low Feed Tank Level', equipment: 'RO5 - Feed Tank', severity: 'Critical', description: 'Feed tank level is low — feed pump may stop soon to prevent dry-run.' },
+  // { key: 'RO5-FeedTankLow', message: 'Low Feed Tank Level', equipment: 'RO5 - Feed Tank', severity: 'Critical', description: 'Feed tank level is low — feed pump may stop soon to prevent dry-run.' },
 ];
 
 // ✅ Exported for AlertsCenter.jsx — maps each PLC bit alarm's candidate
