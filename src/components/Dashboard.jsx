@@ -571,15 +571,13 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const operationMode = systemActiveOn ? rawMode : 'OFF';
 
   // Why is it in STANDBY?
-  const standbyReason = !systemActiveOn
+const standbyReason = !systemActiveOn
     ? null
     : tankEmpty
       ? 'Feed tank empty'
-      : criticalAlarmsPresent
-        ? 'Critical alarm active'
-        : rawMode === 'STANDBY'
-          ? 'PLC reports standby'
-          : null;
+      : rawMode === 'STANDBY'
+        ? 'PLC reports standby'
+        : null;
 
   // AUTO / MANUAL is the PLC's *control* mode, separate from operationMode.
   const isAutoMode = typeof systemMode === 'string' && systemMode.toLowerCase().trim() === 'auto';
@@ -884,7 +882,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           {systemStateHistory.lastChanged && (
             <div style={{ fontSize: 8, color: 'var(--muted-foreground)', marginTop: 6, textAlign: 'center' }}>
               {/* Last state change: {new Date(systemStateHistory.lastChanged).toLocaleTimeString()} */}
-              {systemStateHistory.previousState && ` (was ${systemStateHistory.previousState})`}
+              {/* {systemStateHistory.previousState && ` (was ${systemStateHistory.previousState})`} */}
             </div>
           )}
 
