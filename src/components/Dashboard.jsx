@@ -746,13 +746,13 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           valueColor={systemActiveOn ? COLORS.success : COLORS.danger}
           subColor="var(--muted-foreground)"
         />
-        <TopStatusCard
-          icon={Clock} iconBg="rgba(34,197,94,0.12)" iconColor={dosingPumpOn ? COLORS.success : COLORS.muted}
-          title="Run Hours"
-          value={`${systemRunHrs.toFixed(1)} hrs`}
-          valueColor={dosingPumpOn ? COLORS.success : 'var(--foreground)'}
-          subColor="var(--muted-foreground)"
-        />
+          {/* <TopStatusCard
+            icon={Clock} iconBg="rgba(34,197,94,0.12)" iconColor={dosingPumpOn ? COLORS.success : COLORS.muted}
+            title="Run Hours"
+            value={`${systemRunHrs.toFixed(1)} hrs`}
+            valueColor={dosingPumpOn ? COLORS.success : 'var(--foreground)'}
+            subColor="var(--muted-foreground)"
+          /> */}
         <TopStatusCard
           icon={AlertTriangle} iconBg="rgba(239,68,68,0.12)" iconColor={COLORS.danger}
           title="Active Alarms" value={activeAlarmsList.length} valueColor={activeAlarmsList.length > 0 ? COLORS.danger : COLORS.success}
@@ -826,6 +826,10 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             trend={getTrend(history, 'RO5-FeedTankLevelRaw')}
             statusText={hasRawTankReading ? `≈ ${calibratedFeedTankPct.toFixed(1)}%` : 'No reading'}
             statusOk={hasRawTankReading} />
+            <KPICardV2 label="Run Hours" unit="hrs" icon={Clock} value={safeFormat(systemRunHrs, 1)}
+  color={COLORS.primary}
+  trend={getTrend(history, 'RO5-SystemRunhrs', 60 * 60 * 1000)}
+  statusText={formatHoursFromHours(systemRunHrs)} statusOk={true} />
         </div>
       </div>
     </div>
