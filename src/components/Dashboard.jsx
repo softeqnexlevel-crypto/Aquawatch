@@ -28,8 +28,6 @@ import { InstrumentCard } from './dashboardComponents/InstrumentCard';
 import { RadialGauge, classifyByBands } from './dashboardComponents/Radialgauge';
 import {
   isActive,
-  getDisplayedTankLevelPct,
-  getDisplayedPressure,
   DATA_FRESHNESS_WINDOW_MS,
 } from './dashboardComponents/instrumentUtils';
 import { rawToPercent } from './dashboardComponents/feedTankCalibration';
@@ -81,6 +79,18 @@ function formatHoursFromHours(hrs) {
 // into one canonical value.
 // Returns: 'FILTER' | 'BACKWASH' | 'STANDBY' | 'OFF' | 'UNKNOWN'
 function normalizeSystemMode(raw) {
+  if (raw === undefined || raw === null || raw === '') return 'UNKNOWN';
+  const v = String(raw).trim().toUpperCase();
+  if (v.includes('FILTER')) return 'FILTER';
+  if (v.includes('BACKWASH') || v.includes('BACK WASH')) return 'BACKWASH';
+  if (v.includes('STANDBY') || v.includes('STAND BY')) return 'STANDBY';
+  if (v === 'OFF' || v === 'STOP' || v === 'STOPPED') return 'OFF';
+  return 'UNKNOWN';
+}
+
+// Normalizes the PLC SystemOperation signal.
+// SystemOperation is the authoritative operation-state signal.
+function normalizeSystemOperation(raw) {
   if (raw === undefined || raw === null || raw === '') return 'UNKNOWN';
   const v = String(raw).trim().toUpperCase();
   if (v.includes('FILTER')) return 'FILTER';
@@ -508,76 +518,118 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   // High filter differential-pressure alarm bit.
   const highPrefilterDeltaPRaw = getValue('RO5-HighPrefilterDeltaP');
 
-  // ── MASTER SIGNAL ──────────────────────────────────────────────────────
+  // ── PLC STATUS INPUTS ───────────────────────────────────────────────────
+  // Keep the raw PLC SystemActive bit separate from the effective plant state.
+  // In this installation the operation/machine signals can be correct even
+  // when the dedicated SystemActive bit is stale or mapped incorrectly.
   const systemActiveRaw = getValue('RO5-SystemActive');
-  const systemActiveOn = isActive(systemActiveRaw);
+  const rawSystemActiveOn = isActive(systemActiveRaw);
 
   const feedPumpOn = isActive(feedPumpRaw);
   const backwashOn = isActive(backwashRaw);
 
-  // DEBUG: uncomment to verify tag names/values coming from the backend.
-  // console.log({ systemActiveRaw, systemOperation, systemMode, feedPumpRaw, backwashRaw });
-
-  // ── Feed tank level: recomputed from the RAW transmitter signal ────────
-  // Uses the corrected 4.9 -> 10% / 10.0 -> 
+  // ── LIVE FEED TANK LEVEL ────────────────────────────────────────────────
+  // The RAW transmitter value is the source of truth for the feed tank.
+  // Convert RAW -> percentage exactly once using the existing calibration.
   const feedTankLevelRawValue = getValue('RO5-FeedTankLevelRaw');
-  const feedTankLevelRawNum = typeof feedTankLevelRawValue === 'number'
-    ? feedTankLevelRawValue
-    : parseFloat(feedTankLevelRawValue);
+
+  const feedTankLevelRawNum =
+    typeof feedTankLevelRawValue === 'number'
+      ? feedTankLevelRawValue
+      : parseFloat(feedTankLevelRawValue);
+
   const hasRawTankReading = Number.isFinite(feedTankLevelRawNum);
-  const calibratedFeedTankPct = hasRawTankReading ? rawToPercent(feedTankLevelRawNum) : null;
 
-  // FIX: gate on the master SystemActive signal (`systemOn`) instead of
-  // SystemOperation + Feedpump, which could be misread as OFF and force the
-  // gauges to 0 while the KPI cards still showed live data.
-  const feedTankLevel = getDisplayedTankLevelPct({
-    rawTankLevel: hasRawTankReading ? calibratedFeedTankPct : getValue('RO5-FeedTankLevel'),
-    lastUpdate,
-    systemOn: systemActiveOn,
-    freshnessWindowMs: DATA_FRESHNESS_WINDOW_MS,
-  });
+  const calibratedFeedTankPct = hasRawTankReading
+    ? rawToPercent(feedTankLevelRawNum)
+    : null;
 
-  const roPressure = getDisplayedPressure({
-    rawPressure: roPressureRaw,
-    lastUpdate,
-    systemOn: systemActiveOn,
-    freshnessWindowMs: DATA_FRESHNESS_WINDOW_MS,
-  });
+  // IMPORTANT:
+  // Tank level is a physical instrument reading.
+  // It must NOT become 0 just because SystemActive is OFF.
+  const feedTankLevel = calibratedFeedTankPct;
+
+  // ── LIVE RO PRESSURE ───────────────────────────────────────────────────
+  // Pressure is also a physical instrument reading.
+  // Do not gate it with SystemActive/SystemOperation.
+  const roPressure = Number.isFinite(roPressureRaw)
+    ? roPressureRaw
+    : null;
 
   const tankHasData = feedTankLevel !== null;
   const pressureHasData = roPressure !== null;
 
-  const tankEmpty = tankHasData && feedTankLevel <= TANK_EMPTY_THRESHOLD_PCT;
+  const tankEmpty =
+    tankHasData && feedTankLevel <= TANK_EMPTY_THRESHOLD_PCT;
 
   const criticalAlarmsCount = alertCounts.Critical;
   const criticalAlarmsPresent = criticalAlarmsCount > 0;
 
   // ── MODE RESOLUTION ────────────────────────────────────────────────────
-  // Priority: physical backwash signal > explicit PLC mode > inferred.
-  //   backwash active          -> BACKWASH
-  //   PLC reports a known mode -> that mode
-  //   feed pump running        -> FILTER
-  //   otherwise                -> STANDBY (system active but idle)
+  // SystemOperation is the authoritative PLC operation state.
+  // SystemActive is a separate ON/OFF signal and must NOT overwrite it.
+  // Fallbacks are used only when SystemOperation is unavailable.
+  const plcOperation = normalizeSystemOperation(systemOperation);
   const plcMode = normalizeSystemMode(systemMode);
-  const rawMode = backwashOn
-    ? 'BACKWASH'
-    : plcMode !== 'UNKNOWN'
-      ? plcMode
-      : feedPumpOn
-        ? 'FILTER'
-        : 'STANDBY';
 
-  // SystemActive is master. If OFF → force OFF.
-  const operationMode = systemActiveOn ? rawMode : 'OFF';
+  const operationMode =
+    plcOperation !== 'UNKNOWN'
+      ? plcOperation
+      : backwashOn
+        ? 'BACKWASH'
+        : plcMode !== 'UNKNOWN'
+          ? plcMode
+          : feedPumpOn
+            ? 'FILTER'
+            : 'STANDBY';
+
+  // Effective ON state: the plant is considered active when the dedicated
+  // bit is ON OR the PLC is explicitly reporting an active operation OR the
+  // physical pump/backwash signal is ON. This prevents a bad/stale
+  // SystemActive bit from forcing a running FILTER plant to OFF on the UI.
+  const systemActiveOn =
+    rawSystemActiveOn ||
+    operationMode === 'FILTER' ||
+    operationMode === 'BACKWASH' ||
+    feedPumpOn ||
+    backwashOn;
 
   // Why is it in STANDBY?
-const standbyReason = !systemActiveOn
-    ? null
-    : tankEmpty
-      ? 'Feed tank empty'
-      : rawMode === 'STANDBY'
-        ? 'PLC reports standby'
-        : null;
+  const standbyReason = tankEmpty
+    ? 'Feed tank empty'
+    : operationMode === 'STANDBY'
+      ? 'PLC reports standby'
+      : null;
+
+  useEffect(() => {
+    console.log('[DASHBOARD PLC STATUS]', {
+      systemActiveRaw,
+      rawSystemActiveOn,
+      effectiveSystemActiveOn: systemActiveOn,
+      systemOperation,
+      plcOperation,
+      systemMode,
+      plcMode,
+      operationMode,
+      feedPumpRaw,
+      feedPumpOn,
+      backwashRaw,
+      backwashOn,
+    });
+  }, [
+    systemActiveRaw,
+    rawSystemActiveOn,
+    systemActiveOn,
+    systemOperation,
+    plcOperation,
+    systemMode,
+    plcMode,
+    operationMode,
+    feedPumpRaw,
+    feedPumpOn,
+    backwashRaw,
+    backwashOn,
+  ]);
 
   // AUTO / MANUAL is the PLC's *control* mode, separate from operationMode.
   const isAutoMode = typeof systemMode === 'string' && systemMode.toLowerCase().trim() === 'auto';
@@ -591,30 +643,40 @@ const standbyReason = !systemActiveOn
   const dosingPumpOn = operationMode === 'FILTER' && systemActiveOn && isDosingOn;
 
   // ── System Operation display (FILTER / BACKWASH / STANDBY / OFF) ───────
+  // System Operation is displayed directly from the PLC operation state.
+  // It is NOT overridden by the dedicated SystemActive bit.
   const getOperationDisplay = () => {
-    if (!systemActiveOn) {
-      return {
-        label: 'OFF',
-        color: COLORS.danger,
-        sub: tankEmpty
-          ? 'Feed tank empty - system stopped'
-          : 'System Active is OFF',
-      };
-    }
     switch (operationMode) {
       case 'FILTER':
-        return { label: 'FILTER MODE', color: COLORS.success};
+        return {
+          label: 'FILTER MODE',
+          color: COLORS.success,
+          sub: rawSystemActiveOn ? 'System is filtering' : 'Filtering — SystemActive bit is OFF',
+        };
       case 'BACKWASH':
-        return { label: 'BACKWASH MODE', color: COLORS.warning};
+        return {
+          label: 'BACKWASH MODE',
+          color: COLORS.warning,
+          sub: rawSystemActiveOn ? 'System is backwashing' : 'Backwash — SystemActive bit is OFF',
+        };
       case 'STANDBY':
         return {
           label: 'STANDBY MODE',
           color: COLORS.warning,
-        
+          sub: 'System is on standby',
         };
       case 'OFF':
+        return {
+          label: 'OFF',
+          color: COLORS.danger,
+          sub: 'PLC reports system operation OFF',
+        };
       default:
-        return { label: 'OFF', color: COLORS.danger, sub: 'System offline' };
+        return {
+          label: 'UNKNOWN',
+          color: COLORS.muted,
+          sub: 'Waiting for PLC operation state',
+        };
     }
   };
 
@@ -742,6 +804,9 @@ const standbyReason = !systemActiveOn
           title="System Active"
           value={systemActiveOn ? "ON" : "OFF"}
           valueColor={systemActiveOn ? COLORS.success : COLORS.danger}
+          sub={rawSystemActiveOn === systemActiveOn
+            ? undefined
+            : `PLC SystemActive=${rawSystemActiveOn ? 'ON' : 'OFF'}; derived from plant operation`}
           subColor="var(--muted-foreground)"
         />
           {/* <TopStatusCard
