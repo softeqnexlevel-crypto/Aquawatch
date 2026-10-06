@@ -257,7 +257,7 @@ export function SystemRecovery() {
       : recovery;
 
     // TARGET SET TO 70%
-    const target = 70;
+    const target = 75;
 
     const tdsRejection = Math.min(99, 95 + (100 - pureWaterEC / 10) / 10);
     const chlorideRejection = Math.min(99, tdsRejection + 0.4);
