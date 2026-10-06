@@ -651,7 +651,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
         return {
           label: 'FILTER MODE',
           color: COLORS.success,
-          sub: rawSystemActiveOn ? 'System is filtering' : 'Filtering — SystemActive bit is OFF',
+          
         };
       case 'BACKWASH':
         return {
@@ -663,19 +663,19 @@ export function Dashboard({ onViewAllAlerts } = {}) {
         return {
           label: 'STANDBY MODE',
           color: COLORS.warning,
-          sub: 'System is on standby',
+          
         };
       case 'OFF':
         return {
           label: 'OFF',
           color: COLORS.danger,
-          sub: 'PLC reports system operation OFF',
+         
         };
       default:
         return {
           label: 'UNKNOWN',
           color: COLORS.muted,
-          sub: 'Waiting for PLC operation state',
+          
         };
     }
   };
@@ -804,10 +804,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           title="System Active"
           value={systemActiveOn ? "ON" : "OFF"}
           valueColor={systemActiveOn ? COLORS.success : COLORS.danger}
-          sub={rawSystemActiveOn === systemActiveOn
-            ? undefined
-            : `PLC SystemActive=${rawSystemActiveOn ? 'ON' : 'OFF'}; derived from plant operation`}
-          subColor="var(--muted-foreground)"
+          
         />
           {/* <TopStatusCard
             icon={Clock} iconBg="rgba(34,197,94,0.12)" iconColor={dosingPumpOn ? COLORS.success : COLORS.muted}
