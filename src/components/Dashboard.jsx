@@ -25,7 +25,7 @@ import { PressureGauge, PRESSURE_BANDS_BAR, classifyPressure, PRESSURE_UNIT_DISP
 import { TankLevelGauge, TANK_BANDS, classifyTankLevel }
   from './dashboardComponents/TankLevelGauge';
 import { InstrumentCard } from './dashboardComponents/InstrumentCard';
-import { RadialGauge, classifyByBands } from './dashboardComponents/Radialgauge';
+import { RadialGauge } from './dashboardComponents/Radialgauge';
 import {
   isActive,
   DATA_FRESHNESS_WINDOW_MS,
@@ -104,13 +104,8 @@ function normalizeSystemOperation(raw) {
 const MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR = 2.0;
 const FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR = 0.40;
 
-// Shared pressure bands for the 0–16 bar dials.
+// Max for the 0–16 bar dials.
 const PRESSURE_GAUGE_MAX = 16;
-const PRESSURE_GAUGE_BANDS = [
-  { key: 'normal',   label: 'Normal',   min: 0,  max: 10, color: '#2e9e4f' },
-  { key: 'warning',  label: 'Warning',  min: 10, max: 14, color: '#f2c318' },
-  { key: 'critical', label: 'Critical', min: 14, max: 16, color: '#dc2626' },
-];
 
 export const SENSOR_MAP = {
   'RO5-FEEDFlow': { label: 'Feed Flow', unit: 'm³/h', icon: Droplets, color: COLORS.primary, shortName: 'FEEDFlow' },
@@ -121,65 +116,44 @@ export const SENSOR_MAP = {
   'RO5-ROPressure': {
     label: 'RO Pressure', unit: 'bar', icon: Gauge, color: COLORS.danger, shortName: 'ROPressure',
     chartType: 'gauge',
-    gauge: { max: PRESSURE_GAUGE_MAX, bands: PRESSURE_GAUGE_BANDS },
+    gauge: { max: PRESSURE_GAUGE_MAX },
   },
   'RO5-InterstagePress': {
     label: 'Interstage Pressure', unit: 'bar', icon: Gauge, color: COLORS.orange, shortName: 'InterstagePress',
     chartType: 'gauge',
-    gauge: { max: PRESSURE_GAUGE_MAX, bands: PRESSURE_GAUGE_BANDS },
+    gauge: { max: PRESSURE_GAUGE_MAX },
   },
   'RO5-ConcetratePress': {
     label: 'Concentrate Pressure', unit: 'bar', icon: Gauge, color: COLORS.yellow, shortName: 'ConcetratePress',
     chartType: 'gauge',
-    gauge: { max: PRESSURE_GAUGE_MAX, bands: PRESSURE_GAUGE_BANDS },
+    gauge: { max: PRESSURE_GAUGE_MAX },
   },
   'RO5-MediaFilterInPress': {
     label: 'Filter Inlet Pressure', unit: 'bar', icon: Filter, color: COLORS.purple, shortName: 'MediaFilterInPress',
     chartType: 'gauge',
-    gauge: { max: PRESSURE_GAUGE_MAX, bands: PRESSURE_GAUGE_BANDS },
+    gauge: { max: PRESSURE_GAUGE_MAX },
   },
   'RO5-MediaFilterOutPress': {
     label: 'Filter Outlet Pressure', unit: 'bar', icon: Filter, color: COLORS.indigo, shortName: 'MediaFilterOutPress',
     chartType: 'gauge',
-    gauge: { max: PRESSURE_GAUGE_MAX, bands: PRESSURE_GAUGE_BANDS },
+    gauge: { max: PRESSURE_GAUGE_MAX },
   },
 
   // ---- Differential pressures ----
   'RO5-Stage1Delta': {
     label: 'Stage 1 Delta P', unit: 'bar', icon: Zap, color: COLORS.success, shortName: 'Stage1Delta',
     chartType: 'gauge',
-    gauge: {
-      max: MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 1.5,
-      bands: [
-        { key: 'normal', label: 'Normal', min: 0, max: MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 0.5, color: '#2e9e4f' },
-        { key: 'warning', label: 'Warning', min: MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 0.5, max: MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR, color: '#f2c318' },
-        { key: 'critical', label: 'Critical', min: MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR, max: MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 1.5, color: '#dc2626' },
-      ],
-    },
+    gauge: { max: MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 1.5 },
   },
   'RO5-Stage2Delta': {
     label: 'Stage 2 Delta P', unit: 'bar', icon: Zap, color: '#14b8a6', shortName: 'Stage2Delta',
     chartType: 'gauge',
-    gauge: {
-      max: MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 1.5,
-      bands: [
-        { key: 'normal', label: 'Normal', min: 0, max: MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 0.5, color: '#2e9e4f' },
-        { key: 'warning', label: 'Warning', min: MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 0.5, max: MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR, color: '#f2c318' },
-        { key: 'critical', label: 'Critical', min: MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR, max: MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 1.5, color: '#dc2626' },
-      ],
-    },
+    gauge: { max: MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 1.5 },
   },
   'RO5-MediaFilterDeltaP': {
     label: 'Filter Delta P', unit: 'bar', icon: Filter, color: '#7c3aed', shortName: 'MediaFilterDeltaP',
     chartType: 'gauge',
-    gauge: {
-      max: FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 1.5,
-      bands: [
-        { key: 'normal', label: 'Normal', min: 0, max: FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 0.625, color: '#2e9e4f' },
-        { key: 'warning', label: 'Warning', min: FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 0.625, max: FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR, color: '#f2c318' },
-        { key: 'critical', label: 'Critical', min: FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR, max: FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 1.5, color: '#dc2626' },
-      ],
-    },
+    gauge: { max: FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 1.5 },
   },
 
   // ---- Non-pressure sensors ----
@@ -651,7 +625,6 @@ export function Dashboard({ onViewAllAlerts } = {}) {
         return {
           label: 'FILTER MODE',
           color: COLORS.success,
-          
         };
       case 'BACKWASH':
         return {
@@ -663,19 +636,16 @@ export function Dashboard({ onViewAllAlerts } = {}) {
         return {
           label: 'STANDBY MODE',
           color: COLORS.warning,
-          
         };
       case 'OFF':
         return {
           label: 'OFF',
           color: COLORS.danger,
-         
         };
       default:
         return {
           label: 'UNKNOWN',
           color: COLORS.muted,
-          
         };
     }
   };
@@ -804,15 +774,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           title="System Active"
           value={systemActiveOn ? "ON" : "OFF"}
           valueColor={systemActiveOn ? COLORS.success : COLORS.danger}
-          
         />
-          {/* <TopStatusCard
-            icon={Clock} iconBg="rgba(34,197,94,0.12)" iconColor={dosingPumpOn ? COLORS.success : COLORS.muted}
-            title="Run Hours"
-            value={`${systemRunHrs.toFixed(1)} hrs`}
-            valueColor={dosingPumpOn ? COLORS.success : 'var(--foreground)'}
-            subColor="var(--muted-foreground)"
-          /> */}
         <TopStatusCard
           icon={AlertTriangle} iconBg="rgba(239,68,68,0.12)" iconColor={COLORS.danger}
           title="Active Alarms" value={activeAlarmsList.length} valueColor={activeAlarmsList.length > 0 ? COLORS.danger : COLORS.success}
@@ -821,31 +783,27 @@ export function Dashboard({ onViewAllAlerts } = {}) {
       </div>
 
       {/* Live Instruments */}
-      <div>
-        <SectionTitle>Live Instruments</SectionTitle>
-        <div className="grid grid-cols-2 gap-2 sm:gap-4">
-          <InstrumentCard
-            title="Pressure"
-            subtitle="System Pressure Gauge"
-          >
-            <PressureGauge
-              value={pressureHasData ? roPressure : undefined}
-              unit={PRESSURE_UNIT_DISPLAY}
-              size={isMobile ? 110 : 180}
-            />
-          </InstrumentCard>
+      <div className="grid grid-cols-2 gap-2 sm:gap-4">
+  <InstrumentCard title="Pressure" subtitle="System Pressure Gauge">
+    <div style={{ minHeight: isMobile ? 190 : 260, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <PressureGauge
+        value={pressureHasData ? roPressure : undefined}
+        unit={PRESSURE_UNIT_DISPLAY}
+        size={isMobile ? 90 : 140}
+      />
+    </div>
+  </InstrumentCard>
 
-          <InstrumentCard
-            title="Feed Tank"
-          >
-            <TankLevelGauge
-              value={tankHasData ? feedTankLevel : undefined}
-              width={isMobile ? 80 : 120}
-              height={isMobile ? 130 : 200}
-            />
-          </InstrumentCard>
-        </div>
-      </div>
+  <InstrumentCard title="Feed Tank">
+    <div style={{ minHeight: isMobile ? 190 : 260, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <TankLevelGauge
+        value={tankHasData ? feedTankLevel : undefined}
+        width={isMobile ? 64 : 96}
+        height={isMobile ? 104 : 160}
+      />
+    </div>
+  </InstrumentCard>
+</div>  
 
       {/* KPI grid */}
       <div>
@@ -886,10 +844,10 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             trend={getTrend(history, 'RO5-FeedTankLevelRaw')}
             statusText={hasRawTankReading ? `≈ ${calibratedFeedTankPct.toFixed(1)}%` : 'No reading'}
             statusOk={hasRawTankReading} />
-            <KPICardV2 label="Run Hours" unit="hrs" icon={Clock} value={safeFormat(systemRunHrs, 1)}
-  color={COLORS.primary}
-  trend={getTrend(history, 'RO5-SystemRunhrs', 60 * 60 * 1000)}
-  statusText={formatHoursFromHours(systemRunHrs)} statusOk={true} />
+          <KPICardV2 label="Run Hours" unit="hrs" icon={Clock} value={safeFormat(systemRunHrs, 1)}
+            color={COLORS.primary}
+            trend={getTrend(history, 'RO5-SystemRunhrs', 60 * 60 * 1000)}
+            statusText={formatHoursFromHours(systemRunHrs)} statusOk={true} />
         </div>
       </div>
     </div>
@@ -938,13 +896,6 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             }}>
               <RefreshCw size={10} className="animate-spin" />
               Startup in progress... Waiting for pumps to come online
-            </div>
-          )}
-
-          {systemStateHistory.lastChanged && (
-            <div style={{ fontSize: 8, color: 'var(--muted-foreground)', marginTop: 6, textAlign: 'center' }}>
-              {/* Last state change: {new Date(systemStateHistory.lastChanged).toLocaleTimeString()} */}
-              {/* {systemStateHistory.previousState && ` (was ${systemStateHistory.previousState})`} */}
             </div>
           )}
 
@@ -1016,13 +967,22 @@ export function Dashboard({ onViewAllAlerts } = {}) {
       selectedMeta?.chartType === 'gauge' &&
       gaugeCfg &&
       Number.isFinite(gaugeCfg.max) &&
-      gaugeCfg.max > 0 &&
-      Array.isArray(gaugeCfg.bands) &&
-      gaugeCfg.bands.length > 0;
+      gaugeCfg.max > 0;
 
     const genericValue = isGaugeSensor && !isRoPressure ? getNumber(selectedKey) : null;
-    const genericBands = isGaugeSensor ? gaugeCfg.bands : [];
-    const genericBand = isGaugeSensor && !isRoPressure ? classifyByBands(genericValue, genericBands) : null;
+
+    // Shared wrapper style for the gauge panel (left of the trend chart).
+    const gaugePanelStyle = {
+      flexShrink: 0,
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: isMobile ? 8 : 12,
+      background: 'var(--secondary)',
+      borderRadius: 8,
+      width: isMobile ? '100%' : 220,
+    };
 
     return (
       <div className="flex flex-col gap-3 sm:gap-4">
@@ -1060,34 +1020,13 @@ export function Dashboard({ onViewAllAlerts } = {}) {
 
           {isRoPressure ? (
             <div className="flex flex-col sm:flex-row gap-4 items-center sm:items-stretch">
-              <div style={{
-                flexShrink: 0,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: isMobile ? 8 : 12,
-                background: 'var(--secondary)',
-                borderRadius: 8,
-                width: isMobile ? '100%' : 220,
-              }}>
+              <div style={gaugePanelStyle}>
                 <PressureGauge
                   value={pressureHasData ? roPressure : undefined}
                   unit={PRESSURE_UNIT_DISPLAY}
                   size={isMobile ? 150 : 190}
                   bands={PRESSURE_BANDS_BAR}
                 />
-                <span style={{
-                  marginTop: 6,
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: !pressureHasData ? COLORS.muted
-                    : pressureStatusTone === 'normal' ? COLORS.success
-                    : pressureStatusTone === 'warning' ? COLORS.warning
-                    : COLORS.danger,
-                }}>
-                  {!pressureHasData ? 'No Data' : pressureBand?.label}
-                </span>
               </div>
 
               <div style={{ flex: 1, minWidth: 0, width: '100%' }}>
@@ -1100,37 +1039,15 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             </div>
           ) : isGaugeSensor ? (
             <div className="flex flex-col sm:flex-row gap-4 items-center sm:items-stretch">
-              <div style={{
-                flexShrink: 0,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: isMobile ? 8 : 12,
-                background: 'var(--secondary)',
-                borderRadius: 8,
-                width: isMobile ? '100%' : 220,
-              }}>
+              <div style={gaugePanelStyle}>
                 <RadialGauge
                   value={genericValue}
                   unit={selectedMeta.unit}
                   label={selectedMeta.label}
                   size={isMobile ? 150 : 190}
                   max={gaugeCfg.max}
-                  bands={genericBands}
                   precision={selectedMeta.unit === 'bar' && gaugeCfg.max < 1 ? 3 : 2}
                 />
-                <span style={{
-                  marginTop: 6,
-                  fontSize: 11,
-                  fontWeight: 700,
-                  color: !Number.isFinite(genericValue) ? COLORS.muted
-                    : genericBand?.key === 'normal' ? COLORS.success
-                    : genericBand?.key === 'warning' ? COLORS.warning
-                    : COLORS.danger,
-                }}>
-                  {!Number.isFinite(genericValue) ? 'No Data' : genericBand?.label}
-                </span>
               </div>
 
               <div style={{ flex: 1, minWidth: 0, width: '100%' }}>
