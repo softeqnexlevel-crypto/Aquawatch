@@ -107,6 +107,13 @@ const FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR = 0.40;
 // Max for the 0–16 bar dials.
 const PRESSURE_GAUGE_MAX = 16;
 
+// Builds the same green / yellow / red bands the pressure gauge uses.
+const makeBands = (max, warnAt, critAt) => [
+  { key: 'normal',   label: 'Normal',   min: 0,      max: warnAt, color: '#2e9e4f' },
+  { key: 'warning',  label: 'Warning',  min: warnAt, max: critAt, color: '#f2c318' },
+  { key: 'critical', label: 'Critical', min: critAt, max: max,    color: '#dc2626' },
+];
+
 export const SENSOR_MAP = {
   'RO5-FEEDFlow': { label: 'Feed Flow', unit: 'm³/h', icon: Droplets, color: COLORS.primary, shortName: 'FEEDFlow' },
   'RO5-Permeateflow': { label: 'Permeate Flow', unit: 'm³/h', icon: Droplets, color: COLORS.secondary, shortName: 'Permeateflow' },
@@ -116,44 +123,65 @@ export const SENSOR_MAP = {
   'RO5-ROPressure': {
     label: 'RO Pressure', unit: 'bar', icon: Gauge, color: COLORS.danger, shortName: 'ROPressure',
     chartType: 'gauge',
-    gauge: { max: PRESSURE_GAUGE_MAX },
+    gauge: { max: PRESSURE_GAUGE_MAX, bands: PRESSURE_BANDS_BAR },
   },
   'RO5-InterstagePress': {
     label: 'Interstage Pressure', unit: 'bar', icon: Gauge, color: COLORS.orange, shortName: 'InterstagePress',
     chartType: 'gauge',
-    gauge: { max: PRESSURE_GAUGE_MAX },
+    gauge: { max: PRESSURE_GAUGE_MAX, bands: PRESSURE_BANDS_BAR },
   },
   'RO5-ConcetratePress': {
     label: 'Concentrate Pressure', unit: 'bar', icon: Gauge, color: COLORS.yellow, shortName: 'ConcetratePress',
     chartType: 'gauge',
-    gauge: { max: PRESSURE_GAUGE_MAX },
+    gauge: { max: PRESSURE_GAUGE_MAX, bands: PRESSURE_BANDS_BAR },
   },
   'RO5-MediaFilterInPress': {
     label: 'Filter Inlet Pressure', unit: 'bar', icon: Filter, color: COLORS.purple, shortName: 'MediaFilterInPress',
     chartType: 'gauge',
-    gauge: { max: PRESSURE_GAUGE_MAX },
+    gauge: { max: PRESSURE_GAUGE_MAX, bands: PRESSURE_BANDS_BAR },
   },
   'RO5-MediaFilterOutPress': {
     label: 'Filter Outlet Pressure', unit: 'bar', icon: Filter, color: COLORS.indigo, shortName: 'MediaFilterOutPress',
     chartType: 'gauge',
-    gauge: { max: PRESSURE_GAUGE_MAX },
+    gauge: { max: PRESSURE_GAUGE_MAX, bands: PRESSURE_BANDS_BAR },
   },
 
   // ---- Differential pressures ----
   'RO5-Stage1Delta': {
     label: 'Stage 1 Delta P', unit: 'bar', icon: Zap, color: COLORS.success, shortName: 'Stage1Delta',
     chartType: 'gauge',
-    gauge: { max: MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 1.5 },
+    gauge: {
+      max: MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 1.5,
+      bands: makeBands(
+        MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 1.5,
+        MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 0.5,
+        MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR
+      ),
+    },
   },
   'RO5-Stage2Delta': {
     label: 'Stage 2 Delta P', unit: 'bar', icon: Zap, color: '#14b8a6', shortName: 'Stage2Delta',
     chartType: 'gauge',
-    gauge: { max: MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 1.5 },
+    gauge: {
+      max: MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 1.5,
+      bands: makeBands(
+        MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 1.5,
+        MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 0.5,
+        MEMBRANE_DIFFERENTIAL_PRESSURE_CRITICAL_BAR
+      ),
+    },
   },
   'RO5-MediaFilterDeltaP': {
     label: 'Filter Delta P', unit: 'bar', icon: Filter, color: '#7c3aed', shortName: 'MediaFilterDeltaP',
     chartType: 'gauge',
-    gauge: { max: FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 1.5 },
+    gauge: {
+      max: FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 1.5,
+      bands: makeBands(
+        FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 1.5,
+        FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR * 0.625,
+        FILTER_DIFFERENTIAL_PRESSURE_CRITICAL_BAR
+      ),
+    },
   },
 
   // ---- Non-pressure sensors ----
@@ -783,27 +811,30 @@ export function Dashboard({ onViewAllAlerts } = {}) {
       </div>
 
       {/* Live Instruments */}
-      <div className="grid grid-cols-2 gap-2 sm:gap-4">
-  <InstrumentCard title="Pressure" subtitle="System Pressure Gauge">
-    <div style={{ minHeight: isMobile ? 190 : 260, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <PressureGauge
-        value={pressureHasData ? roPressure : undefined}
-        unit={PRESSURE_UNIT_DISPLAY}
-        size={isMobile ? 90 : 140}
-      />
-    </div>
-  </InstrumentCard>
+      <div>
+        <SectionTitle>Live Instruments</SectionTitle>
+        <div className="grid grid-cols-2 gap-2 sm:gap-4">
+          <InstrumentCard title="Pressure" subtitle="System Pressure Gauge">
+            <div style={{ minHeight: isMobile ? 190 : 260, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <PressureGauge
+                value={pressureHasData ? roPressure : undefined}
+                unit={PRESSURE_UNIT_DISPLAY}
+                size={isMobile ? 90 : 140}
+              />
+            </div>
+          </InstrumentCard>
 
-  <InstrumentCard title="Feed Tank">
-    <div style={{ minHeight: isMobile ? 190 : 260, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <TankLevelGauge
-        value={tankHasData ? feedTankLevel : undefined}
-        width={isMobile ? 64 : 96}
-        height={isMobile ? 104 : 160}
-      />
-    </div>
-  </InstrumentCard>
-</div>  
+          <InstrumentCard title="Feed Tank">
+            <div style={{ minHeight: isMobile ? 190 : 260, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <TankLevelGauge
+                value={tankHasData ? feedTankLevel : undefined}
+                width={isMobile ? 64 : 96}
+                height={isMobile ? 104 : 160}
+              />
+            </div>
+          </InstrumentCard>
+        </div>
+      </div>
 
       {/* KPI grid */}
       <div>
@@ -1046,6 +1077,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
                   label={selectedMeta.label}
                   size={isMobile ? 150 : 190}
                   max={gaugeCfg.max}
+                  bands={gaugeCfg.bands}
                   precision={selectedMeta.unit === 'bar' && gaugeCfg.max < 1 ? 3 : 2}
                 />
               </div>
