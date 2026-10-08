@@ -1147,23 +1147,70 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           background: !connected ? 'rgba(239,68,68,0.05)' : hasFreshData ? 'rgba(34,197,94,0.05)' : 'rgba(245,158,11,0.05)',
           borderBottom: `1px solid ${!connected ? 'rgba(239,68,68,0.15)' : hasFreshData ? 'rgba(34,197,94,0.15)' : 'rgba(245,158,11,0.15)'}`
         }}>
-          <div className="flex items-center gap-3 flex-wrap">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{
-                width: 8, height: 8, borderRadius: '50%',
-                background: !connected ? COLORS.danger : hasFreshData ? COLORS.success : COLORS.warning,
-                boxShadow: connected ? (hasFreshData ? `0 0 8px #22c55e80` : `0 0 8px #f59e0b80`) : 'none'
-              }} />
-              <span style={{ fontSize: 10, fontWeight: 600, color: !connected ? COLORS.danger : hasFreshData ? COLORS.success : COLORS.warning }}>
-                {!connected ? 'DISCONNECTED' : hasFreshData ? 'LIVE DATA' : 'NO SENSOR DATA'}
-              </span>
-              {connected && (
-                <span style={{ fontSize: 9, color: 'var(--muted-foreground)' }}>
-                  · {hasFreshData ? 'All systems online' : `${activeSensors}/${totalSensors} sensors reporting`}
-                </span>
-              )}
-            </div>
-          </div>
+         <div className="flex items-center gap-3 flex-wrap">
+  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+    <span
+      style={{
+        fontSize: 12,
+        color: !connected
+          ? COLORS.danger
+          : hasFreshData
+          ? COLORS.success
+          : COLORS.warning,
+        display: 'inline-block',
+        animation: connected && hasFreshData
+          ? 'pulse 1.5s ease-in-out infinite'
+          : 'none'
+      }}
+    >
+      📡
+    </span>
+
+    <span
+      style={{
+        fontSize: 10,
+        fontWeight: 600,
+        color: !connected
+          ? COLORS.danger
+          : hasFreshData
+          ? COLORS.success
+          : COLORS.warning
+      }}
+    >
+      {!connected
+        ? 'DISCONNECTED'
+        : hasFreshData
+        ? 'LIVE DATA'
+        : 'NO SENSOR DATA'}
+    </span>
+
+    {connected && (
+      <span
+        style={{
+          fontSize: 9,
+          color: 'var(--muted-foreground)'
+        }}
+      >
+        · {hasFreshData
+          ? 'All systems online'
+          : `${activeSensors}/${totalSensors} sensors reporting`}
+      </span>
+    )}
+  </div>
+
+  <style>{`
+    @keyframes pulse {
+      0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+      }
+      50% {
+        opacity: 0.45;
+        transform: scale(1.15);
+      }
+    }
+  `}</style>
+</div>
           <div className="flex items-center gap-4 flex-wrap">
             <button
               onClick={handleRefresh}
