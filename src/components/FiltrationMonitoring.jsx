@@ -7,7 +7,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
 } from "recharts";
-import { AlertTriangle, CheckCircle, AlertCircle, Filter, Clock } from "lucide-react";
+import { AlertCircle, Filter, Clock } from "lucide-react";
 import { useData } from "../contexts/DataContext";
 import { format, subHours } from 'date-fns';
 
@@ -78,10 +78,6 @@ function FilterGaugeCard({ value, filter, lastUpdate, mode, isMobile }) {
   const isLiveMode = mode === 'live';
   const band = isLiveMode ? classifyByBands(value, bands) : null;
   const color = !isLiveMode ? 'var(--muted-foreground)' : (band?.color ?? '#22c55e');
-  const statusLabel =
-    mode === 'offline' ? 'NO DATA' :
-    mode === 'stopped' ? 'STOPPED' :
-    (band?.label ?? 'NORMAL').toUpperCase();
 
   // Health score: 100% at 0 bar, 0% at critical. Not meaningful unless running.
   const healthScore = isLiveMode
@@ -90,12 +86,6 @@ function FilterGaugeCard({ value, filter, lastUpdate, mode, isMobile }) {
   const healthColor =
     healthScore === null ? 'var(--muted-foreground)' :
     healthScore > 70 ? '#22c55e' : healthScore > 50 ? '#eab308' : '#ef4444';
-
-  const StatusIcon =
-    !isLiveMode ? AlertCircle :
-    value >= critical ? AlertTriangle :
-    value >= warning ? AlertCircle :
-    CheckCircle;
 
   // Gauge: needle at 0 when stopped, blank when there is no data at all
   const gaugeValue = mode === 'offline' ? undefined : (isLiveMode ? value : 0);
@@ -112,7 +102,7 @@ function FilterGaugeCard({ value, filter, lastUpdate, mode, isMobile }) {
       className="rounded p-3 sm:p-4 flex flex-col gap-3 sm:gap-4"
       style={{ background: "var(--card)", border: `1px solid ${tint(color, '30')}` }}
     >
-      {/* Header: name + status pill */}
+      {/* Header: name */}
       <div className="flex items-start justify-between gap-2">
         <div
           style={{
@@ -128,15 +118,6 @@ function FilterGaugeCard({ value, filter, lastUpdate, mode, isMobile }) {
         >
           <Filter size={isMobile ? 10 : 12} />
           {label}
-        </div>
-        <div
-          className="flex items-center gap-1 rounded px-1.5 sm:px-2 py-0.5 sm:py-1"
-          style={{ background: tint(color, '15'), border: `1px solid ${tint(color, '40')}`, flexShrink: 0 }}
-        >
-          <StatusIcon size={isMobile ? 10 : 12} style={{ color }} />
-          <span style={{ fontSize: isMobile ? 8 : 10, fontWeight: 700, color, letterSpacing: "0.06em" }}>
-            {statusLabel}
-          </span>
         </div>
       </div>
 
@@ -206,7 +187,6 @@ export function FiltrationMonitoring() {
     stopped: { text: 'PLANT STOPPED', color: '#eab308' },
     offline: { text: 'NO LIVE DATA',  color: '#ef4444' },
   }[mode];
-  const systemText = systemOn === null ? 'unknown' : (systemOn ? 'ON' : 'OFF');
 
   // Current values. Never fall back to chart history: history is old by definition.
   const filterData = useMemo(() => (
@@ -281,7 +261,7 @@ export function FiltrationMonitoring() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Shows exactly what the page believes about the plant */}
+          {/* Connection / plant state badge */}
           <div
             title="Feed status · value of RO5-SystemOperation"
             style={{
@@ -292,7 +272,7 @@ export function FiltrationMonitoring() {
             }}
           >
             <span style={{ width: 6, height: 6, borderRadius: '50%', background: modeInfo.color }} />
-            {modeInfo.text} · System: {systemText}
+            {modeInfo.text}
           </div>
           {['1h', '24h'].map((range) => (
             <button

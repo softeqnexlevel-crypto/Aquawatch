@@ -76,7 +76,6 @@ export function PressureGauge({
   size = 180,
   bands,
   dialBands,
-  showReadout = true,
 }) {
   const idRef = useRef(null);
   if (idRef.current === null) idRef.current = `pg${++gaugeInstance}`;
@@ -89,9 +88,6 @@ export function PressureGauge({
   const hasValue = Number.isFinite(value);
   const clamped = hasValue ? Math.max(0, Math.min(DIAL_MAX_BAR * OVERTRAVEL, value)) : 0;
   const needleRotation = -angleFor(clamped);
-
-  const valueColor = 'var(--foreground)';
-  const readoutSize = Math.max(16, Math.round(size * 0.13));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: '100%' }}>
@@ -222,22 +218,6 @@ export function PressureGauge({
 
         <circle cx={CX} cy={CY} r="60" fill="none" stroke="#334155" strokeWidth="2" />
       </svg>
-
-      {showReadout && (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: 6, lineHeight: 1.15 }}>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: readoutSize, fontWeight: 700, color: valueColor }}>
-            {hasValue ? value.toFixed(1) : '--'}
-            <span style={{ fontSize: Math.max(9, Math.round(readoutSize * 0.45)), fontWeight: 400, color: 'var(--muted-foreground)', marginLeft: 4 }}>
-              {unit}
-            </span>
-          </div>
-          {hasValue && (
-            <div style={{ fontFamily: 'var(--font-mono)', fontSize: Math.max(9, Math.round(readoutSize * 0.45)), color: 'var(--muted-foreground)' }}>
-              {(value / BAR_PER_MPA).toFixed(2)} MPa
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }

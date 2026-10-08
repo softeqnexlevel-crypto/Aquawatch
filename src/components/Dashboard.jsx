@@ -247,6 +247,22 @@ const RANGE_OPTIONS = [
   { key: '30D', ms: 30 * 24 * 60 * 60 * 1000 },
 ];
 
+// ── Live Instruments layout ────────────────────────────────────────────────
+// Both the pressure dial and the tank bar share ONE visual height so their
+// tops and bottoms line up. Change these numbers to resize both together.
+const GAUGE_VISUAL_DESKTOP = 140;
+const GAUGE_VISUAL_MOBILE = 90;
+
+// Shared body style so both instrument cards position their gauge identically.
+// Fixed height (not minHeight) so neither card can grow taller than the other.
+const INSTRUMENT_BODY_STYLE = (isMobile) => ({
+  height: isMobile ? 190 : 260,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  width: '100%',
+});
+
 // --- UI COMPONENTS ---
 
 function SectionTitle({ children }) {
@@ -743,6 +759,9 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const pressureStatusTone = !pressureHasData ? 'muted' : pressureBand?.key === 'normal' ? 'normal' : pressureBand?.key === 'warning' ? 'warning' : 'danger';
   const tankStatusTone = !tankHasData ? 'muted' : tankBand?.key === 'top' ? 'normal' : tankBand?.key === 'mid' ? 'warning' : 'danger';
 
+  // Shared visual height for the pressure dial and the tank bar.
+  const gaugeVisual = isMobile ? GAUGE_VISUAL_MOBILE : GAUGE_VISUAL_DESKTOP;
+
   if (contextLoading && !dataInitialized) {
     return (
       <div className="flex items-center justify-center h-full p-8">
@@ -813,23 +832,33 @@ export function Dashboard({ onViewAllAlerts } = {}) {
       {/* Live Instruments */}
       <div>
         <SectionTitle>Live Instruments</SectionTitle>
-        <div className="grid grid-cols-2 gap-2 sm:gap-4">
-          <InstrumentCard title="Pressure" subtitle="System Pressure Gauge">
-            <div style={{ minHeight: isMobile ? 190 : 260, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div className="grid grid-cols-2 gap-2 sm:gap-4 items-stretch">
+          <InstrumentCard 
+            title="Pressure" 
+            subtitle="System Pressure Gauge"
+            status={pressureHasData ? `${roPressure.toFixed(1)} bar` : '--'} 
+            statusTone={pressureStatusTone}
+          >
+            <div style={INSTRUMENT_BODY_STYLE(isMobile)}>
               <PressureGauge
                 value={pressureHasData ? roPressure : undefined}
                 unit={PRESSURE_UNIT_DISPLAY}
-                size={isMobile ? 90 : 140}
+                size={gaugeVisual} 
               />
             </div>
           </InstrumentCard>
 
-          <InstrumentCard title="Feed Tank">
-            <div style={{ minHeight: isMobile ? 190 : 260, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <InstrumentCard 
+            title="Feed Tank" 
+            subtitle="Tank Level Indicator"
+            status={tankHasData ? `${feedTankLevel.toFixed(1)}%` : '--'}
+            statusTone={tankStatusTone}
+          >
+            <div style={INSTRUMENT_BODY_STYLE(isMobile)}>
               <TankLevelGauge
                 value={tankHasData ? feedTankLevel : undefined}
-                width={isMobile ? 64 : 96}
-                height={isMobile ? 104 : 160}
+                height={gaugeVisual} 
+                width={isMobile ? 56 : 84} 
               />
             </div>
           </InstrumentCard>
