@@ -28,6 +28,12 @@ export function TankLevelGauge({ value, height = 200, width = 120 }) {
   const fillColor = band?.color || '#64748b';
   const fillGradient = WATER_GRADIENTS[fillColor] || WATER_GRADIENTS['#ef4444'];
 
+  // Font scales with bar width so it always fits.
+  // width 84  → ~22px
+  // width 100 → ~26px
+  // width 120 → ~31px
+  const valueFontSize = Math.max(12, Math.round(width * 0.26));
+
   return (
     <div style={{
       position: 'relative',
@@ -58,10 +64,18 @@ export function TankLevelGauge({ value, height = 200, width = 120 }) {
 
       <div style={{
         position: 'absolute', inset: 0,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontFamily: 'var(--font-mono)', fontSize: 22, fontWeight: 700,
-        color: '#ffffff', textShadow: '0 1px 4px rgba(0,0,0,0.6)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        fontFamily: 'var(--font-mono)',
+        fontSize: valueFontSize,
+        fontWeight: 700,
+        color: '#ffffff',
+        textShadow: '0 1px 4px rgba(0,0,0,0.6)',
         pointerEvents: 'none',
+        lineHeight: 1,
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
       }}>
         {hasValue ? `${clamped.toFixed(1)}%` : '--'}
       </div>
