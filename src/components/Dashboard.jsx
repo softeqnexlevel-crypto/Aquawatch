@@ -835,7 +835,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
         <div className="grid grid-cols-2 gap-2 sm:gap-4 items-stretch">
           <InstrumentCard 
             title="Pressure" 
-            subtitle="System Pressure Gauge"
+            // subtitle="System Pressure Gauge"
             status={pressureHasData ? `${roPressure.toFixed(1)} bar` : '--'} 
             statusTone={pressureStatusTone}
           >
@@ -850,7 +850,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
 
           <InstrumentCard 
             title="Feed Tank" 
-            subtitle="Tank Level Indicator"
+            // subtitle="Tank Level Indicator"
             status={tankHasData ? `${feedTankLevel.toFixed(1)}%` : '--'}
             statusTone={tankStatusTone}
           >
