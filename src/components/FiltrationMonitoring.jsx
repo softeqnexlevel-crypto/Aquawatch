@@ -126,7 +126,7 @@ function FilterGaugeCard({ value, filter, lastUpdate, mode, isMobile }) {
         <RadialGauge
           value={gaugeValue}
           unit="bar"
-          label={label}
+          // label={label}
           size={isMobile ? 170 : 210}
           max={gaugeMax}
           bands={bands}
