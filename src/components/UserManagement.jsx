@@ -7,8 +7,7 @@ import { useAuth } from "../contexts/AuthContext";
 // ==================== ROLE PERMISSIONS ====================
 const ROLE_PERMISSIONS = {
   admin: [
-    "dashboard", "analytics", "reports", "maintenance",
-    "chemical", "borehole", "settings", "user-management"
+   "dashboard", "production", "antiscalant", "system recovery", "alerts", "tag manager", "billing", "analytics", "reports", "maintenance","filtration", "tank level", "settings", "user-management", 
   ],
   operator: [
     "dashboard", "maintenance", "reports"
@@ -19,8 +18,7 @@ const ROLE_PERMISSIONS = {
 };
 
 const ALL_PAGES = [
-  "dashboard", "analytics", "reports", "maintenance",
-  "chemical", "borehole", "settings", "user-management"
+  "dashboard", "production", "antiscalant", "system recovery", "alerts", "tag manager", "billing", "analytics", "reports", "maintenance","filtration", "tank level", "settings", "user-management",
 ];
 
 const ROLE_COLORS = {
