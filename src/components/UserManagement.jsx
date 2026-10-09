@@ -17,7 +17,7 @@ const ROLE_PERMISSIONS = {
   ],
 };
 
-const ALL_PAGES = [
+const   ALL_PAGES = [
   "dashboard", "production", "antiscalant", "system recovery", "alerts", "tag manager", "billing", "analytics", "reports", "maintenance","filtration", "tank level", "settings", "user-management",
 ];
 

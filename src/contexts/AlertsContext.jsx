@@ -6,6 +6,7 @@ import {
   evaluateBackwashFilterDpAlert,
   evaluateBackwashModeAlert,
 } from '../utils/backwashAlert';
+import { API_BASE_URL } from '../config';
 
 const AlertsContext = createContext();
 
@@ -42,7 +43,7 @@ function saveHistory(history) {
 // Only the alert types listed here are shown. Everything else is suppressed,
 // including any new rules added to alertEngine later, until added here.
 // Matched against the candidate's `message` (the text shown as the alert type).
-const ALLOWED_ALERT_TYPES = ['Low Feed Tank Level'];
+const ALLOWED_ALERT_TYPES = ['Low Feed Tank Level', 'Power Problem'];
 
 const SEVERITY_RANK = { Critical: 0, High: 1, Medium: 2, Low: 3, Info: 4 };
 
@@ -50,9 +51,35 @@ const norm = (s) => String(s ?? '').trim().toLowerCase();
 
 export function AlertsProvider({ children }) {
   const { sensorData, getValue } = useData();
-
   const [alerts, setAlerts] = useState([]);
   const [history, setHistory] = useState(loadHistory);
+  const [serverHistory, setServerHistory] = useState([]);
+
+  useEffect(() => {
+    let stop = false;
+    const load = async () => {
+      try {
+        const r = await fetch(`${API_BASE_URL}/api/alert-events`);
+        if (!r.ok) return;
+        const rows = await r.json();
+        if (!stop) {
+          setServerHistory(rows.map((e) => ({
+            id: `srv-${e.id}`, alertId: e.alertId, kind: e.kind,
+            type: e.type, severity: e.severity, equipment: e.equipment, time: e.time,
+          })));
+        }
+      } catch { /* ignore */ }
+    };
+    load();
+    const t = setInterval(load, 15000);
+    return () => { stop = true; clearInterval(t); };
+  }, []);
+
+  // Server stores Power Problem history, so skip the browser's own copy of it.
+  const mergedHistory = [
+    ...history.filter((h) => norm(h.type) !== 'power problem'),
+    ...serverHistory,
+  ];
 
   // Tracks which rule IDs were active last evaluation, for hysteresis.
   const activeIdsRef = useRef(new Set());
@@ -184,7 +211,7 @@ export function AlertsProvider({ children }) {
         alerts,
         activeAlerts,
         counts,
-        history,
+        history: mergedHistory,
         acknowledgeAlert,
         clearAlert,
         clearAllAcknowledged,
