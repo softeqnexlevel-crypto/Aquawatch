@@ -1,9 +1,14 @@
 // frontend/src/contexts/DataContext.jsx
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import { API_BASE_URL } from '../config';
 
 const DataContext = createContext();
+
+// ── History tuning ─────────────────────────────────────────────────────────
+const MAX_HISTORY_POINTS = 2000;       // per sensor (~5.5 h at 10 s sampling)
+const HEARTBEAT_MS = 10_000;           // sample-and-hold interval while connected
+const FALLBACK_POLL_MS = 30_000;       // /api/current polling while socket is down
 
 // Map backend keys to frontend keys
 const KEY_MAPPING = {
@@ -21,22 +26,21 @@ const KEY_MAPPING = {
   'siemens200smart-RO5-SystemRecovery': 'RO5-SystemRecovery',
   'siemens200smart-RO5-PureWaterEc': 'RO5-PureWaterEc',
   'siemens200smart-RO5-FeedTankLevel': 'RO5-FeedTankLevel',
+
   // Raw (uncalibrated) transmitter signal, 4.9-10.0. The correct
   // percentage is derived from this on the frontend via
   // dashboardComponents/feedTankCalibration.js — see that file for why.
   'siemens200smart-RO5-FeedTankLevelRaw': 'RO5-FeedTankLevelRaw',
   'RO5-FeedTankLevelRaw': 'RO5-FeedTankLevelRaw',
 
+  'RO5-Feedpump': 'RO5-Feedpump',
+  'siemens200smart-RO5-Feedpump': 'RO5-Feedpump',
 
-'RO5-Feedpump': 'RO5-Feedpump',
-'siemens200smart-RO5-Feedpump': 'RO5-Feedpump',
+  'RO5-PrefilterBackwash': 'RO5-PrefilterBackwash',
+  'siemens200smart-RO5-PrefilterBackwash': 'RO5-PrefilterBackwash',
 
-'RO5-PrefilterBackwash': 'RO5-PrefilterBackwash',
-'siemens200smart-RO5-PrefilterBackwash': 'RO5-PrefilterBackwash',
-
-'RO5-PrefilterBackwashing': 'RO5-PrefilterBackwashing',
-'siemens200smart-RO5-PrefilterBackwashing': 'RO5-PrefilterBackwashing',
-
+  'RO5-PrefilterBackwashing': 'RO5-PrefilterBackwashing',
+  'siemens200smart-RO5-PrefilterBackwashing': 'RO5-PrefilterBackwashing',
 
   'siemens200smart-RO5-SystemOperation': 'RO5-SystemOperation',
   'RO5-SystemOperation': 'RO5-SystemOperation',
@@ -67,7 +71,6 @@ const KEY_MAPPING = {
   'RO5-SystemRunhrs': 'RO5-SystemRunhrs',
   'SystemRunhrs': 'RO5-SystemRunhrs',
 
-
   // ✅ SYSTEM ACTIVE (master ON/OFF signal — must NOT be collapsed into
   // RO5-SystemOperation. It was previously mapped to that key, which meant
   // getValue('RO5-SystemActive') in Dashboard.jsx always fell back to 0
@@ -78,19 +81,13 @@ const KEY_MAPPING = {
   'siemens200smart-RO5-SystemActive': 'RO5-SystemActive',
   'SystemActive': 'RO5-SystemActive',
 
-'RO5-Feedpump': 'RO5-Feedpump',
-'siemens200smart-RO5-Feedpump': 'RO5-Feedpump',
-'RO5-PrefilterBackwash': 'RO5-PrefilterBackwash',
-'siemens200smart-RO5-PrefilterBackwash': 'RO5-PrefilterBackwash',
-'RO5-PrefilterBackwashing': 'RO5-PrefilterBackwashing',
-
-'RO5-HighPrefilterDeltaP': 'RO5-HighPrefilterDeltaP',
-'RO5-PowerProblem': 'RO5-PowerProblem',
-'RO5-HighMediaDeltaP': 'RO5-HighMediaDeltaP',
-'RO5-S2DeltaHigh': 'RO5-S2DeltaHigh',
-'RO5-S1DeltaHigh': 'RO5-S1DeltaHigh',
-'RO5-HighROPressure': 'RO5-HighROPressure',
-'RO5-FeedTankLow': 'RO5-FeedTankLow',
+  'RO5-HighPrefilterDeltaP': 'RO5-HighPrefilterDeltaP',
+  'RO5-PowerProblem': 'RO5-PowerProblem',
+  'RO5-HighMediaDeltaP': 'RO5-HighMediaDeltaP',
+  'RO5-S2DeltaHigh': 'RO5-S2DeltaHigh',
+  'RO5-S1DeltaHigh': 'RO5-S1DeltaHigh',
+  'RO5-HighROPressure': 'RO5-HighROPressure',
+  'RO5-FeedTankLow': 'RO5-FeedTankLow',
 };
 
 const getUnitForParameter = (param) => {
@@ -114,7 +111,6 @@ const getUnitForParameter = (param) => {
     'RO5-SystemOperation': '',
     'RO5-SystemMode': '',
     'RO5-AntiscalantDosingActive': '',
-    // ✅ new parameters
     'RO5-AntiscalantDaily': 'ml',
     'RO5-SystemRunhrs': 'hrs',
   };
@@ -142,6 +138,42 @@ const normalizeAntiscalantValue = (value) => {
   return 'OFF';
 };
 
+/**
+ * Converts a sensor value into something chartable, or null if it isn't
+ * chartable. Numbers and numeric strings pass through, ON/OFF-style flags
+ * become 1/0, and text states such as "FILTER" are skipped.
+ */
+const toHistoryNumber = (value) => {
+  if (value === undefined || value === null || value === '') return null;
+  if (typeof value === 'boolean') return value ? 1 : 0;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string') {
+    const v = value.trim().toUpperCase();
+    if (v === 'ON' || v === 'TRUE') return 1;
+    if (v === 'OFF' || v === 'FALSE') return 0;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+};
+
+/**
+ * Appends points to the history map without mutating it.
+ * entries: [[key, rawValue, Date], ...]
+ */
+const appendHistory = (prev, entries) => {
+  const next = { ...prev };
+  entries.forEach(([key, rawValue, time]) => {
+    const value = toHistoryNumber(rawValue);
+    if (value === null) return;
+    const arr = next[key] || [];
+    const last = arr[arr.length - 1];
+    if (last && new Date(last.time).getTime() === time.getTime()) return; // de-dupe
+    next[key] = [...arr, { time, value }].slice(-MAX_HISTORY_POINTS);
+  });
+  return next;
+};
+
 export const DataProvider = ({ children }) => {
   const [sensorData, setSensorData] = useState({});
   const [history, setHistory] = useState({});
@@ -150,19 +182,24 @@ export const DataProvider = ({ children }) => {
   const [lastUpdate, setLastUpdate] = useState(null);
   const [connected, setConnected] = useState(false);
 
+  // Refs so long-lived intervals always see current values
+  // (a plain `connected` inside the interval was stuck at its initial false).
+  const sensorDataRef = useRef(sensorData);
+  const connectedRef = useRef(connected);
+  sensorDataRef.current = sensorData;
+  connectedRef.current = connected;
+
   const fetchInitialData = async () => {
     try {
-      setLoading(true); // ✅ so the Dashboard "Refresh" button visibly shows a loading state again
+      setLoading(true); // so the Dashboard "Refresh" button visibly shows a loading state
       const response = await fetch(`${API_BASE_URL}/api/current`);
       if (!response.ok) throw new Error(`HTTP ${response.status}: Failed to fetch data`);
       const readings = await response.json();
 
-      console.log('📊 Fetched readings (raw backend keys):', readings);
-      console.log('📊 Raw keys list:', Object.keys(readings));
-
+      const now = new Date();
       const formattedData = {};
       Object.entries(readings).forEach(([rawKey, value]) => {
-        let key = KEY_MAPPING[rawKey] || rawKey;
+        const key = KEY_MAPPING[rawKey] || rawKey;
 
         let finalValue = value;
         if (key === 'RO5-AntiscalantDosingActive' || rawKey.includes('Antiscalant')) {
@@ -170,27 +207,31 @@ export const DataProvider = ({ children }) => {
           // a numeric ml value, not a boolean state.
           if (key !== 'RO5-AntiscalantDaily') {
             finalValue = normalizeAntiscalantValue(value);
-            console.log(`🔍 Antiscalant normalized: ${rawKey} → ${key} = ${value} → ${finalValue}`);
           }
         }
 
         formattedData[key] = {
           value: finalValue,
-          timestamp: new Date().toISOString(),
-          unit: getUnitForParameter(key)
+          timestamp: now.toISOString(),
+          unit: getUnitForParameter(key),
         };
       });
 
-      console.log('📊 Formatted sensor data keys:', Object.keys(formattedData));
-      console.log('🔍 SystemOperation value:', formattedData['RO5-SystemOperation']?.value, '(undefined here means the raw key from your backend is not yet in KEY_MAPPING — check the raw keys list above)');
-      console.log('🔍 Antiscalant value:', formattedData['RO5-AntiscalantDosingActive']?.value);
-      console.log('🔍 Antiscalant Daily value:', formattedData['RO5-AntiscalantDaily']?.value);
-      console.log('🔍 System Run Hours value:', formattedData['RO5-SystemRunhrs']?.value);
+      // Merge instead of replace, so keys that arrived over the socket but
+      // are missing from /api/current aren't wiped out.
+      setSensorData((prev) => ({ ...prev, ...formattedData }));
 
-      setSensorData(formattedData);
+      // Seed history so charts have a starting point immediately.
+      setHistory((prev) =>
+        appendHistory(
+          prev,
+          Object.entries(formattedData).map(([key, d]) => [key, d.value, now])
+        )
+      );
+
       setLoading(false);
       setError(null);
-      setLastUpdate(new Date().toISOString());
+      setLastUpdate(now.toISOString());
     } catch (err) {
       console.error('Failed to fetch initial data:', err);
       setError(err.message);
@@ -209,12 +250,13 @@ export const DataProvider = ({ children }) => {
     socket.on('connect', () => {
       console.log('✅ DataContext connected to backend');
       setConnected(true);
+      connectedRef.current = true;
       fetchInitialData();
     });
 
     socket.on('plc-data', (newData) => {
       const rawKey = newData.parameter;
-      let key = KEY_MAPPING[rawKey] || rawKey;
+      const key = KEY_MAPPING[rawKey] || rawKey;
       const timestamp = newData.timestamp || new Date().toISOString();
 
       let value = newData.value;
@@ -222,27 +264,17 @@ export const DataProvider = ({ children }) => {
         value = normalizeAntiscalantValue(newData.value);
       }
 
-      setSensorData(prev => ({
+      setSensorData((prev) => ({
         ...prev,
         [key]: {
-          value: value,
-          timestamp: timestamp,
+          value,
+          timestamp,
           unit: newData.unit || getUnitForParameter(key),
-          simulated: newData.simulated || false
-        }
+          simulated: newData.simulated || false,
+        },
       }));
 
-      setHistory(prev => {
-        const currentHistory = prev[key] || [];
-        const newHistory = [...currentHistory, {
-          time: new Date(timestamp),
-          value: value
-        }];
-        return {
-          ...prev,
-          [key]: newHistory.slice(-500)
-        };
-      });
+      setHistory((prev) => appendHistory(prev, [[key, value, new Date(timestamp)]]));
 
       setLastUpdate(timestamp);
     });
@@ -250,6 +282,7 @@ export const DataProvider = ({ children }) => {
     socket.on('disconnect', () => {
       console.log('❌ DataContext disconnected from backend');
       setConnected(false);
+      connectedRef.current = false;
     });
 
     socket.on('connect_error', (err) => {
@@ -258,16 +291,28 @@ export const DataProvider = ({ children }) => {
       fetchInitialData();
     });
 
-    const interval = setInterval(() => {
-      if (!connected) {
-        fetchInitialData();
-      }
-    }, 30000);
+    // Fallback polling: only while the socket is down.
+    const pollInterval = setInterval(() => {
+      if (!connectedRef.current) fetchInitialData();
+    }, FALLBACK_POLL_MS);
+
+    // Heartbeat: PLCs often emit only on change, so a steady signal would
+    // otherwise leave a single point. While connected, record the latest
+    // value of every chartable sensor on a fixed cadence (sample-and-hold).
+    const heartbeatInterval = setInterval(() => {
+      if (!connectedRef.current) return; // never fabricate points while offline
+      const now = new Date();
+      const entries = Object.entries(sensorDataRef.current).map(([key, d]) => [key, d?.value, now]);
+      if (entries.length === 0) return;
+      setHistory((prev) => appendHistory(prev, entries));
+    }, HEARTBEAT_MS);
 
     return () => {
       socket.disconnect();
-      clearInterval(interval);
+      clearInterval(pollInterval);
+      clearInterval(heartbeatInterval);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const getValue = (key) => {
@@ -278,22 +323,22 @@ export const DataProvider = ({ children }) => {
     return value !== undefined && value !== null ? value : 0;
   };
 
-  const getHistory = (key) => {
-    return history[key] || [];
-  };
+  const getHistory = (key) => history[key] || [];
 
   return (
-    <DataContext.Provider value={{
-      sensorData,
-      history,
-      loading,
-      error,
-      lastUpdate,
-      connected,
-      getValue,
-      getHistory,
-      refresh: fetchInitialData
-    }}>
+    <DataContext.Provider
+      value={{
+        sensorData,
+        history,
+        loading,
+        error,
+        lastUpdate,
+        connected,
+        getValue,
+        getHistory,
+        refresh: fetchInitialData,
+      }}
+    >
       {children}
     </DataContext.Provider>
   );
