@@ -43,8 +43,8 @@ function saveHistory(history) {
 // Only the alert types listed here are shown. Everything else is suppressed,
 // including any new rules added to alertEngine later, until added here.
 // Matched against the candidate's `message` (the text shown as the alert type).
-const ALLOWED_ALERT_TYPES = ['Low Feed Tank Level', 'Power Problem', 'Feed Tank Low Signal'];
-const SERVER_TYPES = ['power problem', 'low feed tank level', 'feed tank low signal'];
+const ALLOWED_ALERT_TYPES = ['Power Problem', 'Feed Tank Low Signal']
+const SERVER_TYPES = ['power problem', 'feed tank low signal'];
 const SEVERITY_RANK = { Critical: 0, High: 1, Medium: 2, Low: 3, Info: 4 };
 
 const norm = (s) => String(s ?? '').trim().toLowerCase();
