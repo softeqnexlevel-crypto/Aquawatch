@@ -3,32 +3,46 @@ import React, { useState, useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { COLORS, SENSOR_MAP } from '../Dashboard';
 
+// Picks enough decimal places that adjacent bin edges don't round to
+// the same displayed value (e.g. "11.3-11.3" repeated when the range is tiny).
+const getPrecision = (binSize) => {
+  if (!isFinite(binSize) || binSize <= 0) return 2;
+  const decimals = Math.ceil(-Math.log10(binSize));
+  return Math.min(Math.max(decimals, 1), 6); // clamp to 1–6 decimals
+};
+
 export const DistributionHistogram = ({ data, sensorKey }) => {
   const [bins, setBins] = useState(20);
   const history = data?.history?.[sensorKey] || [];
   const sensor = SENSOR_MAP[sensorKey] || { label: sensorKey || 'Sensor', color: COLORS.primary };
 
-  // Picks enough decimal places that adjacent bin edges don't round to
-  // the same displayed value. A fixed .toFixed(1) works fine when the
-  // data spans a wide range, but collapses to identical labels (e.g.
-  // "11.3-11.3" repeated) when the range is tiny — like RO Pressure
-  // barely moving between 11.31 and 11.32 across only a few readings.
-  const getPrecision = (binSize) => {
-    if (!isFinite(binSize) || binSize <= 0) return 2;
-    const decimals = Math.ceil(-Math.log10(binSize));
-    return Math.min(Math.max(decimals, 1), 6); // clamp to 1–6 decimals
-  };
+  // Unit comes from SENSOR_MAP (bar, m³/h, %, µS/cm, ...) instead of being hardcoded.
+  const unit = sensor.unit || '';
+
+  // Valid numeric values only
+  const values = useMemo(
+    () => history.map(d => d.value).filter(v => v !== undefined && v !== null && !isNaN(v)),
+    [history]
+  );
+
+  // Summary statistics
+  const stats = useMemo(() => {
+    if (values.length === 0) return { mean: 0, median: 0, max: 0, min: 0 };
+    const sorted = [...values].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    const median = sorted.length % 2 === 0
+      ? (sorted[mid - 1] + sorted[mid]) / 2
+      : sorted[mid];
+    return {
+      mean: values.reduce((a, b) => a + b, 0) / values.length,
+      median,
+      max: sorted[sorted.length - 1],
+      min: sorted[0],
+    };
+  }, [values]);
 
   const histogramData = useMemo(() => {
-    if (!history || history.length === 0) return [];
-
-    // Extract values and filter out invalid ones
-    const values = history.map(d => d.value).filter(v => v !== undefined && v !== null && !isNaN(v));
     if (values.length === 0) return [];
-
-    // Log the actual values for debugging
-    console.log(`📊 ${sensorKey} values:`, values);
-    console.log(`📊 Min: ${Math.min(...values)}, Max: ${Math.max(...values)}, Mean: ${values.reduce((a, b) => a + b, 0) / values.length}`);
 
     const min = Math.min(...values);
     const max = Math.max(...values);
@@ -38,10 +52,7 @@ export const DistributionHistogram = ({ data, sensorKey }) => {
       return [{ range: `${min.toFixed(2)}`, label: min.toFixed(2), count: values.length }];
     }
 
-    // Don't create more bins than there is real data to fill them with —
-    // 20 bins for 4 readings just produces a wall of empty, overlapping
-    // labels. Cap to the smaller of: what the user picked, or a sane
-    // number derived from how many readings actually exist.
+    // Don't create more bins than there is real data to fill them with.
     const effectiveBins = Math.max(1, Math.min(bins, values.length));
     const binSize = range / effectiveBins;
     const precision = getPrecision(binSize);
@@ -50,33 +61,26 @@ export const DistributionHistogram = ({ data, sensorKey }) => {
       const start = min + i * binSize;
       const end = min + (i + 1) * binSize;
       return {
-        range: `${start.toFixed(precision)}-${end.toFixed(precision)}`, // full range — shown in tooltip
-        label: start.toFixed(precision),                                 // short label — shown on axis
+        range: `${start.toFixed(precision)}-${end.toFixed(precision)}`, // full range — tooltip
+        label: start.toFixed(precision),                                 // short label — axis
         count: 0,
         start,
         end,
       };
     });
 
-    // Count values in each bin
     values.forEach(v => {
-      // Handle edge case where value equals the max
-      let binIndex;
-      if (v === max) {
-        binIndex = effectiveBins - 1;
-      } else {
-        binIndex = Math.min(Math.floor((v - min) / binSize), effectiveBins - 1);
-      }
-      if (binsArray[binIndex]) {
-        binsArray[binIndex].count++;
-      }
+      const binIndex = v === max
+        ? effectiveBins - 1
+        : Math.min(Math.floor((v - min) / binSize), effectiveBins - 1);
+      if (binsArray[binIndex]) binsArray[binIndex].count++;
     });
 
     return binsArray;
-  }, [history, bins, sensorKey]);
+  }, [values, bins]);
 
-  // If no data, show empty state
-  if (!history || history.length === 0) {
+  // Empty state
+  if (!history || history.length === 0 || values.length === 0) {
     return (
       <div style={{
         background: 'var(--card)',
@@ -94,11 +98,6 @@ export const DistributionHistogram = ({ data, sensorKey }) => {
       </div>
     );
   }
-
-  const values = history.map(d => d.value).filter(v => v !== undefined && v !== null && !isNaN(v));
-  const mean = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : 0;
-  const median = values.length > 0 ? [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)] : 0;
-  const maxValue = values.length > 0 ? Math.max(...values) : 0;
 
   return (
     <div style={{
@@ -150,10 +149,10 @@ export const DistributionHistogram = ({ data, sensorKey }) => {
         color: 'var(--muted-foreground)',
         flexWrap: 'wrap'
       }}>
-        <span>Mean: <span style={{ color: 'var(--foreground)', fontFamily: 'var(--font-mono)' }}>{mean.toFixed(2)} bar</span></span>
-        <span>Median: <span style={{ color: 'var(--foreground)', fontFamily: 'var(--font-mono)' }}>{median.toFixed(2)} bar</span></span>
-        <span>Max: <span style={{ color: COLORS.success, fontFamily: 'var(--font-mono)' }}>{maxValue.toFixed(2)} bar</span></span>
-        <span>Min: <span style={{ color: COLORS.warning, fontFamily: 'var(--font-mono)' }}>{Math.min(...values).toFixed(2)} bar</span></span>
+        <span>Mean: <span style={{ color: 'var(--foreground)', fontFamily: 'var(--font-mono)' }}>{stats.mean.toFixed(2)} {unit}</span></span>
+        <span>Median: <span style={{ color: 'var(--foreground)', fontFamily: 'var(--font-mono)' }}>{stats.median.toFixed(2)} {unit}</span></span>
+        <span>Max: <span style={{ color: COLORS.success, fontFamily: 'var(--font-mono)' }}>{stats.max.toFixed(2)} {unit}</span></span>
+        <span>Min: <span style={{ color: COLORS.warning, fontFamily: 'var(--font-mono)' }}>{stats.min.toFixed(2)} {unit}</span></span>
       </div>
 
       {histogramData.length > 0 ? (
@@ -174,6 +173,7 @@ export const DistributionHistogram = ({ data, sensorKey }) => {
               tick={{ fontSize: 9, fill: 'var(--muted-foreground)', fontFamily: 'var(--font-mono)' }}
               axisLine={false}
               tickLine={false}
+              allowDecimals={false}
             />
             <Tooltip
               content={({ active, payload }) => {
@@ -186,7 +186,7 @@ export const DistributionHistogram = ({ data, sensorKey }) => {
                     borderRadius: 4,
                     padding: '8px 12px'
                   }}>
-                    <p style={{ fontSize: 10, color: '#4d7a9e' }}>Range: {d.range} bar</p>
+                    <p style={{ fontSize: 10, color: '#4d7a9e' }}>Range: {d.range} {unit}</p>
                     <p style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: COLORS.primary }}>
                       Count: {d.count}
                     </p>
