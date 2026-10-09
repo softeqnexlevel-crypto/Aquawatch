@@ -45,7 +45,7 @@ function saveHistory(history) {
 // Matched against the candidate's `message` (the text shown as the alert type).
 const ALLOWED_ALERT_TYPES = ['Low Feed Tank Level', 'Power Problem'];
 
-const SEVERITY_RANK = { Critical: 0, High: 1, Medium: 2, Low: 3, Info: 4 };
+const SEVERITY_RANK = { Critical: 0, High: 1, Low: 3, Info: 4 };
 
 const norm = (s) => String(s ?? '').trim().toLowerCase();
 
