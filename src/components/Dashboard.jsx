@@ -542,10 +542,9 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   // when the dedicated SystemActive bit is stale or mapped incorrectly.
   const systemActiveRaw = getValue('RO5-SystemActive');
   const rawSystemActiveOn = isActive(systemActiveRaw);
-
-  const feedPumpOn = isActive(feedPumpRaw);
-  const backwashOn = isActive(backwashRaw);
-
+ 
+  const feedPumpOn = bitOn(getValue('RO5-Feedpump'));
+ const backwashOn = bitOn(getValue('RO5-PrefilterBackwash')) || bitOn(getValue('RO5-PrefilterBackwashing'));
   // ── LIVE FEED TANK LEVEL ────────────────────────────────────────────────
   // The RAW transmitter value is the source of truth for the feed tank.
   // Convert RAW -> percentage exactly once using the existing calibration.
@@ -657,9 +656,18 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const isDosingOn = dosingActive === 'ON' || isActive(dosingActive);
 
   // Pumps only run in FILTER mode with the system truly active.
-  const highPressurePumpOn = operationMode === 'FILTER' && systemActiveOn;
-  const dosingPumpOn = operationMode === 'FILTER' && systemActiveOn && isDosingOn;
+// Pump cards follow the PLC bits directly.
+ const bitOn = (v) => {
+  if (v === true) return true;
+  if (typeof v === 'number') return v === 1;
+  if (typeof v === 'string') {
+    return ['1', 'true', 'on', 'running', 'active', 'yes'].includes(v.trim().toLowerCase());
+  }
+  return false;
+};
 
+const highPressurePumpOn = bitOn(getValue('RO5-HPPpump'));
+const dosingPumpOn = isDosingOn;
   // ── System Operation display (FILTER / BACKWASH / STANDBY / OFF) ───────
   // System Operation is displayed directly from the PLC operation state.
   // It is NOT overridden by the dedicated SystemActive bit.
@@ -987,7 +995,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             <SectionTitle>Equipment Status</SectionTitle>
             <div className="grid grid-cols-2 gap-1.5 sm:gap-2">
               <EquipmentStatusItem icon={Wrench} label="High Pressure Pump" state={highPressurePumpOn ? 'on' : 'off'} />
-              <EquipmentStatusItem icon={Wrench} label="Feed Pump" state={feedPumpOn && !tankEmpty ? 'on' : 'off'} />
+              <EquipmentStatusItem icon={Wrench} label="Feed Pump" state={feedPumpOn ? 'on' : 'off'} />
               <EquipmentStatusItem icon={FlaskConical} label="Dosing Pump" state={dosingPumpOn ? 'on' : 'off'} />
               <EquipmentStatusItem icon={Filter} label="Prefilter" state={backwashOn ? 'backwash' : 'filtering'} />
             </div>
