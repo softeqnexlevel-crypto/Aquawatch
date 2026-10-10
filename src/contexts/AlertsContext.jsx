@@ -77,9 +77,9 @@ export function AlertsProvider({ children }) {
 
   // Server stores Power Problem history, so skip the browser's own copy of it.
   const mergedHistory = [
-    ...history.filter((h) => norm(h.type) !== 'power problem'),
-    ...serverHistory,
-  ];
+  ...history.filter((h) => !SERVER_TYPES.includes(norm(h.type))),
+  ...serverHistory,
+];
 
   // Tracks which rule IDs were active last evaluation, for hysteresis.
   const activeIdsRef = useRef(new Set());
@@ -197,31 +197,25 @@ export function AlertsProvider({ children }) {
     recompute();
   }, [recompute]);
 
-    const reportRef = useRef(reportExtraAlerts);
+  const reportRef = useRef(reportExtraAlerts);
   reportRef.current = reportExtraAlerts;
 
+  // PLC Data Lost follows the server's record: the newest event decides.
   useEffect(() => {
-    const STALE_MS = 120000; // same as the backend notifier
-    const check = () => {
-      const last = lastUpdate ? new Date(lastUpdate).getTime() : 0;
-      const age = Date.now() - last;
-      const stale = last > 0 && age > STALE_MS;
-      reportRef.current('plc-data-lost', [{
-        id: 'derived-plc-data-lost',
-        active: stale,
-        source: 'derived',
-        severity: 'Critical',
-        message: 'PLC Data Lost',
-        equipment: 'RO5 - MQTT Link',
-        value: `${Math.round(age / 1000)}s since last data`,
-        threshold: `> ${STALE_MS / 1000}s`,
-        description: 'No data received from the PLC/ABox. Check its power and network.',
-      }]);
-    };
-    check();
-    const t = setInterval(check, 5000);
-    return () => clearInterval(t);
-  }, [lastUpdate]);
+    const newest = serverHistory.find((e) => norm(e.type) === 'plc data lost');
+    const open = !!newest && newest.kind === 'triggered';
+    reportRef.current('plc-data-lost', [{
+      id: 'derived-plc-data-lost',
+      active: open,
+      source: 'derived',
+      severity: 'Critical',
+      message: 'PLC Data Lost',
+      equipment: 'RO5 - MQTT Link',
+      value: 'No data from PLC',
+      threshold: '',
+      description: 'The backend is receiving no data from the PLC/ABox. Check its power and network.',
+    }]);
+  }, [serverHistory]);
 
   const activeAlerts = alerts.filter((a) => a.status === 'Active');
   const counts = {
