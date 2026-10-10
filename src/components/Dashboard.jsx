@@ -539,6 +539,13 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   // PLC-reported lifetime system run-hours
   const systemRunHrs = getNumber('RO5-SystemRunhrs');
 
+  // PLC-reported run-hours for today
+  const systemDailyRunHrsRaw = getValue('RO5-SystemDailyRunHrs');
+  const systemDailyRunHrs = getNumber('RO5-SystemDailyRunHrs');
+  const hasDailyRunHrs =
+    sensorData['RO5-SystemDailyRunHrs']?.value !== undefined &&
+    sensorData['RO5-SystemDailyRunHrs']?.value !== null;
+
   const systemOperation = getValue('RO5-SystemOperation');
   const systemMode = getValue('RO5-SystemMode');
   const dosingActive = getValue('RO5-AntiscalantDosingActive');
@@ -830,6 +837,17 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           icon={AlertTriangle} iconBg="rgba(239,68,68,0.12)" iconColor={COLORS.danger}
           title="Active Alarms" value={activeAlarmsList.length} valueColor={activeAlarmsList.length > 0 ? COLORS.danger : COLORS.success}
           sub={criticalAlarmsCount > 0 ? `${criticalAlarmsCount} Critical` : 'All clear'} subColor={criticalAlarmsCount > 0 ? COLORS.danger : COLORS.success}
+        />
+        {/* Daily run hours: PLC-reported (RO5-SystemDailyRunHrs) */}
+        <TopStatusCard
+          icon={Clock}
+          iconBg="rgba(14,165,233,0.12)"
+          iconColor={COLORS.primary}
+          title="Daily Run Hours"
+          value={hasDailyRunHrs && hasFreshData ? formatHoursFromHours(systemDailyRunHrs) : '--'}
+          valueColor={hasDailyRunHrs && hasFreshData ? COLORS.primary : COLORS.muted}
+          sub={hasDailyRunHrs && hasFreshData ? `${safeFormat(systemDailyRunHrs, 1)} hrs today` : 'No data'}
+          subColor="var(--muted-foreground)"
         />
       </div>
 
