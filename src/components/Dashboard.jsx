@@ -66,6 +66,17 @@ const safeNumber = (value, fallback = 0) => {
   return (isNaN(num) || !isFinite(num)) ? fallback : num;
 };
 
+// Reads an MQTT bit ("ON"/"OFF", 1/0, true/false) as a real boolean.
+// Defined at module level so it is available everywhere in this file.
+const bitOn = (v) => {
+  if (v === true) return true;
+  if (typeof v === 'number') return v === 1;
+  if (typeof v === 'string') {
+    return ['1', 'true', 'on', 'running', 'active', 'yes'].includes(v.trim().toLowerCase());
+  }
+  return false;
+};
+
 // Formats a duration given in HOURS (float, PLC-reported) as "Xh Ym".
 function formatHoursFromHours(hrs) {
   if (!Number.isFinite(hrs) || hrs < 0) return '0h 0m';
@@ -538,13 +549,25 @@ export function Dashboard({ onViewAllAlerts } = {}) {
 
   // ── PLC STATUS INPUTS ───────────────────────────────────────────────────
   // Keep the raw PLC SystemActive bit separate from the effective plant state.
-  // In this installation the operation/machine signals can be correct even
-  // when the dedicated SystemActive bit is stale or mapped incorrectly.
   const systemActiveRaw = getValue('RO5-SystemActive');
   const rawSystemActiveOn = isActive(systemActiveRaw);
- 
-  const feedPumpOn = bitOn(getValue('RO5-Feedpump'));
- const backwashOn = bitOn(getValue('RO5-PrefilterBackwash')) || bitOn(getValue('RO5-PrefilterBackwashing'));
+
+  // ── DATA FRESHNESS (defined early so every status below can use it) ─────
+  const activeSensors = Object.keys(sensorData).filter(key => sensorData[key]?.value !== undefined && sensorData[key]?.value !== null).length;
+  const totalSensors = 15;
+  const isDataFresh = Boolean(
+    lastUpdate && (Date.now() - new Date(lastUpdate).getTime()) < DATA_FRESHNESS_WINDOW_MS
+  );
+  const hasFreshData = connected && activeSensors > 0 && isDataFresh;
+
+  // ── EQUIPMENT BITS ──────────────────────────────────────────────────────
+  // Every status below follows its MQTT bit, and reads OFF when no data is arriving.
+  const feedPumpOn         = hasFreshData && bitOn(getValue('RO5-Feedpump'));
+  const highPressurePumpOn = hasFreshData && bitOn(getValue('RO5-HPPpump'));
+  const backwashOn         = hasFreshData && (bitOn(getValue('RO5-PrefilterBackwash')) || bitOn(getValue('RO5-PrefilterBackwashing')));
+  const isDosingOn         = hasFreshData && bitOn(dosingActive);
+  const dosingPumpOn       = isDosingOn;
+
   // ── LIVE FEED TANK LEVEL ────────────────────────────────────────────────
   // The RAW transmitter value is the source of truth for the feed tank.
   // Convert RAW -> percentage exactly once using the existing calibration.
@@ -583,33 +606,27 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const criticalAlarmsPresent = criticalAlarmsCount > 0;
 
   // ── MODE RESOLUTION ────────────────────────────────────────────────────
-  // SystemOperation is the authoritative PLC operation state.
-  // SystemActive is a separate ON/OFF signal and must NOT overwrite it.
-  // Fallbacks are used only when SystemOperation is unavailable.
+  // SystemOperation is the authoritative PLC operation state when present.
+  // With no sensor data at all, the operation reads OFF.
   const plcOperation = normalizeSystemOperation(systemOperation);
   const plcMode = normalizeSystemMode(systemMode);
 
-  const operationMode =
-    plcOperation !== 'UNKNOWN'
+  const operationMode = !hasFreshData
+    ? 'OFF'
+    : plcOperation !== 'UNKNOWN'
       ? plcOperation
       : backwashOn
         ? 'BACKWASH'
         : plcMode !== 'UNKNOWN'
           ? plcMode
-          : feedPumpOn
+          : (feedPumpOn || highPressurePumpOn)
             ? 'FILTER'
             : 'STANDBY';
 
-  // Effective ON state: the plant is considered active when the dedicated
-  // bit is ON OR the PLC is explicitly reporting an active operation OR the
-  // physical pump/backwash signal is ON. This prevents a bad/stale
-  // SystemActive bit from forcing a running FILTER plant to OFF on the UI.
+  // Effective ON state: follows the pump/backwash bits (or the SystemActive
+  // bit when the PLC sends it), and is OFF when there is no sensor data.
   const systemActiveOn =
-    rawSystemActiveOn ||
-    operationMode === 'FILTER' ||
-    operationMode === 'BACKWASH' ||
-    feedPumpOn ||
-    backwashOn;
+    hasFreshData && (rawSystemActiveOn || feedPumpOn || highPressurePumpOn || backwashOn);
 
   // Why is it in STANDBY?
   const standbyReason = tankEmpty
@@ -653,21 +670,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const systemModeDisplay = isAutoMode ? 'AUTO' : 'MANUAL';
 
   const isSystemOn = systemActiveOn;
-  const isDosingOn = dosingActive === 'ON' || isActive(dosingActive);
 
-  // Pumps only run in FILTER mode with the system truly active.
-// Pump cards follow the PLC bits directly.
- const bitOn = (v) => {
-  if (v === true) return true;
-  if (typeof v === 'number') return v === 1;
-  if (typeof v === 'string') {
-    return ['1', 'true', 'on', 'running', 'active', 'yes'].includes(v.trim().toLowerCase());
-  }
-  return false;
-};
-
-const highPressurePumpOn = bitOn(getValue('RO5-HPPpump'));
-const dosingPumpOn = isDosingOn;
   // ── System Operation display (FILTER / BACKWASH / STANDBY / OFF) ───────
   // System Operation is displayed directly from the PLC operation state.
   // It is NOT overridden by the dedicated SystemActive bit.
@@ -750,13 +753,6 @@ const dosingPumpOn = isDosingOn;
   const isStartingUp = systemActiveOn && feedPumpOn && !highPressurePumpOn && operationMode === 'FILTER';
 
   const dailyProdDisplay = summaryLoading ? '...' : Math.round(dailyProduction).toLocaleString();
-  const activeSensors = Object.keys(sensorData).filter(key => sensorData[key]?.value !== undefined && sensorData[key]?.value !== null).length;
-  const totalSensors = 15;
-
-  const isDataFresh = Boolean(
-    lastUpdate && (Date.now() - new Date(lastUpdate).getTime()) < DATA_FRESHNESS_WINDOW_MS
-  );
-  const hasFreshData = connected && activeSensors > 0 && isDataFresh;
 
   const roHealthScore = computeHealthScore(activeAlarmsList, hasFreshData);
 
@@ -841,23 +837,23 @@ const dosingPumpOn = isDosingOn;
       <div>
         <SectionTitle>Live Instruments</SectionTitle>
         <div className="grid grid-cols-2 gap-2 sm:gap-4 items-stretch">
-          <InstrumentCard 
-            title="Pressure" 
+          <InstrumentCard
+            title="Pressure"
             // subtitle="System Pressure Gauge"
-            status={pressureHasData ? `${roPressure.toFixed(1)} bar` : '--'} 
+            status={pressureHasData ? `${roPressure.toFixed(1)} bar` : '--'}
             statusTone={pressureStatusTone}
           >
             <div style={INSTRUMENT_BODY_STYLE(isMobile)}>
               <PressureGauge
                 value={pressureHasData ? roPressure : undefined}
                 unit={PRESSURE_UNIT_DISPLAY}
-                size={gaugeVisual} 
+                size={gaugeVisual}
               />
             </div>
           </InstrumentCard>
 
-          <InstrumentCard 
-            title="Feed Tank" 
+          <InstrumentCard
+            title="Feed Tank"
             // subtitle="Tank Level Indicator"
             status={tankHasData ? `${feedTankLevel.toFixed(1)}%` : '--'}
             statusTone={tankStatusTone}
@@ -865,8 +861,8 @@ const dosingPumpOn = isDosingOn;
             <div style={INSTRUMENT_BODY_STYLE(isMobile)}>
               <TankLevelGauge
                 value={tankHasData ? feedTankLevel : undefined}
-                height={gaugeVisual} 
-                width={isMobile ? 56 : 84} 
+                height={gaugeVisual}
+                width={isMobile ? 56 : 84}
               />
             </div>
           </InstrumentCard>
@@ -1155,70 +1151,70 @@ const dosingPumpOn = isDosingOn;
           background: !connected ? 'rgba(239,68,68,0.05)' : hasFreshData ? 'rgba(34,197,94,0.05)' : 'rgba(245,158,11,0.05)',
           borderBottom: `1px solid ${!connected ? 'rgba(239,68,68,0.15)' : hasFreshData ? 'rgba(34,197,94,0.15)' : 'rgba(245,158,11,0.15)'}`
         }}>
-         <div className="flex items-center gap-3 flex-wrap">
-  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-    <span
-      style={{
-        fontSize: 12,
-        color: !connected
-          ? COLORS.danger
-          : hasFreshData
-          ? COLORS.success
-          : COLORS.warning,
-        display: 'inline-block',
-        animation: connected && hasFreshData
-          ? 'pulse 1.5s ease-in-out infinite'
-          : 'none'
-      }}
-    >
-      📡
-    </span>
+          <div className="flex items-center gap-3 flex-wrap">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span
+                style={{
+                  fontSize: 12,
+                  color: !connected
+                    ? COLORS.danger
+                    : hasFreshData
+                      ? COLORS.success
+                      : COLORS.warning,
+                  display: 'inline-block',
+                  animation: connected && hasFreshData
+                    ? 'pulse 1.5s ease-in-out infinite'
+                    : 'none'
+                }}
+              >
+                📡
+              </span>
 
-    <span
-      style={{
-        fontSize: 10,
-        fontWeight: 600,
-        color: !connected
-          ? COLORS.danger
-          : hasFreshData
-          ? COLORS.success
-          : COLORS.warning
-      }}
-    >
-      {!connected
-        ? 'DISCONNECTED'
-        : hasFreshData
-        ? 'LIVE DATA'
-        : 'NO SENSOR DATA'}
-    </span>
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: !connected
+                    ? COLORS.danger
+                    : hasFreshData
+                      ? COLORS.success
+                      : COLORS.warning
+                }}
+              >
+                {!connected
+                  ? 'DISCONNECTED'
+                  : hasFreshData
+                    ? 'LIVE DATA'
+                    : 'NO SENSOR DATA'}
+              </span>
 
-    {connected && (
-      <span
-        style={{
-          fontSize: 9,
-          color: 'var(--muted-foreground)'
-        }}
-      >
-        · {hasFreshData
-          ? 'All systems online'
-          : `${activeSensors}/${totalSensors} sensors reporting`}
-      </span>
-    )}
-  </div>
+              {connected && (
+                <span
+                  style={{
+                    fontSize: 9,
+                    color: 'var(--muted-foreground)'
+                  }}
+                >
+                  · {hasFreshData
+                    ? 'All systems online'
+                    : `${activeSensors}/${totalSensors} sensors reporting`}
+                </span>
+              )}
+            </div>
 
-  <style>{`
-    @keyframes pulse {
-      0%, 100% {
-        opacity: 1;
-        transform: scale(1);
-      }
-      50% {
-        opacity: 0.45;
-        transform: scale(1.15);
-      }
-    }
-  `}</style>
-</div>
+            <style>{`
+              @keyframes pulse {
+                0%, 100% {
+                  opacity: 1;
+                  transform: scale(1);
+                }
+                50% {
+                  opacity: 0.45;
+                  transform: scale(1.15);
+                }
+              }
+            `}</style>
+          </div>
           <div className="flex items-center gap-4 flex-wrap">
             <button
               onClick={handleRefresh}
