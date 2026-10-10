@@ -815,7 +815,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     <div className="flex flex-col gap-3 sm:gap-4">
 
       {/* Top Status Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-3">
         {/* System Operation: FILTER / BACKWASH / STANDBY / OFF */}
         <TopStatusCard
           icon={Settings}
@@ -850,17 +850,6 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           value={hasDailyRunHrs && hasFreshData ? formatHoursFromHours(systemDailyRunHrs) : '--'}
           valueColor={hasDailyRunHrs && hasFreshData ? COLORS.primary : COLORS.muted}
           sub={hasDailyRunHrs && hasFreshData ? `${safeFormat(systemDailyRunHrs, 1)} hrs today` : 'No data'}
-          subColor="var(--muted-foreground)"
-        />
-        {/* Total run hours: PLC-reported (RO5-SystemRunhrs) */}
-        <TopStatusCard
-          icon={Clock}
-          iconBg="rgba(14,165,233,0.12)"
-          iconColor={COLORS.primary}
-          title="Service Run Hours"
-          value={hasRunHrs && hasFreshData ? formatHoursFromHours(systemRunHrs) : '--'}
-          valueColor={hasRunHrs && hasFreshData ? COLORS.primary : COLORS.muted}
-          sub={hasRunHrs && hasFreshData ? `${safeFormat(systemRunHrs, 1)} hrs in service` : 'No data'}
           subColor="var(--muted-foreground)"
         />
       </div>
@@ -940,6 +929,17 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             trend={getTrend(history, 'RO5-FeedTankLevelRaw')}
             statusText={hasRawTankReading ? `≈ ${calibratedFeedTankPct.toFixed(1)}%` : 'No reading'}
             statusOk={hasRawTankReading} />
+          {/* Service run hours: PLC-reported (RO5-SystemRunhrs), next to Feed Tank Raw */}
+          <TopStatusCard
+            icon={Clock}
+            iconBg="rgba(14,165,233,0.12)"
+            iconColor={COLORS.primary}
+            title="Service Run Hours"
+            value={hasRunHrs && hasFreshData ? formatHoursFromHours(systemRunHrs) : '--'}
+            valueColor={hasRunHrs && hasFreshData ? COLORS.primary : COLORS.muted}
+            sub={hasRunHrs && hasFreshData ? `${safeFormat(systemRunHrs, 1)} hrs in service` : 'No data'}
+            subColor="var(--muted-foreground)"
+          />
         </div>
       </div>
     </div>
