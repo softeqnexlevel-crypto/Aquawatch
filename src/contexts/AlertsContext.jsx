@@ -43,14 +43,14 @@ function saveHistory(history) {
 // Only the alert types listed here are shown. Everything else is suppressed,
 // including any new rules added to alertEngine later, until added here.
 // Matched against the candidate's `message` (the text shown as the alert type).
-const ALLOWED_ALERT_TYPES = ['Power Problem', 'Feed Tank Low Signal']
-const SERVER_TYPES = ['power problem', 'feed tank low signal'];
+const ALLOWED_ALERT_TYPES = ['Power Problem', 'Feed Tank Low Signal', 'PLC Data Lost']
+const SERVER_TYPES = ['power problem', 'feed tank low signal','PLC Data Lost' ];
 const SEVERITY_RANK = { Critical: 0, High: 1, Medium: 2, Low: 3, Info: 4 };
 
 const norm = (s) => String(s ?? '').trim().toLowerCase();
 
 export function AlertsProvider({ children }) {
-  const { sensorData, getValue } = useData();
+ const { sensorData, getValue, lastUpdate } = useData();
   const [alerts, setAlerts] = useState([]);
   const [history, setHistory] = useState(loadHistory);
   const [serverHistory, setServerHistory] = useState([]);
@@ -196,6 +196,32 @@ export function AlertsProvider({ children }) {
     extraSourcesRef.current[sourceKey] = candidates;
     recompute();
   }, [recompute]);
+
+    const reportRef = useRef(reportExtraAlerts);
+  reportRef.current = reportExtraAlerts;
+
+  useEffect(() => {
+    const STALE_MS = 120000; // same as the backend notifier
+    const check = () => {
+      const last = lastUpdate ? new Date(lastUpdate).getTime() : 0;
+      const age = Date.now() - last;
+      const stale = last > 0 && age > STALE_MS;
+      reportRef.current('plc-data-lost', [{
+        id: 'derived-plc-data-lost',
+        active: stale,
+        source: 'derived',
+        severity: 'Critical',
+        message: 'PLC Data Lost',
+        equipment: 'RO5 - MQTT Link',
+        value: `${Math.round(age / 1000)}s since last data`,
+        threshold: `> ${STALE_MS / 1000}s`,
+        description: 'No data received from the PLC/ABox. Check its power and network.',
+      }]);
+    };
+    check();
+    const t = setInterval(check, 5000);
+    return () => clearInterval(t);
+  }, [lastUpdate]);
 
   const activeAlerts = alerts.filter((a) => a.status === 'Active');
   const counts = {
