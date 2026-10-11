@@ -139,7 +139,7 @@ function SearchModal({ open, onClose }) {
 }
 
 // ── Notifications dropdown ─────────────────────────────────────────────────
-function NotifDropdown({ open, onClose, alerts, onMarkAllRead }) {
+function NotifDropdown({ open, onClose, alerts, onMarkAllRead, onViewAll }) {
   const ref = useRef(null);
   const [isMobile, setIsMobile] = useState(false);
 
@@ -195,7 +195,7 @@ function NotifDropdown({ open, onClose, alerts, onMarkAllRead }) {
         ))}
       </div>
       <div style={{ padding: "10px 14px", textAlign: "center" }}>
-        <button onClick={onClose} style={{ fontSize: 11, color: BRAND.blue, background: "none", border: "none", cursor: "pointer" }}>View all alerts</button>
+        <button onClick={onViewAll} style={{ fontSize: 11, color: BRAND.blue, background: "none", border: "none", cursor: "pointer" }}>View all notifications</button>
       </div>
     </div>
   );
@@ -354,6 +354,13 @@ export function TopNav({ darkMode, onToggleDark, alertCount, title }) {
 
   const handleNavigateProfile  = () => navigate("/app/settings");
   const handleNavigateSettings = () => navigate("/app/settings");
+
+  // "View all notifications" opens the Alerts page.
+  // If your Alerts page lives at a different address, change it here.
+  const handleViewAllNotifications = () => {
+    setNotifOpen(false);
+    navigate("/app/alerts");
+  };
 
   // ⌘K / Ctrl+K shortcut
   useEffect(() => {
@@ -535,6 +542,7 @@ export function TopNav({ darkMode, onToggleDark, alertCount, title }) {
             onClose={() => setNotifOpen(false)}
             alerts={alerts}
             onMarkAllRead={markAllRead}
+            onViewAll={handleViewAllNotifications}
           />
         </div>
 

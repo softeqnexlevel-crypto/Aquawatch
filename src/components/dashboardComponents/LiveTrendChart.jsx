@@ -1,5 +1,6 @@
 // components/dashboardComponents/LiveTrendChart.jsx
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import { API_BASE_URL } from '../../config';
 import { ComposedChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, ReferenceArea } from "recharts";
 import { Play, Pause, Maximize2, Minimize2 } from "lucide-react";
 import { format, subHours, subDays, subWeeks } from 'date-fns';
@@ -20,6 +21,54 @@ export const LiveTrendChart = ({ data, sensorKey, height = 200, showControls = t
     unit: '',
     color: COLORS.primary,
   };
+
+  // ---- Stored history from the database (so 6h / 24h / 7d show real data) ----
+  const [serverPoints, setServerPoints] = useState([]);
+
+  useEffect(() => {
+    let stop = false;
+    const hoursByRange = { '1h': 1, '6h': 6, '24h': 24, '7d': 168 };
+    const hours = hoursByRange[timeRange] || 1;
+
+    const load = async () => {
+      try {
+        const r = await fetch(
+          `${API_BASE_URL}/api/history/${encodeURIComponent(sensorKey)}?hours=${hours}`
+        );
+        if (!r.ok) return;
+        const rows = await r.json();
+        if (stop || !Array.isArray(rows)) return;
+        setServerPoints(
+          rows
+            .map((row) => ({ t: new Date(row.t).getTime(), value: Number(row.value) }))
+            .filter((p) => Number.isFinite(p.t) && Number.isFinite(p.value))
+            .map((p) => ({ ...p, raw: p }))
+        );
+      } catch {
+        /* keep whatever we already have */
+      }
+    };
+
+    setServerPoints([]);
+    load();
+    const timer = setInterval(load, 60000);
+    return () => {
+      stop = true;
+      clearInterval(timer);
+    };
+  }, [sensorKey, timeRange]);
+
+  // Stored points first, then any live points that are newer than the last stored one.
+  const mergedPoints = useMemo(() => {
+    const live = (history || []).map((d) => ({
+      t: new Date(d.time).getTime(),
+      value: d.value,
+      raw: d,
+    }));
+    if (serverPoints.length === 0) return live;
+    const lastServerT = serverPoints[serverPoints.length - 1].t;
+    return [...serverPoints, ...live.filter((p) => p.t > lastServerT)];
+  }, [history, serverPoints]);
 
   // ---- Time window: returns { startMs, endMs, tickFormat } ----
   const getTimeWindow = useCallback(() => {
@@ -52,21 +101,16 @@ export const LiveTrendChart = ({ data, sensorKey, height = 200, showControls = t
 
   // Recompute the window when the user hits a range button AND whenever new
   // readings arrive, so the end of the window keeps moving with the data.
-  const timeWindow = useMemo(() => getTimeWindow(), [getTimeWindow, history]);
+  const timeWindow = useMemo(() => getTimeWindow(), [getTimeWindow, mergedPoints]);
 
-  // Convert the raw history into { t: number, value } so Recharts can treat
-  // the X-axis as a continuous time scale.
+  // Keep only the points inside the selected window, as { t, value }.
   const filteredData = useMemo(() => {
-    if (!history || history.length === 0) return [];
+    if (!mergedPoints || mergedPoints.length === 0) return [];
     const { startMs, endMs } = timeWindow;
-    return history
-      .map((d) => {
-        const t = new Date(d.time).getTime();
-        return { t, value: d.value, raw: d };
-      })
+    return mergedPoints
       .filter((d) => Number.isFinite(d.t) && d.t >= startMs && d.t <= endMs)
       .sort((a, b) => a.t - b.t);
-  }, [history, timeWindow]);
+  }, [mergedPoints, timeWindow]);
 
   // Draw at most ~300 points so the chart stays light on phones.
   const chartData = useMemo(() => {
@@ -115,7 +159,7 @@ export const LiveTrendChart = ({ data, sensorKey, height = 200, showControls = t
   }, [filteredData]);
 
   // Helpful hint when the selected window contains no data.
-  const hasNoDataInWindow = history && history.length > 0 && filteredData.length === 0;
+  const hasNoDataInWindow = mergedPoints.length > 0 && filteredData.length === 0;
 
   if (!sensorData) {
     return (
@@ -136,7 +180,7 @@ export const LiveTrendChart = ({ data, sensorKey, height = 200, showControls = t
     );
   }
 
-  if (!history || history.length === 0) {
+  if (mergedPoints.length === 0) {
     const shown = Number(sensorData.value);
     return (
       <div
