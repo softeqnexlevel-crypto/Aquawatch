@@ -50,8 +50,9 @@ export const LiveTrendChart = ({ data, sensorKey, height = 200, showControls = t
     return { startMs: start.getTime(), endMs: now.getTime(), tickFormat };
   }, [timeRange]);
 
-  // Recompute the window when the user hits a range button.
-  const timeWindow = useMemo(() => getTimeWindow(), [getTimeWindow]);
+  // Recompute the window when the user hits a range button AND whenever new
+  // readings arrive, so the end of the window keeps moving with the data.
+  const timeWindow = useMemo(() => getTimeWindow(), [getTimeWindow, history]);
 
   // Convert the raw history into { t: number, value } so Recharts can treat
   // the X-axis as a continuous time scale.
@@ -67,12 +68,21 @@ export const LiveTrendChart = ({ data, sensorKey, height = 200, showControls = t
       .sort((a, b) => a.t - b.t);
   }, [history, timeWindow]);
 
-     const chartData = useMemo(() => {
-     const maxPoints = 300;
-     if (filteredData.length <= maxPoints) return filteredData;
-     const step = Math.ceil(filteredData.length / maxPoints);
-     return filteredData.filter((_, i) => i % step === 0);
-   }, [filteredData]);
+  // Draw at most ~300 points so the chart stays light on phones.
+  const chartData = useMemo(() => {
+    const maxPoints = 300;
+    if (filteredData.length <= maxPoints) return filteredData;
+    const step = Math.ceil(filteredData.length / maxPoints);
+    return filteredData.filter((_, i) => i % step === 0);
+  }, [filteredData]);
+
+  // X-axis range: from the first reading to the latest one, so the line fills
+  // the chart from start to end. Falls back to the full window until there
+  // are at least two readings.
+  const xDomain = useMemo(() => {
+    if (chartData.length < 2) return [timeWindow.startMs, timeWindow.endMs];
+    return [chartData[0].t, chartData[chartData.length - 1].t];
+  }, [chartData, timeWindow]);
 
   const stats = useMemo(() => {
     if (!filteredData || filteredData.length === 0) return null;
@@ -127,6 +137,7 @@ export const LiveTrendChart = ({ data, sensorKey, height = 200, showControls = t
   }
 
   if (!history || history.length === 0) {
+    const shown = Number(sensorData.value);
     return (
       <div
         style={{
@@ -142,13 +153,17 @@ export const LiveTrendChart = ({ data, sensorKey, height = 200, showControls = t
           Waiting for data stream...
         </p>
         <p style={{ fontSize: 10, color: 'var(--muted-foreground)', marginTop: 4 }}>
-          {sensorInfo.label}: {sensorData.value?.toFixed(2) || '--'} {sensorInfo.unit}
+          {sensorInfo.label}: {Number.isFinite(shown) ? shown.toFixed(2) : (sensorData.value ?? '--')} {sensorInfo.unit}
         </p>
       </div>
     );
   }
 
   const chartHeight = isFullscreen ? height * 1.5 : height;
+
+  // Show seconds on the axis when the visible data spans less than an hour.
+  const axisSpanMs = xDomain[1] - xDomain[0];
+  const axisTickFormat = axisSpanMs < 60 * 60 * 1000 ? 'HH:mm:ss' : timeWindow.tickFormat;
 
   return (
     <div
@@ -275,7 +290,7 @@ export const LiveTrendChart = ({ data, sensorKey, height = 200, showControls = t
         </div>
       ) : (
         <ResponsiveContainer width="100%" height={chartHeight}>
-        <ComposedChart data={chartData}>
+          <ComposedChart data={chartData}>
             <defs>
               <linearGradient id={`gradient-${sensorKey}`} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor={sensorInfo.color || COLORS.primary} stopOpacity={0.3} />
@@ -287,8 +302,8 @@ export const LiveTrendChart = ({ data, sensorKey, height = 200, showControls = t
               dataKey="t"
               type="number"
               scale="time"
-              domain={[timeWindow.startMs, timeWindow.endMs]}
-              tickFormatter={(t) => format(new Date(t), timeWindow.tickFormat)}
+              domain={xDomain}
+              tickFormatter={(t) => format(new Date(t), axisTickFormat)}
               tick={{ fontSize: 9, fill: 'var(--muted-foreground)' }}
               axisLine={false}
               tickLine={false}
@@ -325,12 +340,11 @@ export const LiveTrendChart = ({ data, sensorKey, height = 200, showControls = t
             <Area
               type="monotone"
               dataKey="value"
-              isAnimationActive={false}
               stroke={sensorInfo.color || COLORS.primary}
               strokeWidth={2}
               fill={`url(#gradient-${sensorKey})`}
               name={sensorInfo.label}
-              //isAnimationActive={false}
+              isAnimationActive={false}
             />
 
             {showAnnotations &&
