@@ -67,6 +67,13 @@ export const LiveTrendChart = ({ data, sensorKey, height = 200, showControls = t
       .sort((a, b) => a.t - b.t);
   }, [history, timeWindow]);
 
+     const chartData = useMemo(() => {
+     const maxPoints = 300;
+     if (filteredData.length <= maxPoints) return filteredData;
+     const step = Math.ceil(filteredData.length / maxPoints);
+     return filteredData.filter((_, i) => i % step === 0);
+   }, [filteredData]);
+
   const stats = useMemo(() => {
     if (!filteredData || filteredData.length === 0) return null;
     const values = filteredData.map((d) => d.value).filter((v) => v !== undefined && v !== null);
@@ -268,7 +275,7 @@ export const LiveTrendChart = ({ data, sensorKey, height = 200, showControls = t
         </div>
       ) : (
         <ResponsiveContainer width="100%" height={chartHeight}>
-          <ComposedChart data={filteredData}>
+        <ComposedChart data={chartData}>
             <defs>
               <linearGradient id={`gradient-${sensorKey}`} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor={sensorInfo.color || COLORS.primary} stopOpacity={0.3} />
@@ -318,11 +325,12 @@ export const LiveTrendChart = ({ data, sensorKey, height = 200, showControls = t
             <Area
               type="monotone"
               dataKey="value"
+              isAnimationActive={false}
               stroke={sensorInfo.color || COLORS.primary}
               strokeWidth={2}
               fill={`url(#gradient-${sensorKey})`}
               name={sensorInfo.label}
-              isAnimationActive={isPlaying}
+              //isAnimationActive={false}
             />
 
             {showAnnotations &&

@@ -6,8 +6,8 @@ import { API_BASE_URL } from '../config';
 const DataContext = createContext();
 
 // ── History tuning ─────────────────────────────────────────────────────────
-const MAX_HISTORY_POINTS = 2000;       // per sensor (~5.5 h at 10 s sampling)
-const HEARTBEAT_MS = 10_000;           // sample-and-hold interval while connected
+const MAX_HISTORY_POINTS = 500;       // per sensor (~5.5 h at 10 s sampling)
+const HEARTBEAT_MS = 30_000;           // sample-and-hold interval while connected
 const FALLBACK_POLL_MS = 30_000;       // /api/current polling while socket is down
 
 // Map backend keys to frontend keys
