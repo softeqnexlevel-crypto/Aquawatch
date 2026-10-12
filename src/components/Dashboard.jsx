@@ -951,6 +951,18 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     </div>
   );
 
+            {/* System run 24hrs ago: saved daily record from the backend */}
+          <TopStatusCard
+            icon={Clock}
+            iconBg="rgba(167,139,250,0.12)"
+            iconColor={COLORS.purple}
+            title="System Run 24hrs Ago"
+            value={has24hAgo ? formatHoursFromHours(runHrs24hAgo) : '--'}
+            valueColor={has24hAgo ? COLORS.purple : COLORS.muted}
+            sub={has24hAgo ? `${safeFormat(runHrs24hAgo, 1)} hrs yesterday` : 'No record yet'}
+            subColor="var(--muted-foreground)"
+          />
+
   const renderSystemTab = () => (
     <div className="flex flex-col gap-3 sm:gap-4">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
