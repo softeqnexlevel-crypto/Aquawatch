@@ -8,6 +8,9 @@ import {
 } from '../utils/backwashAlert';
 import { API_BASE_URL } from '../config';
 
+// config.js already ends with /api, so strip it before adding our own.
+const API_ROOT = String(API_BASE_URL || '').replace(/\/api\/?$/, '');
+
 const AlertsContext = createContext();
 
 // History is kept until an operator clears it by hand, so the cap is generous.
@@ -44,7 +47,7 @@ function saveHistory(history) {
 // including any new rules added to alertEngine later, until added here.
 // Matched against the candidate's `message` (the text shown as the alert type).
 const ALLOWED_ALERT_TYPES = ['Power Problem', 'Feed Tank Low Signal', 'PLC Data Lost']
-const SERVER_TYPES = ['power problem', 'feed tank low signal','PLC Data Lost' ];
+const SERVER_TYPES = ['power problem', 'feed tank low signal', 'plc data lost'];
 const SEVERITY_RANK = { Critical: 0, High: 1, Medium: 2, Low: 3, Info: 4 };
 
 const norm = (s) => String(s ?? '').trim().toLowerCase();
@@ -59,7 +62,7 @@ export function AlertsProvider({ children }) {
     let stop = false;
     const load = async () => {
       try {
-        const r = await fetch(`${API_BASE_URL}/api/alert-events`);
+        const r = await fetch(`${API_ROOT}/api/alert-events`);
         if (!r.ok) return;
         const rows = await r.json();
         if (!stop) {
@@ -71,7 +74,7 @@ export function AlertsProvider({ children }) {
       } catch { /* ignore */ }
     };
     load();
-    const t = setInterval(load, 15000);
+    const t = setInterval(load, 5000);
     return () => { stop = true; clearInterval(t); };
   }, []);
 

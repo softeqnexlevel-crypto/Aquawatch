@@ -6,6 +6,9 @@ import { Play, Pause, Maximize2, Minimize2 } from "lucide-react";
 import { format, subHours, subDays, subWeeks } from 'date-fns';
 import { COLORS, SENSOR_MAP } from '../Dashboard';
 
+// config.js already ends with /api, so strip it before adding our own.
+const API_ROOT = String(API_BASE_URL || '').replace(/\/api\/?$/, '');
+
 export const LiveTrendChart = ({ data, sensorKey, height = 200, showControls = true }) => {
   const [isPlaying, setIsPlaying] = useState(true);
   const [timeRange, setTimeRange] = useState('1h');
@@ -33,7 +36,7 @@ export const LiveTrendChart = ({ data, sensorKey, height = 200, showControls = t
     const load = async () => {
       try {
         const r = await fetch(
-          `${API_BASE_URL}/api/history/${encodeURIComponent(sensorKey)}?hours=${hours}`
+          `${API_ROOT}/api/history/${encodeURIComponent(sensorKey)}?hours=${hours}`
         );
         if (!r.ok) return;
         const rows = await r.json();
