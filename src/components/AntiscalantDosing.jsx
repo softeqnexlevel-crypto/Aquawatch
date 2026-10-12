@@ -356,7 +356,7 @@ export function AntiscalantDosing() {
           sub={hasMl24hAgo ? `${(ml24hAgo / 1000).toFixed(3)} L · ${dailySummary.yesterday.day}` : 'No record yet'}
           isMobile={isMobile}
         />
-        <MetricCard
+        {/*}<MetricCard
           label="System Run 24hrs Ago"
           value={hasRun24hAgo ? run24hAgo.toFixed(1) : '--'}
           unit="hrs"
