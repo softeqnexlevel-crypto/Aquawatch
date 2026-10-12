@@ -946,12 +946,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             sub={hasRunHrs && hasFreshData ? `${safeFormat(systemRunHrs, 1)} hrs in service` : 'No data'}
             subColor="var(--muted-foreground)"
           />
-        </div>
-      </div>
-    </div>
-  );
-
-            {/* System run 24hrs ago: saved daily record from the backend */}
+          {/* System run 24hrs ago: saved daily record from the backend */}
           <TopStatusCard
             icon={Clock}
             iconBg="rgba(167,139,250,0.12)"
@@ -962,6 +957,12 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             sub={has24hAgo ? `${safeFormat(runHrs24hAgo, 1)} hrs yesterday` : 'No record yet'}
             subColor="var(--muted-foreground)"
           />
+        </div>
+      </div>
+    </div>
+  );
+
+
 
   const renderSystemTab = () => (
     <div className="flex flex-col gap-3 sm:gap-4">
