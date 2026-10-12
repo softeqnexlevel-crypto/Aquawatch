@@ -1373,7 +1373,7 @@ export function FeedTankManagement() {
                         >
                           <div className="flex items-center gap-1">
                             <MapPin size={9} />
-                            {t.location}
+                            
                           </div>
                         </td>
 
@@ -1757,7 +1757,7 @@ export function FeedTankManagement() {
               }}
             >
               <MapPin size={9} />
-              {selected.location}
+            
             </div>
 
             <div
