@@ -12,6 +12,7 @@ import {
 import { useData } from "../contexts/DataContext";
 import { rawToPercent } from "./dashboardComponents/feedTankCalibration";
 import { format, subHours, subDays } from 'date-fns';
+import { useDailySummary } from "./dashboardComponents/useDailySummary";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function toBool(raw) {
@@ -173,6 +174,13 @@ export function AntiscalantDosing() {
   // const systemRunHrs        = toNum(getValue('RO5-SystemRunhrs'));       // hrs, PLC's own running total
 
   const dailyConsumptionL = antiscalantDailyPLC / 1000;
+
+  // Saved daily record: what happened over the previous day (before the PLC reset to zero)
+  const dailySummary = useDailySummary();
+  const ml24hAgo = dailySummary?.yesterday?.antiscalantMl;
+  const run24hAgo = dailySummary?.yesterday?.runHours;
+  const hasMl24hAgo = Number.isFinite(ml24hAgo);
+  const hasRun24hAgo = Number.isFinite(run24hAgo);
 
   // ── Chart: hourly feed flow over selected range (from client-side ring buffer) ──
   const feedHistory = getHistory('RO5-FEEDFlow');
@@ -337,6 +345,24 @@ export function AntiscalantDosing() {
           color="#0ea5e9"
           icon={Droplet}
           sub={`${dailyConsumptionL.toFixed(3)} L`}
+          isMobile={isMobile}
+        />
+        <MetricCard
+          label="Antiscalant Dosed 24hrs Ago"
+          value={hasMl24hAgo ? ml24hAgo.toFixed(2) : '--'}
+          unit="ml"
+          color="#a78bfa"
+          icon={FlaskConical}
+          sub={hasMl24hAgo ? `${(ml24hAgo / 1000).toFixed(3)} L · ${dailySummary.yesterday.day}` : 'No record yet'}
+          isMobile={isMobile}
+        />
+        <MetricCard
+          label="System Run 24hrs Ago"
+          value={hasRun24hAgo ? run24hAgo.toFixed(1) : '--'}
+          unit="hrs"
+          color="#0ea5e9"
+          icon={Clock}
+          sub={hasRun24hAgo ? `${formatHours(run24hAgo)} · ${dailySummary.yesterday.day}` : 'No record yet'}
           isMobile={isMobile}
         />
         {/* <MetricCard

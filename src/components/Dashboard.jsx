@@ -31,6 +31,7 @@ import {
   DATA_FRESHNESS_WINDOW_MS,
 } from './dashboardComponents/instrumentUtils';
 import { rawToPercent } from './dashboardComponents/feedTankCalibration';
+import { useDailySummary } from './dashboardComponents/useDailySummary';
 
 // isActive now lives in instrumentUtils (avoids a circular import).
 // Re-exported so other files importing it from Dashboard keep working.
@@ -542,6 +543,11 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     sensorData['RO5-SystemRunhrs']?.value !== undefined &&
     sensorData['RO5-SystemRunhrs']?.value !== null;
 
+  // Saved daily record (run hours 24hrs ago) from the backend
+  const dailySummary = useDailySummary();
+  const runHrs24hAgo = dailySummary?.yesterday?.runHours;
+  const has24hAgo = Number.isFinite(runHrs24hAgo);
+
   // PLC-reported run-hours for today
   const systemDailyRunHrsRaw = getValue('RO5-SystemDailyRunHrs');
   const systemDailyRunHrs = getNumber('RO5-SystemDailyRunHrs');
@@ -849,7 +855,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           title="Daily Run Hours"
           value={hasDailyRunHrs && hasFreshData ? formatHoursFromHours(systemDailyRunHrs) : '--'}
           valueColor={hasDailyRunHrs && hasFreshData ? COLORS.primary : COLORS.muted}
-          sub={hasDailyRunHrs && hasFreshData ? `${safeFormat(systemDailyRunHrs, 1)} hrs today` : 'No data'}
+          sub={(hasDailyRunHrs && hasFreshData ? `${safeFormat(systemDailyRunHrs, 1)} hrs today` : 'No data') + (has24hAgo ? ` · 24h ago: ${formatHoursFromHours(runHrs24hAgo)}` : '')}
           subColor="var(--muted-foreground)"
         />
       </div>
