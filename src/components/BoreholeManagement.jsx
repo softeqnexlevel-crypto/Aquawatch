@@ -390,7 +390,7 @@ export function FeedTankManagement() {
 
         name: "Main Feed Tank A",
 
-        location: "North Plant",
+        //location: "North Plant",
 
         status: getStatus(
           tankALevel,
@@ -399,7 +399,7 @@ export function FeedTankManagement() {
 
         level: tankALevel,
 
-        capacity: 500,
+        capacity: 300,
 
         volume:
           (tankALevel / 100) * 500,
@@ -433,7 +433,7 @@ export function FeedTankManagement() {
 
         name: "Flush Tank",
 
-        location: "East Plant",
+        //location: "East Plant",
 
         status: getStatus(
           tankBLevel,
@@ -442,7 +442,7 @@ export function FeedTankManagement() {
 
         level: tankBLevel,
 
-        capacity: 400,
+        capacity: 200,
 
         volume:
           (tankBLevel / 100) * 400,
