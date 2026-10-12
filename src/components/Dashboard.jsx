@@ -855,7 +855,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           title="Daily Run Hours"
           value={hasDailyRunHrs && hasFreshData ? formatHoursFromHours(systemDailyRunHrs) : '--'}
           valueColor={hasDailyRunHrs && hasFreshData ? COLORS.primary : COLORS.muted}
-          sub={(hasDailyRunHrs && hasFreshData ? `${safeFormat(systemDailyRunHrs, 1)} hrs today` : 'No data') + (has24hAgo ? ` · 24h ago: ${formatHoursFromHours(runHrs24hAgo)}` : '')}
+         sub={hasDailyRunHrs && hasFreshData ? `${safeFormat(systemDailyRunHrs, 1)} hrs today` : 'No data'}
           subColor="var(--muted-foreground)"
         />
       </div>
