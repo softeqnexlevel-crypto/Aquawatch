@@ -10,6 +10,7 @@ import {
 import { useData } from '../contexts/DataContext';
 import { useAuth } from '../contexts/AuthContext';
 import { API_BASE_URL } from '../config';
+import { useDailySummary } from '../components/dashboardComponents/useDailySummary';
 import { format, subDays, subWeeks, subMonths } from 'date-fns';
 import {
   buildSensorRows,
@@ -165,12 +166,55 @@ async function fetchProductionSummary() {
   }
 }
 
+// ===================== DAILY LOG (system run hours + antiscalant dosed) =====================
+// Saved by the backend every day before the PLC counters reset to zero.
+const API_ROOT = String(API_BASE_URL || '').replace(/\/api\/?$/, '');
+
+// How many days of the daily log each report type includes
+function daysForType(type) {
+  switch (type) {
+    case 'Daily': return 2;       // yesterday (24hrs ago) + today
+    case 'Weekly': return 7;
+    case 'Monthly': return 31;
+    case 'Quarterly': return 92;
+    case 'Yearly': return 366;
+    default: return 7;            // Custom
+  }
+}
+
+// Never throws: returns [] if the history can't be loaded.
+async function fetchDailyLog(days) {
+  try {
+    const token = localStorage.getItem('accessToken');
+    const response = await fetch(`${API_ROOT}/api/daily-summary/history?days=${days}`, {
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const json = await response.json();
+    return Array.isArray(json?.days) ? json.days : [];
+  } catch (err) {
+    console.error('Report: failed to fetch daily log:', err);
+    return [];
+  }
+}
+
+// CSV block appended under the report CSV
+function dailyLogCsv(rows) {
+  if (!rows || rows.length === 0) return '';
+  const lines = rows.map(r =>
+    [r.day,
+     Number.isFinite(r.runHours) ? r.runHours.toFixed(DECIMALS) : '',
+     Number.isFinite(r.antiscalantMl) ? r.antiscalantMl.toFixed(DECIMALS) : ''].join(','));
+  return `\n\nDaily log\nDate,System Run (hrs),Antiscalant Dosed (ml)\n${lines.join('\n')}`;
+}
+
 // ===================== MAIN COMPONENT =====================
 export function Reports() {
   const { sensorData, history, getValue, getHistory, lastUpdate } = useData();
   const auth = useAuth();
   const userName = auth?.user?.name || auth?.user?.username || auth?.user?.email || 'User';
 
+  const dailySummary = useDailySummary();   // saved run hours + antiscalant for today / 24hrs ago
   const [toast, setToast] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
@@ -226,14 +270,24 @@ export function Reports() {
         type: "Daily",
         category: "Operations",
         size: "156 KB",
-        summary: `Feed: ${fmt(feedFlow)} m³/h | Permeate: ${fmt(permeateFlow)} m³/h | Recovery: ${fmt(recovery)}%`,
+        summary: `Feed: ${fmt(feedFlow)} m³/h | Permeate: ${fmt(permeateFlow)} m³/h | Recovery: ${fmt(recovery)}%` +
+          (Number.isFinite(dailySummary?.yesterday?.runHours)
+            ? ` | Run 24hrs ago: ${fmt(dailySummary.yesterday.runHours)} hrs`
+            : '') +
+          (Number.isFinite(dailySummary?.yesterday?.antiscalantMl)
+            ? ` | Antiscalant 24hrs ago: ${fmt(dailySummary.yesterday.antiscalantMl)} ml`
+            : ''),
         data: {
           feed: feedFlow,
           permeate: permeateFlow,
           concentrate: concentrateFlow,
           recovery: recovery,
           pressure: roPressure,
-          ec: pureWaterEC
+          ec: pureWaterEC,
+          runHoursToday: toNumber(getValue('RO5-SystemDailyRunHrs')),
+          runHours24hAgo: dailySummary?.yesterday?.runHours ?? '',
+          antiscalantMlToday: toNumber(getValue('RO5-AntiscalantDaily')),
+          antiscalantMl24hAgo: dailySummary?.yesterday?.antiscalantMl ?? ''
         }
       },
       {
@@ -328,7 +382,7 @@ export function Reports() {
         }
       },
     ];
-  }, [getValue, getHistory]);
+  }, [getValue, getHistory, dailySummary]);
 
   // ===================== FILTER REPORTS =====================
   const filteredReports = useMemo(() => {
@@ -376,22 +430,24 @@ export function Reports() {
   // ===================== PDF REPORT (client layout) =====================
   // The report window is opened synchronously inside the click (otherwise the
   // browser blocks the popup); the content is written in once the data is ready.
-  function startPdfReport({ reportName, category, filename, iconColor }) {
+  function startPdfReport({ reportName, category, filename, iconColor, days = 2 }) {
     const win = openReportWindow();
     const summaryPromise = fetchProductionSummary();
+    const dailyLogPromise = fetchDailyLog(days);
 
     showToast(
       `Generating ${reportName}`,
       "Preparing PDF...",
       iconColor,
       async () => {
-        const summary = await summaryPromise;
+        const [summary, dailyLog] = await Promise.all([summaryPromise, dailyLogPromise]);
         const html = buildReportHtml({
           generatedAt: new Date(),
           userName,
           reportName,
           kpis: buildKpis({ summary, sensorData }),
           rows: buildSensorRows({ sensorData, getHistory, lastUpdate, category }),
+          dailyLog,
         });
         presentReport(win, html, filename);
       },
@@ -406,6 +462,7 @@ export function Reports() {
       category: report.category,
       filename: `${report.id}_${report.title.replace(/\s+/g, '_')}.pdf`,
       iconColor: "#0ea5e9",
+      days: daysForType(report.type),
     });
   }
 
@@ -416,8 +473,9 @@ export function Reports() {
       `Downloading ${report.title}`,
       "CSV export",
       "#0ea5e9",
-      () => {
-        const content = generateCSV([report.data], report.title);
+      async () => {
+        const log = await fetchDailyLog(daysForType(report.type));
+        const content = generateCSV([report.data], report.title) + dailyLogCsv(log);
         downloadCSV(filename, content);
       }
     );
@@ -430,6 +488,7 @@ export function Reports() {
       category: 'Operations',
       filename: `${type.toLowerCase()}_report_${format(new Date(), 'yyyy-MM-dd')}.pdf`,
       iconColor: "#a78bfa",
+      days: daysForType(type),
     });
   }
 

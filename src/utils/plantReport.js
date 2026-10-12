@@ -50,6 +50,7 @@ export const REPORT_TAGS = [
   { key: 'RO5-SystemRecovery',     label: 'System Recovery',        topic: 'plant/ro1/recovery',              unit: '%',   groups: ['Performance', 'Quality', 'Production', 'Chemical'], low: RECOVERY_LOW_PCT },
   { key: 'RO5-AntiscalantDaily',   label: 'Antiscalant Daily',      topic: 'plant/dosing/antiscalant_daily',  unit: 'ml',  groups: ['Chemical'] },
   { key: 'RO5-SystemRunhrs',       label: 'System Run Hours',       topic: 'plant/ro1/run_hours',             unit: 'hrs', groups: ['Maintenance'] },
+  { key: 'RO5-SystemDailyRunHrs',  label: 'System Run Hours (today)', topic: 'plant/ro1/daily_run_hours',     unit: 'hrs', groups: ['Production', 'Maintenance'] },
 ];
 
 // ───────────────────────── Helpers ─────────────────────────
@@ -129,8 +130,48 @@ export function buildKpis({ summary, sensorData }) {
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+// Daily log: System run hours + Antiscalant dosed per day (saved by the backend
+// before the PLC counters reset). `dailyLog` = [{ day, runHours, antiscalantMl }], oldest first.
+function buildDailyLogHtml(dailyLog, now) {
+  if (!Array.isArray(dailyLog) || dailyLog.length === 0) return '';
+  const today = format(now, 'yyyy-MM-dd');
+  const yesterday = format(new Date(now.getTime() - 24 * 60 * 60 * 1000), 'yyyy-MM-dd');
+  const hrsLabel = (h) => {
+    const m = Math.round(h * 60);
+    return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`;
+  };
+  const has = (v) => Number.isFinite(v);
+  const body = dailyLog.map((r) => {
+    const note = r.day === today ? ' (today, so far)' : r.day === yesterday ? ' (24hrs ago)' : '';
+    return `<tr>
+      <td>${esc(r.day)}${esc(note)}</td>
+      <td>${has(r.runHours) ? esc(r.runHours.toFixed(DECIMALS)) : '—'}</td>
+      <td>${has(r.runHours) ? esc(hrsLabel(r.runHours)) : '—'}</td>
+      <td>${has(r.antiscalantMl) ? esc(r.antiscalantMl.toFixed(DECIMALS)) : '—'}</td>
+      <td>${has(r.antiscalantMl) ? esc((r.antiscalantMl / 1000).toFixed(3)) : '—'}</td>
+    </tr>`;
+  }).join('');
+
+  let total = '';
+  if (dailyLog.length > 1) {
+    const run = dailyLog.map((r) => r.runHours).filter(has).reduce((a, b) => a + b, 0);
+    const ml = dailyLog.map((r) => r.antiscalantMl).filter(has).reduce((a, b) => a + b, 0);
+    total = `<tr class="total"><td>Total</td><td>${esc(run.toFixed(DECIMALS))}</td><td>${esc(hrsLabel(run))}</td>
+      <td>${esc(ml.toFixed(DECIMALS))}</td><td>${esc((ml / 1000).toFixed(3))}</td></tr>`;
+  }
+
+  return `
+  <h2 style="margin-top:24px">System Run &amp; Antiscalant Dosed (Daily)</h2>
+  <div class="wrap">
+    <table>
+      <thead><tr><th>Date</th><th>System Run (hrs)</th><th>System Run (h:m)</th><th>Antiscalant Dosed (ml)</th><th>Antiscalant Dosed (L)</th></tr></thead>
+      <tbody>${body}${total}</tbody>
+    </table>
+  </div>`;
+}
+
 // ───────────────────────── HTML template ─────────────────────────
-export function buildReportHtml({ branding = REPORT_BRANDING, generatedAt = new Date(), userName, reportName, kpis, rows }) {
+export function buildReportHtml({ branding = REPORT_BRANDING, generatedAt = new Date(), userName, reportName, kpis, rows, dailyLog = [] }) {
   const generated = format(generatedAt, 'dd/MM/yyyy, HH:mm:ss');
 
   const kpiHtml = kpis
@@ -175,6 +216,7 @@ export function buildReportHtml({ branding = REPORT_BRANDING, generatedAt = new 
   td { padding: 8px 8px; border: 1px solid #c9cdd2; }
   tr { page-break-inside: avoid; }
   .alarm { color: #dc2626; font-weight: 700; }
+  tr.total td { font-weight: 700; background: #f1f3f5; }
   .nodata { color: #6b7280; }
   .actions { margin-bottom: 16px; }
   .actions button { padding: 8px 16px; font-size: 13px; cursor: pointer; border: 1px solid #0f172a; background: #0f172a; color: #fff; border-radius: 4px; }
@@ -205,7 +247,8 @@ export function buildReportHtml({ branding = REPORT_BRANDING, generatedAt = new 
       <tbody>${rowHtml}</tbody>
     </table>
   </div>
-  <div class="foot">Values are a snapshot at the time of generation.</div>
+  ${buildDailyLogHtml(dailyLog, generatedAt)}
+  <div class="foot">Values are a snapshot at the time of generation. Daily run hours and antiscalant totals are the final values saved before the PLC counters reset at midnight.</div>
 </body>
 </html>`;
 }
