@@ -1,7 +1,7 @@
 // frontend/src/components/UserManagement.jsx - FULLY MOBILE RESPONSIVE
 
 import { useState, useEffect } from "react";
-import { User, Plus, Trash2, Edit2, CheckCircle, X, Shield, Eye, EyeOff, Lock, RefreshCw, Dices } from "lucide-react";
+import { User, Plus, Trash2, Edit2, CheckCircle, X, Shield, Eye, EyeOff, Lock, RefreshCw, Dices, Pause, Play } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 
 // ==================== ROLE PERMISSIONS ====================
@@ -328,7 +328,7 @@ function UserDrawer({ open, onClose, onSave, initial, isEdit = false }) {
             <div style={{ display: "flex", gap: 8 }}>
               {[
                 { label: "Active", v: true },
-                { label: "Inactive", v: false }
+                { label: "Paused", v: false }
               ].map(s => (
                 <button
                   key={s.label}
@@ -468,27 +468,33 @@ export function UserManagement() {
     }
   }
 
-  // ==================== HANDLE TOGGLE ACTIVE ====================
-  async function handleToggleActive(id) {
-    if (!isAdmin) return;
+  // ==================== HANDLE PAUSE / RESUME ====================
+  // Pausing blocks login and cuts off the user's current session; nothing is deleted.
+  const [busyId, setBusyId] = useState(null);
 
-    const user = users.find(u => u.id === id);
-    if (!user) return;
+  async function handlePauseToggle(user) {
+    if (!isAdmin || !user || user.id === me?.id) return;
+    const pausing = user.isActive !== false;
+    const name = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
 
+    const ok = window.confirm(
+      pausing
+        ? `Pause ${name}?\n\nThey will be signed out and cannot access the site (or receive alert emails) until you resume them.`
+        : `Resume ${name}?\n\nThey will be able to sign in again.`
+    );
+    if (!ok) return;
+
+    setBusyId(user.id);
     try {
-      await apiCall(`/auth/users/${id}`, {
+      await apiCall(`/auth/users/${user.id}`, {
         method: 'PUT',
-        body: JSON.stringify({
-          firstName: user.first_name,
-          lastName: user.last_name,
-          role: user.role,
-          isActive: !user.is_active,
-          permissions: user.permissions,
-        })
+        body: JSON.stringify({ isActive: !pausing }),
       });
       await fetchUsers();
     } catch (err) {
-      alert('Failed to update user: ' + err.message);
+      alert(`Failed to ${pausing ? 'pause' : 'resume'} user: ` + err.message);
+    } finally {
+      setBusyId(null);
     }
   }
 
@@ -497,11 +503,11 @@ export function UserManagement() {
     if (!isAdmin) return;
     setEditing({
       id: user.id,
-      firstName: user.first_name,
-      lastName: user.last_name,
+      firstName: user.firstName,
+      lastName: user.lastName,
       email: user.email,
       role: user.role,
-      isActive: user.is_active,
+      isActive: user.isActive !== false,
       permissions: user.permissions || [],
     });
     setDrawerOpen(true);
@@ -517,7 +523,8 @@ export function UserManagement() {
   // ==================== STATS ====================
   const stats = {
     total: users.length,
-    active: users.filter(u => u.is_active).length,
+    active: users.filter(u => u.isActive === true).length,
+    paused: users.filter(u => u.isActive === false).length,
     admins: users.filter(u => u.role === "admin").length,
     operators: users.filter(u => u.role === "operator").length,
     clients: users.filter(u => u.role === "client").length,
@@ -537,14 +544,15 @@ export function UserManagement() {
       )}
 
       {/* KPIs - Responsive */}
-      <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(5, 1fr)" }}>
+      <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(6, 1fr)" }}>
         {[
           { label: isMobile ? "Total" : "Total Users", value: stats.total, color: "#0ea5e9" },
-          { label: isMobile ? "Active" : "Active", value: stats.active, color: "#22c55e" },
-          { label: isMobile ? "Admins" : "Admins", value: stats.admins, color: "#0ea5e9" },
+          { label: "Active", value: stats.active, color: "#22c55e" },
+          { label: "Paused", value: stats.paused, color: "#f59e0b" },
+          { label: "Admins", value: stats.admins, color: "#0ea5e9" },
           { label: isMobile ? "Ops" : "Operators", value: stats.operators, color: "#22c55e" },
-          { label: isMobile ? "Clients" : "Clients", value: stats.clients, color: "#a78bfa" },
-        ].filter((_, idx) => isMobile ? idx < 4 : true).map(c => (
+          { label: "Clients", value: stats.clients, color: "#a78bfa" },
+        ].map(c => (
           <div key={c.label} className="rounded p-2 sm:p-3 flex gap-2 sm:gap-3 items-start" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
             <div className="rounded p-1 sm:p-1.5 mt-0.5" style={{ background: `${c.color}15` }}>
               <User size={isMobile ? 12 : 14} style={{ color: c.color }} />
@@ -555,17 +563,6 @@ export function UserManagement() {
             </div>
           </div>
         ))}
-        {isMobile && (
-          <div key="clients-mobile" className="rounded p-2 sm:p-3 flex gap-2 sm:gap-3 items-start" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-            <div className="rounded p-1 sm:p-1.5 mt-0.5" style={{ background: `rgba(167,139,250,0.1)` }}>
-              <User size={isMobile ? 12 : 14} style={{ color: "#a78bfa" }} />
-            </div>
-            <div>
-              <div style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.06em" }}>Clients</div>
-              <div style={{ fontFamily: "var(--font-mono)", fontSize: isMobile ? 18 : 22, fontWeight: 700, color: "#a78bfa", lineHeight: 1.2 }}>{stats.clients}</div>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Tab bar - Responsive */}
@@ -656,7 +653,7 @@ export function UserManagement() {
 
                     if (isMobile) {
                       return (
-                        <tr key={u.id} style={{ background: i % 2 === 0 ? "var(--card)" : "var(--muted)" }}>
+                        <tr key={u.id} style={{ background: i % 2 === 0 ? "var(--card)" : "var(--muted)", opacity: u.isActive === false ? 0.6 : 1 }}>
                           <td style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                               <div style={{ width: 22, height: 22, borderRadius: "50%", background: `${rc.color}20`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -664,7 +661,7 @@ export function UserManagement() {
                               </div>
                               <div>
                                 <div style={{ fontSize: 10, fontWeight: 500, color: "var(--foreground)" }}>
-                                  {u.first_name} {u.last_name}
+                                  {u.firstName} {u.lastName}
                                 </div>
                                 <div style={{ fontSize: 8, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>{u.email}</div>
                               </div>
@@ -674,27 +671,18 @@ export function UserManagement() {
                             <span style={{ fontSize: 8, fontWeight: 700, color: rc.color, background: rc.bg, borderRadius: 4, padding: "1px 6px", textTransform: "uppercase" }}>{u.role}</span>
                           </td>
                           <td style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)", textAlign: "center" }}>
-                            {isAdmin ? (
-                              <button
-                                onClick={() => handleToggleActive(u.id)}
+                            <span
+                                title={u.isActive === false ? "Paused: cannot sign in" : "Active"}
                                 style={{
-                                  fontSize: 8,
-                                  fontWeight: 600,
-                                  cursor: "pointer",
-                                  color: u.is_active ? "#22c55e" : "#4d7a9e",
-                                  background: u.is_active ? "rgba(34,197,94,0.1)" : "rgba(77,122,158,0.1)",
-                                  border: `1px solid ${u.is_active ? "rgba(34,197,94,0.25)" : "rgba(77,122,158,0.25)"}`,
-                                  borderRadius: 4,
-                                  padding: "1px 6px"
+                                  fontSize: 8, fontWeight: 600,
+                                  color: u.isActive === false ? "#f59e0b" : "#22c55e",
+                                  background: u.isActive === false ? "rgba(245,158,11,0.1)" : "rgba(34,197,94,0.1)",
+                                  border: `1px solid ${u.isActive === false ? "rgba(245,158,11,0.3)" : "rgba(34,197,94,0.25)"}`,
+                                  borderRadius: 4, padding: "1px 6px"
                                 }}
                               >
-                                {u.is_active ? "ACTIVE" : "INACTIVE"}
-                              </button>
-                            ) : (
-                              <span style={{ fontSize: 8, fontWeight: 600, color: u.is_active ? "#22c55e" : "#4d7a9e" }}>
-                                {u.is_active ? "✓" : "✗"}
+                                {u.isActive === false ? "PAUSED" : "ACTIVE"}
                               </span>
-                            )}
                           </td>
                           {isAdmin && (
                             <td style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)", textAlign: "center" }}>
@@ -713,6 +701,21 @@ export function UserManagement() {
                                 >
                                   <Edit2 size={8} />
                                 </button>
+                                {u.id !== me?.id && (
+                                  <button
+                                    onClick={() => handlePauseToggle(u)}
+                                    disabled={busyId === u.id}
+                                    title={u.isActive === false ? "Resume" : "Pause"}
+                                    style={{
+                                      padding: "2px 4px", borderRadius: 4, fontSize: 8, cursor: "pointer",
+                                      color: u.isActive === false ? "#22c55e" : "#f59e0b",
+                                      background: u.isActive === false ? "rgba(34,197,94,0.1)" : "rgba(245,158,11,0.1)",
+                                      border: `1px solid ${u.isActive === false ? "rgba(34,197,94,0.25)" : "rgba(245,158,11,0.3)"}`
+                                    }}
+                                  >
+                                    {u.isActive === false ? <Play size={8} /> : <Pause size={8} />}
+                                  </button>
+                                )}
                                 {u.id !== me?.id && (
                                   <button
                                     onClick={() => handleDelete(u.id)}
@@ -737,14 +740,14 @@ export function UserManagement() {
                     }
 
                     return (
-                      <tr key={u.id} style={{ background: i % 2 === 0 ? "var(--card)" : "var(--muted)" }}>
+                      <tr key={u.id} style={{ background: i % 2 === 0 ? "var(--card)" : "var(--muted)", opacity: u.isActive === false ? 0.6 : 1 }}>
                         <td style={{ padding: "10px 12px", borderBottom: "1px solid var(--border)" }}>
                           <div className="flex items-center gap-2">
                             <div style={{ width: 26, height: 26, borderRadius: "50%", background: `${rc.color}20`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                               <User size={12} style={{ color: rc.color }} />
                             </div>
                             <span style={{ fontSize: 12, fontWeight: 500, color: "var(--foreground)" }}>
-                              {u.first_name} {u.last_name}
+                              {u.firstName} {u.lastName}
                             </span>
                           </div>
                         </td>
@@ -759,45 +762,21 @@ export function UserManagement() {
                           </div>
                         </td>
                         <td style={{ padding: "10px 12px", fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>
-                          {u.created_at ? new Date(u.created_at).toLocaleDateString() : '—'}
+                          {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : '—'}
                         </td>
                         <td style={{ padding: "10px 12px", borderBottom: "1px solid var(--border)" }}>
-                          {isAdmin ? (
-                            <button
-                              onClick={() => handleToggleActive(u.id)}
-                              style={{
-                                fontSize: 9,
-                                fontWeight: 600,
-                                cursor: "pointer",
-                                color: u.is_active ? "#22c55e" : "#4d7a9e",
-                                background: u.is_active ? "rgba(34,197,94,0.1)" : "rgba(77,122,158,0.1)",
-                                border: `1px solid ${u.is_active ? "rgba(34,197,94,0.25)" : "rgba(77,122,158,0.25)"}`,
-                                borderRadius: 4,
-                                padding: "2px 8px"
-                              }}
-                            >
-                              {u.is_active ? "ACTIVE" : "INACTIVE"}
-                            </button>
-                          ) : (
-                            <span
-                              title="Only Admins can change user status"
-                              style={{
-                                fontSize: 9,
-                                fontWeight: 600,
-                                cursor: "not-allowed",
-                                color: u.is_active ? "#22c55e" : "#4d7a9e",
-                                background: u.is_active ? "rgba(34,197,94,0.1)" : "rgba(77,122,158,0.1)",
-                                border: `1px solid ${u.is_active ? "rgba(34,197,94,0.25)" : "rgba(77,122,158,0.25)"}`,
-                                borderRadius: 4,
-                                padding: "2px 8px",
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: 4
-                              }}
-                            >
-                              <Lock size={8} />{u.is_active ? "ACTIVE" : "INACTIVE"}
-                            </span>
-                          )}
+                          <span
+                                title={u.isActive === false ? "Paused: cannot sign in" : "Active"}
+                                style={{
+                                  fontSize: 9, fontWeight: 600,
+                                  color: u.isActive === false ? "#f59e0b" : "#22c55e",
+                                  background: u.isActive === false ? "rgba(245,158,11,0.1)" : "rgba(34,197,94,0.1)",
+                                  border: `1px solid ${u.isActive === false ? "rgba(245,158,11,0.3)" : "rgba(34,197,94,0.25)"}`,
+                                  borderRadius: 4, padding: "2px 8px"
+                                }}
+                              >
+                                {u.isActive === false ? "PAUSED" : "ACTIVE"}
+                              </span>
                         </td>
                         {isAdmin && (
                           <td style={{ padding: "10px 12px", borderBottom: "1px solid var(--border)" }}>
@@ -819,6 +798,21 @@ export function UserManagement() {
                               >
                                 <Edit2 size={10} />Edit
                               </button>
+                              {u.id !== me?.id && (
+                                <button
+                                  onClick={() => handlePauseToggle(u)}
+                                  disabled={busyId === u.id}
+                                  style={{
+                                    display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", borderRadius: 5, fontSize: 10, cursor: "pointer",
+                                    color: u.isActive === false ? "#22c55e" : "#f59e0b",
+                                    background: u.isActive === false ? "rgba(34,197,94,0.1)" : "rgba(245,158,11,0.1)",
+                                    border: `1px solid ${u.isActive === false ? "rgba(34,197,94,0.25)" : "rgba(245,158,11,0.3)"}`,
+                                    opacity: busyId === u.id ? 0.5 : 1
+                                  }}
+                                >
+                                  {u.isActive === false ? <><Play size={10} />Resume</> : <><Pause size={10} />Pause</>}
+                                </button>
+                              )}
                               {u.id !== me?.id && (
                                 <button
                                   onClick={() => handleDelete(u.id)}
