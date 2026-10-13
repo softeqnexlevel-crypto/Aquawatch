@@ -475,7 +475,7 @@ export function FeedTankManagement() {
         capacity: 2,
 
         volume:
-          (tankBLevel / 100) * 200,
+          (tankBLevel / 100) * 2,
 
         dailyConsumption: flushHasData
           ? feedFlow * 24 * 0.35

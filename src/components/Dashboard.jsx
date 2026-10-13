@@ -33,8 +33,8 @@ import {
 import { rawToPercent } from './dashboardComponents/feedTankCalibration';
 import { useDailySummary } from './dashboardComponents/useDailySummary';
 
-// ── Flush tank calibration (tag RO5-FlushTank): 4.9 = 0%, 200 = 100% ──
-const FLUSH_RAW_EMPTY = 4.9;
+// ── Flush tank calibration (tag RO5-FlushTank): 0 = 0%, 200 = 100% ──
+const FLUSH_RAW_EMPTY = 0;
 const FLUSH_RAW_FULL = 200;
 function flushRawToPercent(raw) {
   const n = Number(raw);
