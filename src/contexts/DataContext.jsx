@@ -39,6 +39,10 @@ const KEY_MAPPING = {
   'siemens200smart-RO5-FeedTankLevelRaw': 'RO5-FeedTankLevelRaw',
   'RO5-FeedTankLevelRaw': 'RO5-FeedTankLevelRaw',
 
+  // Flush tank raw transmitter signal (same 4.9-10.0 style as the feed tank)
+  'siemens200smart-RO5-FlushTankLevelRaw': 'RO5-FlushTankLevelRaw',
+  'RO5-FlushTankLevelRaw': 'RO5-FlushTankLevelRaw',
+
   'RO5-Feedpump': 'RO5-Feedpump',
   'siemens200smart-RO5-Feedpump': 'RO5-Feedpump',
 
@@ -113,6 +117,7 @@ const getUnitForParameter = (param) => {
     'RO5-PureWaterEc': 'µS/cm',
     'RO5-FeedTankLevel': '%',
     'RO5-FeedTankLevelRaw': '',
+    'RO5-FlushTankLevelRaw': '',
     'RO5-SystemActive': '',
     'RO5-SystemOperation': '',
     'RO5-SystemMode': '',

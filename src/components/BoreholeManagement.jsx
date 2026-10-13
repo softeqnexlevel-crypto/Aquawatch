@@ -292,6 +292,34 @@ export function FeedTankManagement() {
 
   const tankHasData = displayLevel !== null;
 
+  /* ============================================================
+     LIVE FLUSH TANK LEVEL
+     ============================================================
+     Real transmitter: RO5-FlushTankLevelRaw (same calibration
+     as the feed tank: RAW 4.9 = 0%, RAW 10.0 = 100%).
+     ============================================================ */
+
+  const flushRawValue = getValue("RO5-FlushTankLevelRaw");
+
+  const flushRawNum =
+    typeof flushRawValue === "number"
+      ? flushRawValue
+      : parseFloat(flushRawValue);
+
+  const hasFlushRawReading = Number.isFinite(flushRawNum);
+
+  const calibratedFlushPct = hasFlushRawReading
+    ? rawToPercent(flushRawNum)
+    : null;
+
+  const flushDisplayLevel =
+    calibratedFlushPct !== null && Number.isFinite(calibratedFlushPct)
+      ? Math.min(100, Math.max(0, calibratedFlushPct))
+      : null;
+
+  const flushHasData = flushDisplayLevel !== null;
+  const scaledFlushLevel = flushHasData ? flushDisplayLevel : 0;
+
   /*
    * Never allow undefined/null into the tank calculations.
    */
@@ -324,25 +352,12 @@ export function FeedTankManagement() {
     const tankALevel = scaledTankLevel;
 
     /*
-     * TANK B
+     * FLUSH TANK (Tank B)
      *
-     * There is currently no independent RAW transmitter
-     * supplied for Tank B.
-     *
-     * Therefore this remains a derived placeholder only.
-     *
-     * IMPORTANT:
-     * Tank B is NOT used when calculating the overall
-     * Feed Tank Level.
+     * Real transmitter: RO5-FlushTankLevelRaw.
      */
 
-    const tankBLevel =
-      scaledTankLevel === 0
-        ? 0
-        : Math.min(
-            100,
-            Math.max(0, scaledTankLevel * 0.85 + 2)
-          );
+    const tankBLevel = scaledFlushLevel;
 
     /* ------------------------------------------------------------
        STATUS
@@ -392,6 +407,8 @@ export function FeedTankManagement() {
 
         //location: "North Plant",
 
+        hasData: tankHasData,
+
         status: getStatus(
           tankALevel,
           tankHasData
@@ -435,9 +452,11 @@ export function FeedTankManagement() {
 
         //location: "East Plant",
 
+        hasData: flushHasData,
+
         status: getStatus(
           tankBLevel,
-          tankHasData
+          flushHasData
         ),
 
         level: tankBLevel,
@@ -447,17 +466,17 @@ export function FeedTankManagement() {
         volume:
           (tankBLevel / 100) * 400,
 
-        dailyConsumption: tankHasData
+        dailyConsumption: flushHasData
           ? feedFlow * 24 * 0.35
           : 0,
 
-        monthlyConsumption: tankHasData
+        monthlyConsumption: flushHasData
           ? feedFlow * 24 * 30 * 0.35
           : 0,
 
         health: getHealth(
           tankBLevel,
-          tankHasData
+          flushHasData
         ),
 
         lastMaintenance: format(
@@ -474,6 +493,8 @@ export function FeedTankManagement() {
   }, [
     scaledTankLevel,
     tankHasData,
+    scaledFlushLevel,
+    flushHasData,
     feedFlow,
     recovery,
     stage1Delta,
@@ -1240,7 +1261,7 @@ export function FeedTankManagement() {
                             fontWeight: 600,
                             textAlign: "right",
                             color:
-                              !tankHasData
+                              !t.hasData
                                 ? "#64748b"
                                 : t.level > 50
                                   ? "#22c55e"
@@ -1251,7 +1272,7 @@ export function FeedTankManagement() {
                               "1px solid var(--border)",
                           }}
                         >
-                          {tankHasData
+                          {t.hasData
                             ? `${t.level.toFixed(0)}%`
                             : "--"}
                         </td>
@@ -1270,7 +1291,7 @@ export function FeedTankManagement() {
                               "1px solid var(--border)",
                           }}
                         >
-                          {tankHasData
+                          {t.hasData
                             ? t.volume.toFixed(0)
                             : "--"}
                         </td>
@@ -1289,7 +1310,7 @@ export function FeedTankManagement() {
                               "1px solid var(--border)",
                           }}
                         >
-                          {tankHasData
+                          {t.hasData
                             ? t.dailyConsumption.toFixed(
                                 0
                               )
@@ -1399,7 +1420,7 @@ export function FeedTankManagement() {
                               "var(--font-mono)",
                             fontWeight: 600,
                             color:
-                              !tankHasData
+                              !t.hasData
                                 ? "#64748b"
                                 : t.level > 50
                                   ? "#22c55e"
@@ -1410,7 +1431,7 @@ export function FeedTankManagement() {
                               "1px solid var(--border)",
                           }}
                         >
-                          {tankHasData
+                          {t.hasData
                             ? `${t.level.toFixed(1)}%`
                             : "--"}
                         </td>
@@ -1428,7 +1449,7 @@ export function FeedTankManagement() {
                               "1px solid var(--border)",
                           }}
                         >
-                          {tankHasData
+                          {t.hasData
                             ? t.volume.toFixed(0)
                             : "--"}
                         </td>
@@ -1462,7 +1483,7 @@ export function FeedTankManagement() {
                               "1px solid var(--border)",
                           }}
                         >
-                          {tankHasData
+                          {t.hasData
                             ? `${t.dailyConsumption.toFixed(
                                 0
                               )} m³/day`
@@ -1829,7 +1850,7 @@ export function FeedTankManagement() {
                 <div
                   style={{
                     width: `${
-                      tankHasData
+                      selected.hasData
                         ? Math.min(
                             selected.level,
                             100
@@ -1840,7 +1861,7 @@ export function FeedTankManagement() {
                     height: "100%",
 
                     background:
-                      !tankHasData
+                      !selected.hasData
                         ? "#64748b"
                         : selected.level >
                             50
@@ -1870,7 +1891,7 @@ export function FeedTankManagement() {
                   fontWeight: 700,
 
                   color:
-                    !tankHasData
+                    !selected.hasData
                       ? "#64748b"
                       : selected.level >
                           50
@@ -1881,7 +1902,7 @@ export function FeedTankManagement() {
                           : "#ef4444",
                 }}
               >
-                {tankHasData
+                {selected.hasData
                   ? `${selected.level.toFixed(
                       0
                     )}%`
@@ -1906,7 +1927,7 @@ export function FeedTankManagement() {
                     "var(--muted-foreground)",
                 }}
               >
-                {tankHasData
+                {selected.hasData
                   ? `${selected.volume.toFixed(
                       0
                     )} m³`
@@ -1945,7 +1966,7 @@ export function FeedTankManagement() {
                 label:
                   "Daily Consumption",
 
-                value: tankHasData
+                value: selected.hasData
                   ? `${selected.dailyConsumption.toFixed(
                       0
                     )} m³`
@@ -1956,7 +1977,7 @@ export function FeedTankManagement() {
                 label:
                   "Monthly Usage",
 
-                value: tankHasData
+                value: selected.hasData
                   ? `${Math.round(
                       selected.monthlyConsumption
                     ).toLocaleString()} m³`
@@ -1967,7 +1988,7 @@ export function FeedTankManagement() {
                 label:
                   "Health Score",
 
-                value: tankHasData
+                value: selected.hasData
                   ? `${Math.round(
                       selected.health
                     )}%`

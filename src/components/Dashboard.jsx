@@ -201,6 +201,7 @@ export const SENSOR_MAP = {
   'RO5-PureWaterEc': { label: 'Product Water EC', unit: 'µS/cm', icon: FlaskConical, color: COLORS.purple, shortName: 'PureWaterEC' },
   'RO5-FeedTankLevel': { label: 'Feed Tank Level', unit: '%', icon: Droplets, color: '#14b8a6', shortName: 'FeedTankLevel' },
   'RO5-FeedTankLevelRaw': { label: 'Feed Tank Raw', unit: '', icon: Droplets, color: COLORS.muted, shortName: 'FeedTankRaw' },
+  'RO5-FlushTankLevelRaw': { label: 'Flush Tank', unit: '', icon: Droplets, color: COLORS.muted, shortName: 'FlushTankRaw' },
 
   // Master ON/OFF + PLC mode + status flags
   'RO5-SystemActive': { label: 'System Active', unit: '', icon: Power, color: COLORS.success, shortName: 'SystemActive' },
@@ -214,7 +215,7 @@ export const SENSOR_MAP = {
     color: COLORS.purple, shortName: 'AntiscalantDaily'
   },
   'RO5-SystemRunhrs': {
-    label: 'System Run Hours', unit: 'hrs', icon: Clock,
+    label: 'Service Run Hours', unit: 'hrs', icon: Clock,
     color: COLORS.primary, shortName: 'SystemRunhrs'
   },
 };
@@ -613,6 +614,17 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     : null;
 
   const tankHasData = feedTankLevel !== null;
+
+  // ── FLUSH TANK (raw transmitter, same calibration as the feed tank) ─────
+  const flushTankLevelRawValue = getValue('RO5-FlushTankLevelRaw');
+  const flushTankLevelRawNum =
+    typeof flushTankLevelRawValue === 'number'
+      ? flushTankLevelRawValue
+      : parseFloat(flushTankLevelRawValue);
+  const hasFlushRawReading = Number.isFinite(flushTankLevelRawNum);
+  const calibratedFlushTankPct = hasFlushRawReading
+    ? rawToPercent(flushTankLevelRawNum)
+    : null;
   const pressureHasData = roPressure !== null;
 
   const tankEmpty =
@@ -855,7 +867,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           title="Daily Run Hours"
           value={hasDailyRunHrs && hasFreshData ? formatHoursFromHours(systemDailyRunHrs) : '--'}
           valueColor={hasDailyRunHrs && hasFreshData ? COLORS.primary : COLORS.muted}
-         sub={hasDailyRunHrs && hasFreshData ? `${safeFormat(systemDailyRunHrs, 1)} hrs today` : 'No data'}
+          sub={(hasDailyRunHrs && hasFreshData ? `${safeFormat(systemDailyRunHrs, 1)} hrs today` : 'No data') + (has24hAgo ? ` · 24h ago: ${formatHoursFromHours(runHrs24hAgo)}` : '')}
           subColor="var(--muted-foreground)"
         />
       </div>
@@ -935,6 +947,11 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             trend={getTrend(history, 'RO5-FeedTankLevelRaw')}
             statusText={hasRawTankReading ? `≈ ${calibratedFeedTankPct.toFixed(1)}%` : 'No reading'}
             statusOk={hasRawTankReading} />
+          <KPICardV2 label="Flush Tank" unit="" icon={Droplets} value={hasFlushRawReading ? flushTankLevelRawNum.toFixed(3) : '--'}
+            color={COLORS.muted}
+            trend={getTrend(history, 'RO5-FlushTankLevelRaw')}
+            statusText={hasFlushRawReading ? `≈ ${calibratedFlushTankPct.toFixed(1)}%` : 'No reading'}
+            statusOk={hasFlushRawReading} />
           {/* Service run hours: PLC-reported (RO5-SystemRunhrs), next to Feed Tank Raw */}
           <TopStatusCard
             icon={Clock}
@@ -946,23 +963,10 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             sub={hasRunHrs && hasFreshData ? `${safeFormat(systemRunHrs, 1)} hrs in service` : 'No data'}
             subColor="var(--muted-foreground)"
           />
-          {/* System run 24hrs ago: saved daily record from the backend */}
-          <TopStatusCard
-            icon={Clock}
-            iconBg="rgba(167,139,250,0.12)"
-            iconColor={COLORS.purple}
-            title="System Run 24hrs Ago"
-            value={has24hAgo ? formatHoursFromHours(runHrs24hAgo) : '--'}
-            valueColor={has24hAgo ? COLORS.purple : COLORS.muted}
-            sub={has24hAgo ? `${safeFormat(runHrs24hAgo, 1)} hrs yesterday` : 'No record yet'}
-            subColor="var(--muted-foreground)"
-          />
         </div>
       </div>
     </div>
   );
-
-
 
   const renderSystemTab = () => (
     <div className="flex flex-col gap-3 sm:gap-4">
