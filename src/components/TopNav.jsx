@@ -2,8 +2,9 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router";
-import { Bell, Search, Sun, Moon, User, ChevronDown, X, Settings, LogOut, UserCircle, CheckCircle, AlertTriangle, Info } from "lucide-react";
+import { Bell, Search, Sun, Moon, User, ChevronDown, X, Settings, LogOut, UserCircle, KeyRound, CheckCircle, AlertTriangle, Info } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
+import ChangePasswordModal from "./ChangePasswordModal";
 
 // ── Brand Colors ──────────────────────────────────────────────────────────────
 const BRAND = {
@@ -202,7 +203,7 @@ function NotifDropdown({ open, onClose, alerts, onMarkAllRead, onViewAll }) {
 }
 
 // ── User dropdown ──────────────────────────────────────────────────────────────
-function UserDropdown({ open, onClose, onLogout, onNavigateProfile, onNavigateSettings, user }) {
+function UserDropdown({ open, onClose, onLogout, onNavigateProfile, onNavigateSettings, onChangePassword, user }) {
   const ref = useRef(null);
   const [isMobile, setIsMobile] = useState(false);
 
@@ -299,6 +300,27 @@ function UserDropdown({ open, onClose, onLogout, onNavigateProfile, onNavigateSe
       </button>
 
       <button
+        onClick={() => { onChangePassword(); onClose(); }}
+        style={{ 
+          display: "flex", 
+          alignItems: "center", 
+          gap: 8, 
+          width: "100%", 
+          padding: "9px 14px", 
+          background: "none", 
+          border: "none", 
+          cursor: "pointer", 
+          fontSize: isMobile ? 13 : 12, 
+          color: "var(--foreground)", 
+          textAlign: "left" 
+        }}
+        onMouseEnter={e => e.currentTarget.style.background = "var(--muted)"}
+        onMouseLeave={e => e.currentTarget.style.background = "none"}
+      >
+        <KeyRound size={isMobile ? 15 : 13} /> Change Password
+      </button>
+
+      <button
         onClick={onLogout}
         style={{ 
           display: "flex", 
@@ -330,6 +352,7 @@ export function TopNav({ darkMode, onToggleDark, alertCount, title }) {
   const [searchOpen, setSearchOpen]   = useState(false);
   const [notifOpen, setNotifOpen]     = useState(false);
   const [userOpen, setUserOpen]       = useState(false);
+  const [pwOpen, setPwOpen]           = useState(false);
   const [alerts, setAlerts]           = useState(ALERTS);
   const [isMobile, setIsMobile]       = useState(false);
 
@@ -606,6 +629,7 @@ export function TopNav({ darkMode, onToggleDark, alertCount, title }) {
             onLogout={handleLogout}
             onNavigateProfile={handleNavigateProfile}
             onNavigateSettings={handleNavigateSettings}
+            onChangePassword={() => setPwOpen(true)}
             user={{ 
               ...user, 
               name: displayName, 
@@ -617,6 +641,7 @@ export function TopNav({ darkMode, onToggleDark, alertCount, title }) {
       </header>
 
       <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
+      <ChangePasswordModal open={pwOpen} onClose={() => setPwOpen(false)} />
     </>
   );
 }
