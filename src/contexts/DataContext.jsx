@@ -9,6 +9,12 @@ const DataContext = createContext();
 const MAX_HISTORY_POINTS = 500;       // per sensor (~5.5 h at 10 s sampling)
 const HEARTBEAT_MS = 30_000;           // sample-and-hold interval while connected
 const FALLBACK_POLL_MS = 30_000;       // /api/current polling while socket is down
+const AUTH_RETRY_MS = [5_000, 15_000, 30_000, 60_000]; // retry when the login token is rejected
+
+const getToken = () => {
+  try { return localStorage.getItem('accessToken') || null; } catch { return null; }
+};
+const PAUSED_MESSAGE = 'Your account has been paused. Please contact your administrator.';
 
 // Map backend keys to frontend keys
 const KEY_MAPPING = {
@@ -184,15 +190,35 @@ export const DataProvider = ({ children }) => {
 
   // Refs so long-lived intervals always see current values
   // (a plain `connected` inside the interval was stuck at its initial false).
+  const pausedRef = useRef(false);   // set when the server says this account is paused
   const sensorDataRef = useRef(sensorData);
   const connectedRef = useRef(connected);
   sensorDataRef.current = sensorData;
   connectedRef.current = connected;
 
+  // Stops all live data for a paused account (the server also cuts the connection).
+  const handlePaused = () => {
+    if (pausedRef.current) return;
+    pausedRef.current = true;
+    setConnected(false);
+    connectedRef.current = false;
+    setLoading(false);
+    setError(PAUSED_MESSAGE);
+    try { window.dispatchEvent(new CustomEvent('account-paused')); } catch { /* ignore */ }
+  };
+
   const fetchInitialData = async () => {
+    if (pausedRef.current) return;
     try {
       setLoading(true); // so the Dashboard "Refresh" button visibly shows a loading state
-      const response = await fetch(`${API_BASE_URL}/api/current`);
+      const token = getToken();
+      const response = await fetch(`${API_BASE_URL}/api/current`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (response.status === 401) {
+        const body = await response.json().catch(() => ({}));
+        if (body?.code === 'ACCOUNT_PAUSED') { handlePaused(); return; }
+      }
       if (!response.ok) throw new Error(`HTTP ${response.status}: Failed to fetch data`);
       const readings = await response.json();
 
@@ -240,14 +266,22 @@ export const DataProvider = ({ children }) => {
   };
 
   useEffect(() => {
+    let authRetry = 0;
+    let authTimer = null;
+
     const socket = io(API_BASE_URL, {
+      // Function form: the freshest token is read on every (re)connect
+      auth: (cb) => cb({ token: getToken() }),
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: 5,
       reconnectionDelay: 1000,
     });
 
+    socket.on('account-paused', handlePaused);
+
     socket.on('connect', () => {
+      authRetry = 0;
       console.log('✅ DataContext connected to backend');
       setConnected(true);
       connectedRef.current = true;
@@ -287,6 +321,21 @@ export const DataProvider = ({ children }) => {
 
     socket.on('connect_error', (err) => {
       console.error('Socket connection error:', err);
+
+      if (err?.message === 'ACCOUNT_PAUSED') {
+        handlePaused();
+        socket.disconnect();
+        return;
+      }
+      // Login token rejected (e.g. expired while the app refreshes it): the socket
+      // does not retry by itself in this case, so retry with the newest token.
+      if (err?.message === 'AUTH_INVALID' || err?.message === 'AUTH_REQUIRED' || err?.message === 'AUTH_FAILED') {
+        const delay = AUTH_RETRY_MS[Math.min(authRetry, AUTH_RETRY_MS.length - 1)];
+        authRetry += 1;
+        clearTimeout(authTimer);
+        authTimer = setTimeout(() => { if (!pausedRef.current) socket.connect(); }, delay);
+      }
+
       setError('Failed to connect to backend via WebSocket');
       fetchInitialData();
     });
@@ -308,6 +357,7 @@ export const DataProvider = ({ children }) => {
     }, HEARTBEAT_MS);
 
     return () => {
+      clearTimeout(authTimer);
       socket.disconnect();
       clearInterval(pollInterval);
       clearInterval(heartbeatInterval);

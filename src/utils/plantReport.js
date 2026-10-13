@@ -8,7 +8,7 @@ import { rawToPercent } from '../components/dashboardComponents/feedTankCalibrat
 
 // ───────────────────────── Branding (edit here) ─────────────────────────
 export const REPORT_BRANDING = {
-  title: 'RiftValley Osmotics - RO Plant Report PDF',
+  title: 'Rift Valley Osmotics - Rainforest RO5 report',
   shortName: 'RVO',
   version: 'V15.1',
   plant: 'Naivasha',
@@ -49,8 +49,8 @@ export const REPORT_TAGS = [
   { key: 'RO5-MediaFilterOutPress',label: 'Filter Outlet Pressure', topic: 'plant/filters/media_out_pressure',unit: 'bar', groups: ['Maintenance'], high: PRESSURE_LIMIT_BAR },
   { key: 'RO5-SystemRecovery',     label: 'System Recovery',        topic: 'plant/ro1/recovery',              unit: '%',   groups: ['Performance', 'Quality', 'Production', 'Chemical'], low: RECOVERY_LOW_PCT },
   { key: 'RO5-AntiscalantDaily',   label: 'Antiscalant Daily',      topic: 'plant/dosing/antiscalant_daily',  unit: 'ml',  groups: ['Chemical'] },
-  { key: 'RO5-SystemRunhrs',       label: 'System Run Hours',       topic: 'plant/ro1/run_hours',             unit: 'hrs', groups: ['Maintenance'] },
-  { key: 'RO5-SystemDailyRunHrs',  label: 'System Run Hours (today)', topic: 'plant/ro1/daily_run_hours',     unit: 'hrs', groups: ['Production', 'Maintenance'] },
+  { key: 'RO5-SystemRunhrs',       label: 'Service Run Hours',      topic: 'plant/ro1/run_hours',             unit: 'hrs', groups: ['Maintenance'] },
+  { key: 'RO5-SystemDailyRunHrs',  label: 'Service Run Hours (today)', topic: 'plant/ro1/daily_run_hours',     unit: 'hrs', groups: ['Production', 'Maintenance'] },
 ];
 
 // ───────────────────────── Helpers ─────────────────────────
@@ -161,10 +161,10 @@ function buildDailyLogHtml(dailyLog, now) {
   }
 
   return `
-  <h2 style="margin-top:24px">System Run &amp; Antiscalant Dosed (Daily)</h2>
+  <h2 style="margin-top:24px">Service Run &amp; Antiscalant Dosed (Daily)</h2>
   <div class="wrap">
     <table>
-      <thead><tr><th>Date</th><th>System Run (hrs)</th><th>System Run (h:m)</th><th>Antiscalant Dosed (ml)</th><th>Antiscalant Dosed (L)</th></tr></thead>
+      <thead><tr><th>Date</th><th>Service Run (hrs)</th><th>Service Run (h:m)</th><th>Antiscalant Dosed (ml)</th><th>Antiscalant Dosed (L)</th></tr></thead>
       <tbody>${body}${total}</tbody>
     </table>
   </div>`;

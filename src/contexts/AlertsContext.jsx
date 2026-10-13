@@ -62,7 +62,11 @@ export function AlertsProvider({ children }) {
     let stop = false;
     const load = async () => {
       try {
-        const r = await fetch(`${API_ROOT}/api/alert-events`);
+        const token = (() => { try { return localStorage.getItem('accessToken'); } catch { return null; } })();
+        if (!token) return; // not signed in
+        const r = await fetch(`${API_ROOT}/api/alert-events`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
         if (!r.ok) return;
         const rows = await r.json();
         if (!stop) {

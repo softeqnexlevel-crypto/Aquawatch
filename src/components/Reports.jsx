@@ -166,7 +166,7 @@ async function fetchProductionSummary() {
   }
 }
 
-// ===================== DAILY LOG (system run hours + antiscalant dosed) =====================
+// ===================== DAILY LOG (service run hours + antiscalant dosed) =====================
 // Saved by the backend every day before the PLC counters reset to zero.
 const API_ROOT = String(API_BASE_URL || '').replace(/\/api\/?$/, '');
 
@@ -205,7 +205,7 @@ function dailyLogCsv(rows) {
     [r.day,
      Number.isFinite(r.runHours) ? r.runHours.toFixed(DECIMALS) : '',
      Number.isFinite(r.antiscalantMl) ? r.antiscalantMl.toFixed(DECIMALS) : ''].join(','));
-  return `\n\nDaily log\nDate,System Run (hrs),Antiscalant Dosed (ml)\n${lines.join('\n')}`;
+  return `\n\nDaily log\nDate,Service Run (hrs),Antiscalant Dosed (ml)\n${lines.join('\n')}`;
 }
 
 // ===================== MAIN COMPONENT =====================

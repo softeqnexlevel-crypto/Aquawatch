@@ -35,8 +35,10 @@ export const LiveTrendChart = ({ data, sensorKey, height = 200, showControls = t
 
     const load = async () => {
       try {
+        const token = (() => { try { return localStorage.getItem('accessToken'); } catch { return null; } })();
         const r = await fetch(
-          `${API_ROOT}/api/history/${encodeURIComponent(sensorKey)}?hours=${hours}`
+          `${API_ROOT}/api/history/${encodeURIComponent(sensorKey)}?hours=${hours}`,
+          { headers: token ? { Authorization: `Bearer ${token}` } : {} }
         );
         if (!r.ok) return;
         const rows = await r.json();
