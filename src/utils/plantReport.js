@@ -50,7 +50,7 @@ export const REPORT_TAGS = [
   { key: 'RO5-SystemRecovery',     label: 'System Recovery',        topic: 'plant/ro1/recovery',              unit: '%',   groups: ['Performance', 'Quality', 'Production', 'Chemical'], low: RECOVERY_LOW_PCT },
   { key: 'RO5-AntiscalantDaily',   label: 'Antiscalant Daily',      topic: 'plant/dosing/antiscalant_daily',  unit: 'ml',  groups: ['Chemical'] },
   { key: 'RO5-SystemRunhrs',       label: 'Service Run Hours',      topic: 'plant/ro1/run_hours',             unit: 'hrs', groups: ['Maintenance'] },
-  { key: 'RO5-SystemDailyRunHrs',  label: 'Service Run Hours (today)', topic: 'plant/ro1/daily_run_hours',     unit: 'hrs', groups: ['Production', 'Maintenance'] },
+  { key: 'RO5-SystemDailyRunHrs',  label: 'Daily Run Hours', topic: 'plant/ro1/daily_run_hours',     unit: 'hrs', groups: ['Production', 'Maintenance'] },
 ];
 
 // ───────────────────────── Helpers ─────────────────────────
