@@ -953,7 +953,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           <KPICardV2 label="Daily Production" unit="m³" icon={TrendingUp} value={dailyProdDisplay}
             color={dailyProduction > 0 ? COLORS.success : COLORS.primary}
             trend={getTrend(history, 'RO5-Permeateflow', 60 * 60 * 1000)} statusText={summaryLoading ? "Loading" : `${safeFormat(permeateFlow, 1)} m³/h now`} statusOk={true} />
-          <KPICardV2 label="Feed Tank Raw" unit="" icon={Droplets} value={hasRawTankReading ? feedTankLevelRawNum.toFixed(1) : '--'}
+          <KPICardV2 label="Feed Tank Raw" unit="" icon={Droplets} value={hasRawTankReading ? feedTankLevelRawNum.toFixed(2) : '--'}
             color={COLORS.muted}
             trend={getTrend(history, 'RO5-FeedTankLevelRaw')}
             statusText={hasRawTankReading ? `≈ ${calibratedFeedTankPct.toFixed(1)}%` : 'No reading'}
