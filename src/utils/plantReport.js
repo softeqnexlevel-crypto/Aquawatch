@@ -41,6 +41,8 @@ export const REPORT_TAGS = [
   { key: 'RO5-Stage1Delta',        label: '1st Stage ΔP',      topic: 'plant/ro1/stage1_dp',      unit: 'bar',  groups: ['Performance', 'Maintenance'], high: MEMBRANE_DP_LIMIT_BAR },
   { key: 'RO5-Stage2Delta',        label: '2nd Stage ΔP',      topic: 'plant/ro1/stage2_dp',      unit: 'bar',  groups: ['Performance', 'Maintenance'], high: MEMBRANE_DP_LIMIT_BAR },
   { key: 'FEED_TANK_LEVEL',        label: 'Feed Tank Level',   topic: 'plant/tanks/feed_level',   unit: '%',    groups: ['Production'], low: TANK_EMPTY_PCT, lowIncludesZero: true },
+  // Flush tank: MQTT tag RO5-FlushTank, calibrated 0 = 0%, 126 = 100% (see flushRawToPercent below)
+  { key: 'FLUSH_TANK_LEVEL',       label: 'Flush Tank Level',  topic: 'plant/tanks/flush_level',  unit: '%',    groups: ['Production'], low: TANK_EMPTY_PCT, lowIncludesZero: true },
 
   // Rows below are not in the client's screenshot; TOPICS ARE ASSUMED — confirm them.
   { key: 'RO5-InterstagePress',    label: 'Interstage Pressure',    topic: 'plant/ro1/interstage_pressure',   unit: 'bar', groups: ['Performance'], high: PRESSURE_LIMIT_BAR },
@@ -50,7 +52,7 @@ export const REPORT_TAGS = [
   { key: 'RO5-SystemRecovery',     label: 'System Recovery',        topic: 'plant/ro1/recovery',              unit: '%',   groups: ['Performance', 'Quality', 'Production', 'Chemical'], low: RECOVERY_LOW_PCT },
   { key: 'RO5-AntiscalantDaily',   label: 'Antiscalant Daily',      topic: 'plant/dosing/antiscalant_daily',  unit: 'ml',  groups: ['Chemical'] },
   { key: 'RO5-SystemRunhrs',       label: 'Service Run Hours',      topic: 'plant/ro1/run_hours',             unit: 'hrs', groups: ['Maintenance'] },
-  { key: 'RO5-SystemDailyRunHrs',  label: 'Daily Run Hours', topic: 'plant/ro1/daily_run_hours',     unit: 'hrs', groups: ['Production', 'Maintenance'] },
+  { key: 'RO5-SystemDailyRunHrs',  label: 'Service Run Hours (today)', topic: 'plant/ro1/daily_run_hours',     unit: 'hrs', groups: ['Production', 'Maintenance'] },
 ];
 
 // ───────────────────────── Helpers ─────────────────────────
@@ -65,8 +67,20 @@ function readNumber(sensorData, key) {
   return Number.isFinite(n) ? n : null;
 }
 
+// Flush tank calibration (same as the dashboard): 0 = 0%, 126 = 100%
+const FLUSH_RAW_EMPTY = 0;
+const FLUSH_RAW_FULL = 126;
+function flushRawToPercent(raw) {
+  const pct = ((raw - FLUSH_RAW_EMPTY) / (FLUSH_RAW_FULL - FLUSH_RAW_EMPTY)) * 100;
+  return Math.min(100, Math.max(0, pct));
+}
+
 // Feed tank uses the calibrated raw signal, exactly like the dashboard.
 function readTagValue(sensorData, tag) {
+  if (tag.key === 'FLUSH_TANK_LEVEL') {
+    const raw = readNumber(sensorData, 'RO5-FlushTank');
+    return raw !== null ? flushRawToPercent(raw) : null;
+  }
   if (tag.key === 'FEED_TANK_LEVEL') {
     const raw = readNumber(sensorData, 'RO5-FeedTankLevelRaw');
     return raw !== null ? rawToPercent(raw) : readNumber(sensorData, 'RO5-FeedTankLevel');
@@ -85,7 +99,9 @@ function statusFor(tag, v) {
 }
 
 function lastUpdateOf(tag, getHistory, fallback) {
-  const histKey = tag.key === 'FEED_TANK_LEVEL' ? 'RO5-FeedTankLevelRaw' : tag.key;
+  const histKey = tag.key === 'FEED_TANK_LEVEL' ? 'RO5-FeedTankLevelRaw'
+    : tag.key === 'FLUSH_TANK_LEVEL' ? 'RO5-FlushTank'
+    : tag.key;
   const h = getHistory?.(histKey);
   const t = Array.isArray(h) && h.length ? h[h.length - 1].time : fallback;
   if (!t) return '—';
