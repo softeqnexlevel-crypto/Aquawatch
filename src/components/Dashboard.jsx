@@ -31,8 +31,17 @@ import {
   DATA_FRESHNESS_WINDOW_MS,
 } from './dashboardComponents/instrumentUtils';
 import { rawToPercent } from './dashboardComponents/feedTankCalibration';
-import { flushRawToPercent } from './dashboardComponents/flushTankCalibration';
 import { useDailySummary } from './dashboardComponents/useDailySummary';
+
+// ── Flush tank calibration (tag RO5-FlushTank): 4.9 = 0%, 200 = 100% ──
+const FLUSH_RAW_EMPTY = 4.9;
+const FLUSH_RAW_FULL = 200;
+function flushRawToPercent(raw) {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  const pct = ((n - FLUSH_RAW_EMPTY) / (FLUSH_RAW_FULL - FLUSH_RAW_EMPTY)) * 100;
+  return Math.min(100, Math.max(0, pct));
+}
 
 // isActive now lives in instrumentUtils (avoids a circular import).
 // Re-exported so other files importing it from Dashboard keep working.
@@ -616,7 +625,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
 
   const tankHasData = feedTankLevel !== null;
 
-  // ── FLUSH TANK (tag RO5-FlushTank, own calibration: flushTankCalibration.js) ─────
+  // ── FLUSH TANK (tag RO5-FlushTank, 4.9 = 0%, 200 = 100%) ─────
   // Read straight from sensorData: getValue() turns a missing tag into 0, which would fake a 0.000 reading
   const flushTankLevelRawValue = sensorData['RO5-FlushTank']?.value;
   const flushTankLevelRawNum =

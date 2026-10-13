@@ -28,7 +28,16 @@ import { useData } from "../contexts/DataContext";
 import { format, subDays } from "date-fns";
 
 import { rawToPercent } from "./dashboardComponents/feedTankCalibration";
-import { flushRawToPercent } from "./dashboardComponents/flushTankCalibration";
+
+// ── Flush tank calibration (tag RO5-FlushTank): 4.9 = 0%, 200 = 100% ──
+const FLUSH_RAW_EMPTY = 4.9;
+const FLUSH_RAW_FULL = 200;
+function flushRawToPercent(raw) {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return null;
+  const pct = ((n - FLUSH_RAW_EMPTY) / (FLUSH_RAW_FULL - FLUSH_RAW_EMPTY)) * 100;
+  return Math.min(100, Math.max(0, pct));
+}
 
 /* ============================================================
    STATUS BADGE
