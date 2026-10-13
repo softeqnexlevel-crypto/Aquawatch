@@ -963,6 +963,17 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             sub={hasRunHrs && hasFreshData ? `${safeFormat(systemRunHrs, 1)} hrs in service` : 'No data'}
             subColor="var(--muted-foreground)"
           />
+          {/* System run 24hrs ago: saved daily record from the backend */}
+          <TopStatusCard
+            icon={Clock}
+            iconBg="rgba(167,139,250,0.12)"
+            iconColor={COLORS.purple}
+            title="System Run 24hrs Ago"
+            value={has24hAgo ? formatHoursFromHours(runHrs24hAgo) : '--'}
+            valueColor={has24hAgo ? COLORS.purple : COLORS.muted}
+            sub={has24hAgo ? `${safeFormat(runHrs24hAgo, 1)} hrs yesterday` : 'No record yet'}
+            subColor="var(--muted-foreground)"
+          />
         </div>
       </div>
     </div>
