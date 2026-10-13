@@ -31,6 +31,7 @@ import {
   DATA_FRESHNESS_WINDOW_MS,
 } from './dashboardComponents/instrumentUtils';
 import { rawToPercent } from './dashboardComponents/feedTankCalibration';
+import { flushRawToPercent } from './dashboardComponents/flushTankCalibration';
 import { useDailySummary } from './dashboardComponents/useDailySummary';
 
 // isActive now lives in instrumentUtils (avoids a circular import).
@@ -201,7 +202,7 @@ export const SENSOR_MAP = {
   'RO5-PureWaterEc': { label: 'Product Water EC', unit: 'µS/cm', icon: FlaskConical, color: COLORS.purple, shortName: 'PureWaterEC' },
   'RO5-FeedTankLevel': { label: 'Feed Tank Level', unit: '%', icon: Droplets, color: '#14b8a6', shortName: 'FeedTankLevel' },
   'RO5-FeedTankLevelRaw': { label: 'Feed Tank Raw', unit: '', icon: Droplets, color: COLORS.muted, shortName: 'FeedTankRaw' },
-  'RO5-FlushTankLevelRaw': { label: 'Flush Tank', unit: '', icon: Droplets, color: COLORS.muted, shortName: 'FlushTankRaw' },
+  'RO5-FlushTank': { label: 'Flush Tank', unit: '', icon: Droplets, color: COLORS.muted, shortName: 'FlushTankRaw' },
 
   // Master ON/OFF + PLC mode + status flags
   'RO5-SystemActive': { label: 'System Active', unit: '', icon: Power, color: COLORS.success, shortName: 'SystemActive' },
@@ -615,15 +616,16 @@ export function Dashboard({ onViewAllAlerts } = {}) {
 
   const tankHasData = feedTankLevel !== null;
 
-  // ── FLUSH TANK (raw transmitter, same calibration as the feed tank) ─────
-  const flushTankLevelRawValue = getValue('RO5-FlushTankLevelRaw');
+  // ── FLUSH TANK (tag RO5-FlushTank, own calibration: flushTankCalibration.js) ─────
+  // Read straight from sensorData: getValue() turns a missing tag into 0, which would fake a 0.000 reading
+  const flushTankLevelRawValue = sensorData['RO5-FlushTank']?.value;
   const flushTankLevelRawNum =
     typeof flushTankLevelRawValue === 'number'
       ? flushTankLevelRawValue
       : parseFloat(flushTankLevelRawValue);
   const hasFlushRawReading = Number.isFinite(flushTankLevelRawNum);
   const calibratedFlushTankPct = hasFlushRawReading
-    ? rawToPercent(flushTankLevelRawNum)
+    ? flushRawToPercent(flushTankLevelRawNum)
     : null;
   const pressureHasData = roPressure !== null;
 
@@ -947,10 +949,10 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             trend={getTrend(history, 'RO5-FeedTankLevelRaw')}
             statusText={hasRawTankReading ? `≈ ${calibratedFeedTankPct.toFixed(1)}%` : 'No reading'}
             statusOk={hasRawTankReading} />
-          <KPICardV2 label="Flush Tank" unit="" icon={Droplets} value={hasFlushRawReading ? flushTankLevelRawNum.toFixed(3) : '--'}
+          <KPICardV2 label="Flush Tank" unit="" icon={Droplets} value={hasFlushRawReading ? flushTankLevelRawNum.toFixed(1) : '--'}
             color={COLORS.muted}
-            trend={getTrend(history, 'RO5-FlushTankLevelRaw')}
-            statusText={hasFlushRawReading ? `≈ ${calibratedFlushTankPct.toFixed(1)}%` : 'No reading'}
+            trend={getTrend(history, 'RO5-FlushTank')}
+            statusText={hasFlushRawReading ? (calibratedFlushTankPct !== null ? `≈ ${calibratedFlushTankPct.toFixed(1)}%` : 'Raw value') : 'No reading'}
             statusOk={hasFlushRawReading} />
           {/* Service run hours: PLC-reported (RO5-SystemRunhrs), next to Feed Tank Raw */}
           <TopStatusCard

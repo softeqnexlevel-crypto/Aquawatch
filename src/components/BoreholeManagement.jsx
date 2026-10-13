@@ -28,6 +28,7 @@ import { useData } from "../contexts/DataContext";
 import { format, subDays } from "date-fns";
 
 import { rawToPercent } from "./dashboardComponents/feedTankCalibration";
+import { flushRawToPercent } from "./dashboardComponents/flushTankCalibration";
 
 /* ============================================================
    STATUS BADGE
@@ -295,11 +296,12 @@ export function FeedTankManagement() {
   /* ============================================================
      LIVE FLUSH TANK LEVEL
      ============================================================
-     Real transmitter: RO5-FlushTankLevelRaw (same calibration
+     Real transmitter: RO5-FlushTank (own calibration,
      as the feed tank: RAW 4.9 = 0%, RAW 10.0 = 100%).
      ============================================================ */
 
-  const flushRawValue = getValue("RO5-FlushTankLevelRaw");
+  // getValue() turns a missing tag into 0, so read sensorData directly
+  const flushRawValue = sensorData?.["RO5-FlushTank"]?.value;
 
   const flushRawNum =
     typeof flushRawValue === "number"
@@ -309,7 +311,7 @@ export function FeedTankManagement() {
   const hasFlushRawReading = Number.isFinite(flushRawNum);
 
   const calibratedFlushPct = hasFlushRawReading
-    ? rawToPercent(flushRawNum)
+    ? flushRawToPercent(flushRawNum)
     : null;
 
   const flushDisplayLevel =
@@ -354,7 +356,7 @@ export function FeedTankManagement() {
     /*
      * FLUSH TANK (Tank B)
      *
-     * Real transmitter: RO5-FlushTankLevelRaw.
+     * Real transmitter: RO5-FlushTank.
      */
 
     const tankBLevel = scaledFlushLevel;
@@ -419,7 +421,7 @@ export function FeedTankManagement() {
         capacity: 300,
 
         volume:
-          (tankALevel / 100) * 500,
+          (tankALevel / 100) * 300,
 
         dailyConsumption: tankHasData
           ? feedFlow * 24 * 0.4
@@ -464,7 +466,7 @@ export function FeedTankManagement() {
         capacity: 200,
 
         volume:
-          (tankBLevel / 100) * 400,
+          (tankBLevel / 100) * 200,
 
         dailyConsumption: flushHasData
           ? feedFlow * 24 * 0.35
