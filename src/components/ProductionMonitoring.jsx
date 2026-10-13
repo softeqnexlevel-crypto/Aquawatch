@@ -106,7 +106,11 @@ export function ProductionMonitoring() {
     try {
       setSummaryLoading(true);
       setSummaryError(null);
-      const res = await fetch(`${API_BASE_URL}/api/production-summary`);
+      const token = localStorage.getItem('accessToken');
+      const res = await fetch(`${API_BASE_URL}/api/production-summary`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (res.status === 401) throw new Error('Session expired - please sign in again');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setProductionSummary(data);
