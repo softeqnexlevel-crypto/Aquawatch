@@ -6,7 +6,7 @@
 //
 // >>> SET THESE TWO NUMBERS to what the sensor reads when the tank is EMPTY and FULL. <<<
 // Empty = 4.9, Full = 200.
-export const FLUSH_RAW_EMPTY = 4.9;   // confirmed: 4.9 = 0%
+export const FLUSH_RAW_EMPTY = 4.9;   // confirmed: 0 = 0%
 export const FLUSH_RAW_FULL = 200;    // full tank = 200 (capacity)
 
 export function flushRawToPercent(raw) {

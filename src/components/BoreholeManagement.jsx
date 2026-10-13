@@ -29,7 +29,7 @@ import { format, subDays } from "date-fns";
 
 import { rawToPercent } from "./dashboardComponents/feedTankCalibration";
 
-// ── Flush tank calibration (tag RO5-FlushTank): 4.9 = 0%, 200 = 100% ──
+// ── Flush tank calibration (tag RO5-FlushTank): 0 = 0%, 200 = 100% ──
 const FLUSH_RAW_EMPTY = 4.9;
 const FLUSH_RAW_FULL = 200;
 function flushRawToPercent(raw) {
@@ -472,7 +472,7 @@ export function FeedTankManagement() {
 
         level: tankBLevel,
 
-        capacity: 200,
+        capacity: 2,
 
         volume:
           (tankBLevel / 100) * 200,
