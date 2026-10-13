@@ -878,7 +878,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           title="Daily Run Hours"
           value={hasDailyRunHrs && hasFreshData ? formatHoursFromHours(systemDailyRunHrs) : '--'}
           valueColor={hasDailyRunHrs && hasFreshData ? COLORS.primary : COLORS.muted}
-          sub={(hasDailyRunHrs && hasFreshData ? `${safeFormat(systemDailyRunHrs, 1)} hrs today` : 'No data') + (has24hAgo ? ` · 24h ago: ${formatHoursFromHours(runHrs24hAgo)}` : '')}
+          //sub={(hasDailyRunHrs && hasFreshData ? `${safeFormat(systemDailyRunHrs, 1)} hrs today` : 'No data') + (has24hAgo ? ` · 24h ago: ${formatHoursFromHours(runHrs24hAgo)}` : '')}
           subColor="var(--muted-foreground)"
         />
       </div>
@@ -971,7 +971,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             title="Service Run Hours"
             value={hasRunHrs && hasFreshData ? formatHoursFromHours(systemRunHrs) : '--'}
             valueColor={hasRunHrs && hasFreshData ? COLORS.primary : COLORS.muted}
-            sub={hasRunHrs && hasFreshData ? `${safeFormat(systemRunHrs, 1)} hrs in service` : 'No data'}
+            //sub={hasRunHrs && hasFreshData ? `${safeFormat(systemRunHrs, 1)} hrs in service` : 'No data'}
             subColor="var(--muted-foreground)"
           />
           {/* System run 24hrs ago: saved daily record from the backend */}
@@ -982,7 +982,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             title="System Run 24hrs Ago"
             value={has24hAgo ? formatHoursFromHours(runHrs24hAgo) : '--'}
             valueColor={has24hAgo ? COLORS.purple : COLORS.muted}
-            sub={has24hAgo ? `${safeFormat(runHrs24hAgo, 1)} hrs yesterday` : 'No record yet'}
+           // sub={has24hAgo ? `${safeFormat(runHrs24hAgo, 1)} hrs yesterday` : 'No record yet'}
             subColor="var(--muted-foreground)"
           />
         </div>
