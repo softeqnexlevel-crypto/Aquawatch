@@ -29,9 +29,9 @@ import { format, subDays } from "date-fns";
 
 import { rawToPercent } from "./dashboardComponents/feedTankCalibration";
 
-// ── Flush tank calibration (tag RO5-FlushTank): 0 = 0%, 200 = 100% ──
-const FLUSH_RAW_EMPTY = 4.9;
-const FLUSH_RAW_FULL = 200;
+// ── Flush tank calibration (tag RO5-FlushTank): 0 = 0%, 126 = 100% ──
+const FLUSH_RAW_EMPTY = 0;
+const FLUSH_RAW_FULL = 126;
 function flushRawToPercent(raw) {
   const n = Number(raw);
   if (!Number.isFinite(n)) return null;
@@ -306,7 +306,7 @@ export function FeedTankManagement() {
      LIVE FLUSH TANK LEVEL
      ============================================================
      Real transmitter: RO5-FlushTank (own calibration,
-     as the feed tank: RAW 4.9 = 0%, RAW 10.0 = 100%).
+     as the feed tank: RAW 0 = 0%, RAW 126 = 100%).
      ============================================================ */
 
   // getValue() turns a missing tag into 0, so read sensorData directly

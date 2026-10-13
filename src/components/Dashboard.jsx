@@ -625,7 +625,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
 
   const tankHasData = feedTankLevel !== null;
 
-  // ── FLUSH TANK (tag RO5-FlushTank, 4.9 = 0%, 200 = 100%) ─────
+  // ── FLUSH TANK (tag RO5-FlushTank, 0 = 0%, 126 = 100%) ─────
   // Read straight from sensorData: getValue() turns a missing tag into 0, which would fake a 0.000 reading
   const flushTankLevelRawValue = sensorData['RO5-FlushTank']?.value;
   const flushTankLevelRawNum =
