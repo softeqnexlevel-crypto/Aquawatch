@@ -689,7 +689,7 @@ export function UserManagement() {
       )}
       {error && <div style={{ fontSize: 12, color: "#ff3355" }}>{error}</div>}
 
-      <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 20, padding: isMobile ? 12 : 18, maxWidth: 1600, width: "100%", margin: "0 auto" }}>
+      <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 20, padding: isMobile ? 12 : 18, maxWidth: 1080, width: "100%", margin: "0 auto" }}>
         <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.18em", color: "var(--muted-foreground)", marginBottom: 14, textTransform: "uppercase" }}>
           Users &amp; Logins{(me?.clientName || me?.tenantName) ? <> &middot; <span style={{ letterSpacing: "0.1em" }}>{me.clientName || me.tenantName}</span></> : null}
         </div>

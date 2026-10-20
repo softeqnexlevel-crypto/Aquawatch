@@ -308,7 +308,7 @@ export function AlertsCenter({ onBack } = {}) {
   const totalAck    = alerts.filter((a) => a.status === "Acknowledged").length;
 
   return (
-    <div className="flex flex-col gap-3 sm:gap-4 p-2 sm:p-4" style={{ maxWidth: 1600, width: '100%', margin: '0 auto' }}>
+    <div className="flex flex-col gap-3 sm:gap-4 p-2 sm:p-4" style={{ maxWidth: 1080, width: '100%', margin: '0 auto' }}>
 
       {/* ── Sticky header ─────────────────────────────────────────────── */}
       <div className="flex-shrink-0 sticky top-0 z-10"

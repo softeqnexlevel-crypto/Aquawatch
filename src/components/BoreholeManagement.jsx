@@ -1038,7 +1038,7 @@ export function FeedTankManagement() {
         style={{
           flex: "1 0 auto",
           width: "100%",
-          maxWidth: 1600,
+          maxWidth: 1080,
           margin: "0 auto",
           display: "flex",
           flexDirection: "column",

@@ -283,7 +283,7 @@ export function Settings() {
   return (
     <div className="overflow-auto h-full" style={{ padding: "4px 4px 40px" }}>
       {toastNode}
-      <div style={{ maxWidth: 1100, width: "100%", margin: "0 auto" }}>
+      <div style={{ maxWidth: 1080, width: "100%", margin: "0 auto" }}>
         <Section title="Connection"><Connection isSuper={!!user?.isSuperAdmin} toast={toast} /></Section>
         {tid() === 1 && <Section title="Notifications"><Notifications isAdmin={isAdmin} toast={toast} /></Section>}
         <Section title="Account"><Account user={user} toast={toast} /></Section>

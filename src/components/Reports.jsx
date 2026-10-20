@@ -549,7 +549,7 @@ export function Reports() {
   };
 
   const innerStyle = {
-    maxWidth: 1600,
+    maxWidth: 1080,
     width: '100%',
     margin: '0 auto',
     display: 'flex',

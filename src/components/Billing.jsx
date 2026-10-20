@@ -249,7 +249,7 @@ export default function Billing() {
 
   return (
     <div className="bg-black text-neutral-100 p-8 min-h-screen">
-      <div style={{ maxWidth: 1600, width: "100%", margin: "0 auto", display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ maxWidth: 1080, width: "100%", margin: "0 auto", display: "flex", flexDirection: "column", gap: 14 }}>
 
       {/* Header */}
       <div className="mb-8">
