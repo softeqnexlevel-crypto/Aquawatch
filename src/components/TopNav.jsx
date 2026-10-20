@@ -5,6 +5,7 @@ import { useNavigate } from "react-router";
 import { Bell, Search, Sun, Moon, User, ChevronDown, X, Settings, LogOut, UserCircle, KeyRound, CheckCircle, AlertTriangle, Info } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import ChangePasswordModal from "./ChangePasswordModal";
+import { TenantSwitcher } from "./TenantSwitcher";
 
 // ── Brand Colors ──────────────────────────────────────────────────────────────
 const BRAND = {
@@ -411,9 +412,11 @@ export function TopNav({ darkMode, onToggleDark, alertCount, title }) {
         : "Guest";
   
   // ✅ Get user role
-  const displayRole = user?.role 
-    ? user.role.charAt(0).toUpperCase() + user.role.slice(1) 
-    : "User";
+  const displayRole = user?.isSuperAdmin
+    ? "Super Admin"
+    : user?.role 
+      ? user.role.charAt(0).toUpperCase() + user.role.slice(1) 
+      : "User";
 
   const userEmail = user?.email || "";
   const userInitial = displayName !== "Guest" ? displayName.charAt(0).toUpperCase() : "?";
@@ -527,6 +530,9 @@ export function TopNav({ darkMode, onToggleDark, alertCount, title }) {
         >
           {darkMode ? <Sun size={isMobile ? 14 : 14} /> : <Moon size={isMobile ? 14 : 14} />}
         </button>
+
+        {/* Tenant switcher (super admins) */}
+        <TenantSwitcher compact={isMobile} />
 
         {/* Notifications */}
         <div style={{ position: "relative", flexShrink: 0 }}>

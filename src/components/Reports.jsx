@@ -536,8 +536,36 @@ export function Reports() {
     cursor: "pointer",
   };
 
+  // ===================== PAGE HEIGHT LAYOUT =====================
+  // Desktop: the page is exactly as tall as the space the app gives it (h-full).
+  //   The header, quick buttons and filters keep their size, and the report list
+  //   takes ALL the remaining height and scrolls inside itself (table header stays
+  //   pinned while scrolling).
+  // Mobile: those blocks stack, so the whole page scrolls normally instead.
+  const pageStyle = {
+    overflowY: isMobile ? 'auto' : 'hidden',
+    overflowX: 'hidden',
+    minHeight: 0,
+  };
+
+  const innerStyle = {
+    maxWidth: 1600,
+    width: '100%',
+    margin: '0 auto',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 14,
+    ...(isMobile ? {} : { flex: 1, minHeight: 0 }),
+  };
+
+  const listRegionStyle = isMobile
+    ? {}
+    : { flex: 1, minHeight: 0, overflowY: 'auto' };
+
   return (
-    <div className="flex flex-col gap-3 sm:gap-4 p-2 sm:p-4 overflow-auto h-full">
+    <div className="flex flex-col p-2 sm:p-4 h-full min-h-0" style={pageStyle}>
+      <div style={innerStyle}>
+
       <style>{`
         @keyframes spin {
           from { transform: rotate(0deg); }
@@ -547,10 +575,17 @@ export function Reports() {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.5; }
         }
+        /* keep the table header visible while the report list scrolls */
+        .reports-table thead th {
+          position: sticky;
+          top: 0;
+          z-index: 1;
+          background: var(--muted);
+        }
       `}</style>
 
       {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+      <div className="flex-shrink-0 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
         <div>
           <h2 style={{ fontSize: isMobile ? 14 : 16, fontWeight: 700, color: "var(--foreground)" }}>
             Reports & Analytics
@@ -584,7 +619,7 @@ export function Reports() {
       </div>
 
       {/* Quick Generate Buttons - Responsive */}
-      <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)" }}>
+      <div className="flex-shrink-0 grid gap-2 sm:gap-3" style={{ gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)" }}>
         {generateButtons.map((r) => (
           <button
             key={r.label}
@@ -612,7 +647,7 @@ export function Reports() {
       </div>
 
       {/* Filters - Responsive */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3">
+      <div className="flex-shrink-0 flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3">
         <div className="flex items-center gap-1.5 flex-wrap">
           <Filter size={isMobile ? 12 : 14} style={{ color: "var(--muted-foreground)" }} />
           <span style={{ fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)", fontWeight: 500 }}>
@@ -665,11 +700,26 @@ export function Reports() {
         </span>
       </div>
 
-      {/* Report List */}
+      {/* Report List: fills the remaining height and scrolls inside itself (desktop) */}
       {viewMode === 'table' ? (
-        <div className="rounded overflow-hidden" style={{ border: "1px solid var(--border)" }}>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: isMobile ? 500 : 'auto' }}>
+        <div
+          className="rounded"
+          style={{
+            border: "1px solid var(--border)",
+            overflowX: 'auto',
+            ...listRegionStyle,
+          }}
+        >
+            <table
+              className="reports-table"
+              style={{
+                width: "100%",
+                borderCollapse: "collapse",
+                minWidth: isMobile ? 500 : 'auto',
+                // desktop: the table is as tall as its box, so the rows share the extra height
+                height: isMobile ? 'auto' : '100%',
+              }}
+            >
               <thead>
                 <tr style={{ background: "var(--muted)" }}>
                   {isMobile ? (
@@ -798,11 +848,19 @@ export function Reports() {
                 })}
               </tbody>
             </table>
-          </div>
         </div>
       ) : (
-        // Card View - Responsive
-        <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(280px, 1fr))" }}>
+        // Card View - Responsive (also fills the remaining height and scrolls inside itself)
+        <div
+          className="grid gap-2 sm:gap-3"
+          style={{
+            gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(280px, 1fr))",
+            // desktop: card rows stretch to fill the box height
+            alignContent: 'stretch',
+            gridAutoRows: isMobile ? 'auto' : 'minmax(min-content, 1fr)',
+            ...listRegionStyle,
+          }}
+        >
           {filteredReports.map((r) => {
             const Icon = categoryIcons[r.category] || FileText;
             const tc = typeColors[r.type] || typeColors.Monthly;
@@ -896,7 +954,7 @@ export function Reports() {
 
       {/* Empty State */}
       {filteredReports.length === 0 && (
-        <div className="flex flex-col items-center justify-center p-8" style={{ color: "var(--muted-foreground)" }}>
+        <div className="flex-shrink-0 flex flex-col items-center justify-center p-8" style={{ color: "var(--muted-foreground)" }}>
           <FileText size={isMobile ? 24 : 32} style={{ opacity: 0.3, marginBottom: 12 }} />
           <p style={{ fontSize: isMobile ? 12 : 14, fontWeight: 500 }}>No reports found</p>
           <p style={{ fontSize: isMobile ? 10 : 11, marginTop: 4 }}>Try adjusting your filters or generating a new report</p>
@@ -905,6 +963,7 @@ export function Reports() {
 
       {/* Toast Notification */}
       <Toast toast={toast} />
+    </div>
     </div>
   );
 }

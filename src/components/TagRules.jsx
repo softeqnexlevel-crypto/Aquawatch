@@ -517,6 +517,8 @@ export default function TagManager() {
   };
 
   return (
+      <div style={{ maxWidth: 1600, width: "100%", margin: "0 auto", display: "flex", flexDirection: "column", gap: 14 }}>
+
     <div style={{ 
       fontFamily: "'Inter', system-ui, sans-serif", 
       color: 'var(--foreground)', 
@@ -1039,6 +1041,7 @@ export default function TagManager() {
           animation: spin 0.8s linear infinite;
         }
       `}</style>
+    </div>
     </div>
   );
 }

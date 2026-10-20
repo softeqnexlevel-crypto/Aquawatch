@@ -1,17 +1,11 @@
 
 
 import React, { useState, useMemo, useEffect } from "react";
-import {
-  AreaChart, Area, LineChart, Line,
-  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine
-} from "recharts";
-import {
-  AlertTriangle, CheckCircle, FlaskConical, Droplet,
-  TrendingUp, TrendingDown, Clock, Calendar, AlertCircle, Info
-} from "lucide-react";
+import { AlertTriangle, FlaskConical, AlertCircle, Recycle } from "lucide-react";
+import { API_BASE_URL } from "../config";
 import { useData } from "../contexts/DataContext";
 import { rawToPercent } from "./dashboardComponents/feedTankCalibration";
-import { format, subHours, subDays } from 'date-fns';
+import { format } from 'date-fns';
 import { useDailySummary } from "./dashboardComponents/useDailySummary";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -136,12 +130,41 @@ function ChartPanel({ title, meta, children, isMobile }) {
   );
 }
 
+// ─── Look (matches the rest of the neon dashboard) ──────────────────────────
+const card = () => ({ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 20, padding: 18 });
+const cap = { display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 800, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--muted-foreground)' };
+const big = (color, size = 34) => ({ fontFamily: 'var(--font-mono)', fontSize: size, fontWeight: 800, color, lineHeight: 1 });
+const unit = { fontSize: 13, color: 'var(--muted-foreground)', fontWeight: 700 };
+const sub = { fontSize: 12.5, color: 'var(--muted-foreground)' };
+
+// minutes of dosing per 2h interval + dose rate, computed on the server from stored readings
+function useDosingOverview() {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    let stop = false;
+    const root = String(API_BASE_URL || '').replace(/\/api\/?$/, '');
+    const load = async () => {
+      try {
+        let token = null;
+        try { token = localStorage.getItem('accessToken'); } catch { /* ignore */ }
+        const r = await fetch(`${root}/api/dosing-overview`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+        if (!r.ok) return;
+        const d = await r.json();
+        if (!stop) setData(d);
+      } catch { /* keep last */ }
+    };
+    load();
+    const t = setInterval(load, 60000);
+    return () => { stop = true; clearInterval(t); };
+  }, []);
+  return data;
+}
+
 // ─── Main ───────────────────────────────────────────────────────────────────
 export function AntiscalantDosing() {
   const { getValue, getHistory, lastUpdate, connected } = useData();
   const [isMobile, setIsMobile] = useState(false);
   const [showAlerts, setShowAlerts] = useState(true);
-  const [timeRange, setTimeRange] = useState('24h');
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -178,28 +201,13 @@ export function AntiscalantDosing() {
   // Saved daily record: what happened over the previous day (before the PLC reset to zero)
   const dailySummary = useDailySummary();
   const ml24hAgo = dailySummary?.yesterday?.antiscalantMl;
-  const run24hAgo = dailySummary?.yesterday?.runHours;
   const hasMl24hAgo = Number.isFinite(ml24hAgo);
-  const hasRun24hAgo = Number.isFinite(run24hAgo);
-
-  // ── Chart: hourly feed flow over selected range (from client-side ring buffer) ──
-  const feedHistory = getHistory('RO5-FEEDFlow');
-  const hourlyFlowData = useMemo(() => {
-    const now = new Date();
-    const hours = timeRange === '24h' ? 24 : timeRange === '6h' ? 6 : 1;
-    const startTime = subHours(now, hours);
-    const filtered = (feedHistory || []).filter(d => new Date(d.time) >= startTime);
-    const grouped = {};
-    filtered.forEach(d => {
-      const hour = format(new Date(d.time), 'HH:00');
-      if (!grouped[hour]) grouped[hour] = { hour, flow: 0, count: 0 };
-      grouped[hour].flow += toNum(d.value);
-      grouped[hour].count++;
-    });
-    return Object.values(grouped)
-      .map(g => ({ hour: g.hour, flow: g.count ? g.flow / g.count : 0 }))
-      .sort((a, b) => a.hour.localeCompare(b.hour));
-  }, [feedHistory, timeRange]);
+  const overview = useDosingOverview();
+  const intervals = overview?.intervals || [];
+  const doseRate = overview?.rateMlPerMin;
+  const unitKey = overview?.unit === 'ml' ? 'ml' : 'min';
+  const scaleMax = unitKey === 'ml' ? Math.max(1, ...intervals.map((i) => i.minutes)) : Math.max(60, ...intervals.map((i) => i.minutes));
+  const allZero = intervals.length > 0 && intervals.every((i) => !i.minutes);
 
   // ── Alerts derived from real signals ────────────────────────────────────
   const alerts = useMemo(() => {
@@ -248,8 +256,17 @@ export function AntiscalantDosing() {
   const criticalAlerts = alerts.filter(a => a.severity === 'critical');
 
   // ── Render ──────────────────────────────────────────────────────────────
-  return (
-    <div className="flex flex-col gap-3 sm:gap-4 p-2 sm:p-4 overflow-auto h-full" style={{ scrollbarWidth: "none" }}>
+ return (
+  <div className="h-full overflow-auto antiscalant-scroll">
+    <style>{`
+      .antiscalant-scroll { scrollbar-width: thin; scrollbar-color: #1f3a5f transparent; }
+      .antiscalant-scroll::-webkit-scrollbar { width: 8px; }
+      .antiscalant-scroll::-webkit-scrollbar-track { background: transparent; }
+      .antiscalant-scroll::-webkit-scrollbar-thumb { background: #1f3a5f; border-radius: 8px; }
+      .antiscalant-scroll::-webkit-scrollbar-thumb:hover { background: #00e5ff; }
+    `}</style>
+
+    <div className="flex flex-col gap-3 sm:gap-4 p-2 sm:p-4" style={{ maxWidth: 1600, width: '100%', margin: '0 auto' }}>
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
@@ -336,137 +353,89 @@ export function AntiscalantDosing() {
         </div>
       )}
 
-      {/* KPI cards — all from PLC / live context */}
-      <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(auto-fit, minmax(180px, 1fr))" }}>
-        <MetricCard
-          label="Dosed Today (PLC)"
-          value={antiscalantDailyPLC.toFixed(2)}
-          unit="ml"
-          color="#0ea5e9"
-          icon={Droplet}
-          sub={`${dailyConsumptionL.toFixed(3)} L`}
-          isMobile={isMobile}
-        />
-        <MetricCard
-          label="Antiscalant Dosed 24hrs Ago"
-          value={hasMl24hAgo ? ml24hAgo.toFixed(2) : '--'}
-          unit="ml"
-          color="#a78bfa"
-          icon={FlaskConical}
-          sub={hasMl24hAgo ? `${(ml24hAgo / 1000).toFixed(3)} L · ${dailySummary.yesterday.day}` : 'No record yet'}
-          isMobile={isMobile}
-        />
-        {/*}<MetricCard
-          label="System Run 24hrs Ago"
-          value={hasRun24hAgo ? run24hAgo.toFixed(1) : '--'}
-          unit="hrs"
-          color="#0ea5e9"
-          icon={Clock}
-          sub={hasRun24hAgo ? `${formatHours(run24hAgo)} · ${dailySummary.yesterday.day}` : 'No record yet'}
-          isMobile={isMobile}
-        />
-        {/* <MetricCard
-          label="System Run Hours"
-          value={systemRunHrs.toFixed(1)}
-          unit="hrs"
-          color="#0ea5e9"
-          icon={Clock}
-          sub={`PLC running total · ${formatHours(systemRunHrs)}`}
-          isMobile={isMobile}
-        /> */}
-        <MetricCard
-          label="Recovery"
-          value={recovery.toFixed(1)}
-          unit="%"
-          color={recovery > 75 ? '#22c55e' : recovery > 65 ? '#eab308' : '#ef4444'}
-          icon={TrendingUp}
-          sub={`${feedFlow.toFixed(1)} m³/h feed`}
-          isMobile={isMobile}
-        />
-        <MetricCard
-          label="Feed Tank"
-          value={feedTankLevel.toFixed(1)}
-          unit="%"
-          color={feedTankLevel > 30 ? '#22c55e' : feedTankLevel > 20 ? '#eab308' : '#ef4444'}
-          icon={Info}
-          sub={feedTankLevel > 30 ? 'Normal' : feedTankLevel > 20 ? 'Low' : 'Critical'}
-          isMobile={isMobile}
-        />
+      {/* Dosing today + dose rate */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))', gap: 12 }}>
+        <div style={card()}>
+          <div style={cap}><FlaskConical size={13} style={{ color: '#a78bfa' }} /> Dosing today</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 14 }}>
+            <span style={big('#00e5ff')}>{antiscalantDailyPLC.toFixed(0)}</span>
+            <span style={unit}>ml</span>
+          </div>
+          <div style={{ marginTop: 12 }}><StatusBadge isActive={isDosingActive} size="sm" isMobile={isMobile} /></div>
+        </div>
+        <div style={card()}>
+          <div style={cap}><FlaskConical size={13} style={{ color: '#a78bfa' }} /> Antiscalant dosed 24hrs ago</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 14 }}>
+            <span style={big('#a78bfa')}>{hasMl24hAgo ? ml24hAgo.toFixed(0) : '--'}</span>
+            <span style={unit}>ml</span>
+          </div>
+          
+        </div>
       </div>
 
-      {/* Row: System status */}
-      <ChartPanel title="System Status" meta="live" isMobile={isMobile}>
-        <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
-          <div style={{ padding: isMobile ? '6px' : '10px', background: 'var(--secondary)', borderRadius: 6, textAlign: 'center' }}>
-            <div style={{ fontSize: isMobile ? 8 : 9, color: 'var(--muted-foreground)' }}>Dosing Pump</div>
-            <div style={{
-              fontSize: isMobile ? 14 : 16, fontWeight: 700,
-              color: isDosingActive ? '#22c55e' : '#ef4444', marginTop: 2
-            }}>{isDosingActive ? 'ON' : 'OFF'}</div>
-          </div>
-          <div style={{ padding: isMobile ? '6px' : '10px', background: 'var(--secondary)', borderRadius: 6, textAlign: 'center' }}>
-            <div style={{ fontSize: isMobile ? 8 : 9, color: 'var(--muted-foreground)' }}>Product EC</div>
-            <div style={{
-              fontSize: isMobile ? 14 : 16, fontWeight: 700,
-              color: pureWaterEC < 30 ? '#22c55e' : pureWaterEC < 50 ? '#eab308' : '#ef4444',
-              marginTop: 2
-            }}>{pureWaterEC.toFixed(1)}</div>
-          </div>
-          <div style={{ padding: isMobile ? '6px' : '10px', background: 'var(--secondary)', borderRadius: 6, textAlign: 'center' }}>
-            <div style={{ fontSize: isMobile ? 8 : 9, color: 'var(--muted-foreground)' }}>Feed Flow</div>
-            <div style={{ fontSize: isMobile ? 14 : 16, fontWeight: 700, color: '#0ea5e9', marginTop: 2 }}>
-              {feedFlow.toFixed(1)}
-            </div>
-          </div>
-          <div style={{ padding: isMobile ? '6px' : '10px', background: 'var(--secondary)', borderRadius: 6, textAlign: 'center' }}>
-            <div style={{ fontSize: isMobile ? 8 : 9, color: 'var(--muted-foreground)' }}>Permeate</div>
-            <div style={{ fontSize: isMobile ? 14 : 16, fontWeight: 700, color: '#22c55e', marginTop: 2 }}>
-              {permeateFlow.toFixed(1)}
-            </div>
+      {/* Recovery + feed tank */}
+      <div style={{ ...card(), display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div>
+          <div style={cap}><Recycle size={13} style={{ color: '#00e5ff' }} /> Recovery</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 12 }}>
+            <span style={big(recovery > 75 ? '#39ff88' : recovery > 65 ? '#ffb938' : '#ff3355', 28)}>{recovery.toFixed(1)}</span>
+            <span style={unit}>%</span>
           </div>
         </div>
-      </ChartPanel>
+        <div>
+          <div style={cap}>Feed tank</div>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 12 }}>
+            <span style={big(feedTankLevel > 30 ? '#c6ff00' : feedTankLevel > 20 ? '#ffb938' : '#ff3355', 28)}>{feedTankLevel.toFixed(1)}</span>
+            <span style={unit}>%</span>
+          </div>
+        </div>
+      </div>
 
-      {/* Row: Feed flow (last N hours) */}
-      <ChartPanel
-        title="Feed Flow"
-        meta={`${timeRange === '24h' ? '24 Hours' : timeRange === '6h' ? '6 Hours' : '1 Hour'} · m³/h`}
-        isMobile={isMobile}
-      >
-        <div className="flex items-center gap-2 mb-2">
-          {['1h', '6h', '24h'].map(range => (
-            <button
-              key={range}
-              onClick={() => setTimeRange(range)}
-              style={{
-                padding: isMobile ? '2px 8px' : '3px 10px',
-                borderRadius: 4,
-                fontSize: isMobile ? 9 : 10,
-                fontWeight: 600,
-                background: timeRange === range ? '#0ea5e9' : 'var(--secondary)',
-                color: timeRange === range ? 'white' : 'var(--muted-foreground)',
-                border: '1px solid var(--border)',
-                cursor: 'pointer',
-              }}
-            >{range}</button>
+      {/* Minutes dosing per interval */}
+      <div style={card()}>
+        <div style={cap}>{unitKey === 'ml' ? 'Antiscalant dosed per interval (ml)' : 'Minutes dosing per interval'}</div>
+        {intervals.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--muted-foreground)', fontSize: 13 }}>Loading dosing history...</div>
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'flex-end', gap: isMobile ? 4 : 12, height: isMobile ? 220 : 300, marginTop: 14, padding: '0 4px' }}>
+            {intervals.map((it, i) => {
+              const h = Math.max(2, (it.minutes / scaleMax) * (isMobile ? 160 : 230));
+              return (
+                <div key={i} style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', height: '100%' }}>
+                  <div style={{ fontSize: isMobile ? 10 : 15, color: 'var(--foreground)', marginBottom: 6 }}>{Number(it.minutes) % 1 === 0 ? it.minutes : it.minutes.toFixed(1)}</div>
+                  <div style={{ width: '100%', maxWidth: 56, height: h, borderRadius: 10, background: '#00e5ff', boxShadow: '0 0 16px rgba(0,229,255,0.55)' }} />
+                  <div style={{ fontSize: isMobile ? 9 : 15, color: 'var(--muted-foreground)', marginTop: 10, whiteSpace: 'nowrap' }}>{it.label}</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <div style={{ ...sub, marginTop: 10 }}>
+          {unitKey === 'ml' ? 'Each bar = ml dosed in a 2-hour interval.' : 'Each bar = minutes the pump ran in a 2-hour interval.'} Last bar is the current, still running interval.
+          {allZero && overview?.debug ? ` No dosing found in the stored history (pump records: ${overview.debug.stateRows}, counter records: ${overview.debug.mlRows}).` : ''}
+        </div>
+      </div>
+
+      {/* System status */}
+      <div style={card()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span style={cap}>System status</span>
+          <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.1em', color: '#c6ff00' }}>LIVE</span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 12 }}>
+          {[
+            ['Dosing pump', isDosingActive ? 'ON' : 'OFF', isDosingActive ? '#39ff88' : '#ff3355'],
+            ['Product EC', pureWaterEC.toFixed(1), pureWaterEC < 30 ? '#c6ff00' : pureWaterEC < 50 ? '#ffb938' : '#ff3355'],
+            ['Feed flow', feedFlow.toFixed(1), '#00e5ff'],
+            ['Permeate', permeateFlow.toFixed(1), '#39ff88'],
+          ].map(([l, v, c]) => (
+            <div key={l} style={{ padding: '16px 10px', background: 'var(--secondary)', borderRadius: 14, textAlign: 'center' }}>
+              <div style={{ fontSize: 12, color: 'var(--muted-foreground)' }}>{l}</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: c, marginTop: 6 }}>{v}</div>
+            </div>
           ))}
         </div>
-        {hourlyFlowData.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '30px 0', color: 'var(--muted-foreground)', fontSize: 11 }}>
-            Waiting for feed flow history...
-          </div>
-        ) : (
-          <ResponsiveContainer width="100%" height={isMobile ? 140 : 160}>
-            <LineChart data={hourlyFlowData} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" />
-              <XAxis dataKey="hour" tick={{ fontSize: isMobile ? 7 : 8, fill: "#4d7a9e" }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: isMobile ? 7 : 8, fill: "#4d7a9e" }} axisLine={false} tickLine={false} />
-              <Tooltip content={<CustomTooltip />} />
-              <Line type="monotone" dataKey="flow" stroke="#0ea5e9" strokeWidth={2} dot={false} name="Feed Flow" />
-            </LineChart>
-          </ResponsiveContainer>
-        )}
-      </ChartPanel>
+      </div>
 
       {!showAlerts && alerts.length > 0 && (
         <button
@@ -484,6 +453,7 @@ export function AntiscalantDosing() {
         </button>
       )}
 
+</div>
     </div>
   );
 }

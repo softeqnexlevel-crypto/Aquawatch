@@ -1,519 +1,303 @@
-// pages/Settings.jsx - FULLY MOBILE RESPONSIVE (FIXED)
-
-import { useState, useRef, useEffect } from "react";
-import { Link } from "react-router-dom";
-import { RefreshCw, CheckCircle, Download, Upload, Settings as SettingsIcon, Users, ExternalLink } from "lucide-react";
-import { useData } from "../contexts/DataContext";
+// frontend/src/components/Settings.jsx — client-style settings page (AquaSystemTech)
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
-import { format } from 'date-fns';
-import { API_BASE_URL } from '../config';
+import { getActiveTenantId, setActiveTenantId, setTenantConfig } from "../tenantFetch";
+import { MqttFields, SystemsEditor, PagesEditor } from "./TenantForms";
 
-// ── Toast ──────────────────────────────────────────────────────────────────────
-function Toast({ toast }) {
-  if (!toast) return null;
-  return (
-    <div style={{
-      position: "fixed", bottom: 20, right: 20, zIndex: 999,
-      background: "var(--card)", border: "1px solid var(--border)",
-      borderRadius: 8, padding: "10px 14px", minWidth: 200, maxWidth: 320,
-      boxShadow: "0 2px 12px rgba(0,0,0,0.12)",
-      display: "flex", alignItems: "center", gap: 8,
-      opacity: toast.visible ? 1 : 0, transition: "opacity 0.3s",
-    }}>
-      {toast.done
-        ? <CheckCircle size={15} style={{ color: toast.error ? "#ef4444" : "#22c55e", flexShrink: 0 }} />
-        : <RefreshCw size={15} style={{ color: "#0ea5e9", flexShrink: 0, animation: "spin 1s linear infinite" }} />
-      }
-      <span style={{ fontSize: 12, fontWeight: 500, color: "var(--foreground)" }}>{toast.msg}</span>
-    </div>
-  );
-}
+const API_BASE_URL = `${import.meta.env.VITE_API_URL || "http://localhost:4000"}`;
 
-function useToast() {
-  const [toast, setToast] = useState(null);
-  const t = useRef(null);
-  function show(msg, done = false, error = false) {
-    if (t.current) clearTimeout(t.current);
-    setToast({ msg, done, error, visible: true });
-    t.current = setTimeout(() => setToast(null), 2800);
-  }
-  return { toast, show };
-}
-
-// ── API helper ───────────────────────────────────────────────────────────────
 async function apiCall(endpoint, options = {}) {
-  const token = localStorage.getItem('accessToken');
-  const headers = {
-    'Content-Type': 'application/json',
-    ...options.headers
-  };
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-
-  const response = await fetch(`${API_BASE_URL}/api${endpoint}`, { ...options, headers });
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.error || `HTTP ${response.status}`);
-  }
-  return response.json();
+  const token = localStorage.getItem("accessToken");
+  const res = await fetch(`${API_BASE_URL}/api${endpoint}`, {
+    ...options,
+    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}), ...options.headers },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Request failed");
+  return data;
 }
 
-// ── Helper: Safely parse number ──────────────────────────────────────────────
-function safeNumber(value, fallback = 0) {
-  if (value === null || value === undefined || value === '') return fallback;
-  const num = typeof value === 'string' ? parseFloat(value) : Number(value);
-  return isNaN(num) ? fallback : num;
-}
+// ---------- shared look ----------
+const fld = { width: "100%", background: "var(--input-background, #050a12)", border: "1px solid var(--border)", borderRadius: 12, padding: "12px 14px", fontSize: 15, color: "var(--foreground)", outline: "none", boxSizing: "border-box" };
+const lbl = { fontSize: 13.5, color: "var(--muted-foreground)", margin: "12px 0 6px", display: "block" };
+const pill = (bg, color, extra = {}) => ({ background: bg, color, border: "1px solid transparent", borderRadius: 999, padding: "11px 22px", cursor: "pointer", fontWeight: 800, fontSize: 12.5, letterSpacing: "0.08em", textTransform: "uppercase", ...extra });
+const ghost = { background: "var(--secondary)", color: "var(--foreground)", border: "1px solid var(--border)" };
 
-const DEFAULTS = {
-  plantName: "Nairobi Water Treatment Plant",
-  operatorId: "WTP-2024-NBI-001",
-  productionTarget: "4200",
-  recoveryTarget: "78",
-  filterDpWarn: "0.50",
-  filterDpCrit: "0.65",
-  lowRecoveryWarn: "76",
-  lowChemAlert: "20",
-  minDosing: "2.0",
-  maxDosing: "3.0",
-};
-
-// ── Sub-components ─────────────────────────────────────────────────────────────
-function Section({ title, children, action, isMobile }) {
+function Section({ title, children }) {
   return (
-    <div className="rounded p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2" style={{ marginBottom: 12 }}>
-        <div style={{ fontSize: isMobile ? 10 : 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
-          {title}
-        </div>
-        {action}
-      </div>
+    <div style={{ marginBottom: 18 }}>
+      <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: "0.18em", color: "var(--muted-foreground)", margin: "0 4px 8px", textTransform: "uppercase" }}>{title}</div>
       {children}
     </div>
   );
 }
-
-function SettingRow({ label, desc, children, isMobile }) {
+function Card({ title, badge, children }) {
   return (
-    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between py-2.5 gap-2" style={{ borderBottom: "1px solid var(--border)" }}>
-      <div>
-        <div style={{ fontSize: isMobile ? 11 : 12, fontWeight: 500, color: "var(--foreground)" }}>{label}</div>
-        {desc && <div style={{ fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)", marginTop: 1 }}>{desc}</div>}
-      </div>
-      <div style={{ width: isMobile ? '100%' : 'auto' }}>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-// ── FIXED: StatusBadge with proper number validation ─────────────────────────
-function StatusBadge({ label, value, warning, critical, unit, isMobile }) {
-  // Safely convert all values to numbers
-  const safeValue = safeNumber(value, 0);
-  const safeWarning = safeNumber(warning, 0);
-  const safeCritical = safeNumber(critical, 0);
-
-  const isCritical = safeValue >= safeCritical;
-  const isWarning = safeValue >= safeWarning && safeValue < safeCritical;
-  const color = isCritical ? '#ef4444' : isWarning ? '#eab308' : '#22c55e';
-
-  return (
-    <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-      <span style={{ fontSize: isMobile ? 9 : 10, color: 'var(--muted-foreground)' }}>{label}:</span>
-      <span style={{ fontSize: isMobile ? 10 : 11, fontFamily: 'var(--font-mono)', color }}>
-        {safeValue.toFixed(1)} {unit}
-      </span>
-      <span style={{
-        fontSize: isMobile ? 7 : 8,
-        color,
-        background: `${color}15`,
-        padding: '1px 5px',
-        borderRadius: 3
-      }}>
-        {isCritical ? '⚠️ CRITICAL' : isWarning ? '⚠️ WARNING' : '✅ NORMAL'}
-      </span>
-    </div>
-  );
-}
-
-const inputStyle = { background: "var(--secondary)", border: "1px solid var(--border)", borderRadius: 4, padding: "4px 8px", fontSize: 11, color: "var(--foreground)", outline: "none", width: '100%' };
-const monoInput  = { ...inputStyle, fontFamily: "var(--font-mono)" };
-
-// ── Settings ───────────────────────────────────────────────────────────────────
-export function Settings() {
-  const { getValue, lastUpdate } = useData();
-  const { user: me } = useAuth();
-  const isAdmin = me?.role === "admin";
-  const [isMobile, setIsMobile] = useState(false);
-
-  // Mobile detection
-  useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 768);
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
-
-  const [form, setForm] = useState({ ...DEFAULTS });
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [settingsMeta, setSettingsMeta] = useState(null);
-  const { toast, show } = useToast();
-
-  const [systemInfo, setSystemInfo] = useState(null);
-  const [mqttStatus, setMqttStatus] = useState(null);
-
-  // ==================== FETCH REAL SETTINGS ====================
-  const fetchSettings = async () => {
-    setLoading(true);
-    try {
-      const data = await apiCall('/settings');
-      const s = data.settings;
-      setForm({
-        plantName: s.plantName ?? DEFAULTS.plantName,
-        operatorId: s.operatorId ?? DEFAULTS.operatorId,
-        productionTarget: String(s.productionTarget ?? DEFAULTS.productionTarget),
-        recoveryTarget: String(s.recoveryTarget ?? DEFAULTS.recoveryTarget),
-        filterDpWarn: String(s.filterDpWarn ?? DEFAULTS.filterDpWarn),
-        filterDpCrit: String(s.filterDpCrit ?? DEFAULTS.filterDpCrit),
-        lowRecoveryWarn: String(s.lowRecoveryWarn ?? DEFAULTS.lowRecoveryWarn),
-        lowChemAlert: String(s.lowChemAlert ?? DEFAULTS.lowChemAlert),
-        minDosing: String(s.minDosing ?? DEFAULTS.minDosing),
-        maxDosing: String(s.maxDosing ?? DEFAULTS.maxDosing),
-      });
-      setSettingsMeta({ updatedAt: s.updatedAt, updatedBy: s.updatedBy });
-    } catch (err) {
-      show(`❌ Failed to load settings: ${err.message}`, true, true);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ==================== FETCH REAL SYSTEM INFO ====================
-  const fetchSystemInfo = async () => {
-    try {
-      const health = await apiCall('/health');
-      setSystemInfo(health);
-    } catch (err) {
-      console.warn('Could not fetch system health:', err);
-    }
-    try {
-      const mqtt = await apiCall('/mqtt-status');
-      setMqttStatus(mqtt);
-    } catch (err) {
-      console.warn('Could not fetch MQTT status:', err);
-    }
-  };
-
-  useEffect(() => {
-    fetchSettings();
-    fetchSystemInfo();
-  }, []);
-
-  // ── FIXED: Safely get real-time values ─────────────────────────────────────
-  const currentRecovery = safeNumber(getValue('RO5-SystemRecovery'), 0);
-  const currentFlow = safeNumber(getValue('RO5-FEEDFlow'), 0);
-  const currentDosing = 2.0 + (currentFlow / 100) * 0.5;
-  const filterDelta = safeNumber(getValue('RO5-MediaFilterDeltaP'), 0);
-  const systemOperation = safeNumber(getValue('RO5-SystemOperation'), 0);
-
-  const set = (key) => (e) => setForm(f => ({ ...f, [key]: e.target.value }));
-
-  function validateSettings() {
-    const errors = [];
-    if (parseFloat(form.productionTarget) < 1000) errors.push('Production target should be at least 1000 m³/day');
-    if (parseFloat(form.recoveryTarget) < 50 || parseFloat(form.recoveryTarget) > 95) errors.push('Recovery target should be between 50% and 95%');
-    if (parseFloat(form.minDosing) >= parseFloat(form.maxDosing)) errors.push('Min dosing rate must be less than max dosing rate');
-    if (parseFloat(form.filterDpWarn) >= parseFloat(form.filterDpCrit)) errors.push('Filter warning threshold must be less than critical threshold');
-    return errors;
-  }
-
-  // ==================== REAL SAVE ====================
-  async function handleSave() {
-    if (!isAdmin) {
-      show('❌ Only admins can change settings', true, true);
-      return;
-    }
-
-    const errors = validateSettings();
-    if (errors.length > 0) {
-      show(`❌ ${errors.join('. ')}`, true, true);
-      return;
-    }
-
-    setSaving(true);
-    show("Saving changes…");
-    try {
-      const data = await apiCall('/settings', {
-        method: 'PUT',
-        body: JSON.stringify(form),
-      });
-      setSettingsMeta({ updatedAt: data.settings.updatedAt, updatedBy: data.settings.updatedBy });
-      show("✅ Settings saved successfully", true);
-    } catch (err) {
-      show(`❌ ${err.message}`, true, true);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function handleReset() {
-    if (window.confirm('Reload settings from the server, discarding unsaved changes?')) {
-      fetchSettings();
-      show("Reloaded from server", true);
-    }
-  }
-
-  function handleExportSettings() {
-    const data = { ...form, exportedAt: new Date().toISOString(), version: '2.0' };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `settings_backup_${format(new Date(), 'yyyy-MM-dd')}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    show('✅ Settings exported successfully', true);
-  }
-
-  function handleImportSettings(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const data = JSON.parse(event.target.result);
-        setForm(f => ({ ...f, ...data }));
-        show('Imported — click "Save Changes" to persist this to the server', true);
-      } catch (err) {
-        show('❌ Invalid settings file', true, true);
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
-  }
-
-  function formatUptime(seconds) {
-    if (!seconds || seconds < 0) return '—';
-    const days = Math.floor(seconds / 86400);
-    const hours = Math.floor((seconds % 86400) / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    if (days > 0) return `${days}d ${hours}h ${mins}m`;
-    if (hours > 0) return `${hours}h ${mins}m`;
-    return `${mins}m`;
-  }
-
-  return (
-    <div className="flex flex-col gap-3 sm:gap-4 p-2 sm:p-4 overflow-auto h-full">
-      <style>{`@keyframes spin { from { transform:rotate(0deg) } to { transform:rotate(360deg) } }`}</style>
-
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-        <div style={{ fontSize: isMobile ? 10 : 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
-          <SettingsIcon size={isMobile ? 12 : 14} style={{ display: 'inline', marginRight: 6 }} />
-          System Settings
-        </div>
-        <div className="flex gap-1.5 sm:gap-2 w-full sm:w-auto">
-          <input
-            type="file"
-            accept=".json"
-            onChange={handleImportSettings}
-            style={{ display: 'none' }}
-            id="importSettings"
-          />
-          <label htmlFor="importSettings" style={{ cursor: 'pointer', flex: isMobile ? 1 : 'none' }}>
-            <button
-              className="flex items-center justify-center gap-1 px-2 sm:px-3 py-1.5 rounded w-full"
-              style={{ background: "var(--secondary)", border: "1px solid var(--border)", fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)", cursor: "pointer" }}
-            >
-              <Upload size={isMobile ? 10 : 12} /> {isMobile ? '' : 'Import'}
-            </button>
-          </label>
-          <button
-            onClick={handleExportSettings}
-            className="flex items-center justify-center gap-1 px-2 sm:px-3 py-1.5 rounded flex-1 sm:flex-none"
-            style={{ background: "var(--secondary)", border: "1px solid var(--border)", fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)", cursor: "pointer" }}
-          >
-            <Download size={isMobile ? 10 : 12} /> {isMobile ? '' : 'Export'}
-          </button>
-        </div>
-      </div>
-
-      {!isAdmin && (
-        <div className="rounded p-2 sm:p-2.5" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)", color: "#ef4444", fontSize: isMobile ? 10 : 11 }}>
-          You're viewing in read-only mode. Only Admins can change these settings.
+    <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 20, padding: 18, marginBottom: 14 }}>
+      {(title || badge) && (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 8 }}>
+          <div style={{ fontSize: 17, fontWeight: 800, color: "var(--foreground)" }}>{title}</div>
+          {badge}
         </div>
       )}
+      {children}
+    </div>
+  );
+}
+const Badge = ({ children, color = "#00e5ff" }) => (
+  <span style={{ fontSize: 12, fontWeight: 800, color, border: `1px solid ${color}66`, background: `${color}1a`, borderRadius: 999, padding: "4px 12px", whiteSpace: "nowrap" }}>{children}</span>
+);
+const Note = ({ children }) => <div style={{ fontSize: 15, color: "var(--muted-foreground)", margin: "4px 0 12px", lineHeight: 1.5 }}>{children}</div>;
+const Check = ({ checked, onChange, disabled, children }) => (
+  <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 14.5, color: "var(--foreground)", margin: "8px 0", cursor: disabled ? "default" : "pointer" }}>
+    <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} style={{ width: 16, height: 16, colorScheme: "dark" }} />
+    {children}
+  </label>
+);
 
-      {loading ? (
-        <div style={{ padding: 40, textAlign: "center", color: "var(--muted-foreground)" }}>
-          <RefreshCw size={24} className="animate-spin" style={{ margin: "0 auto 12px" }} />
-          <p>Loading settings…</p>
-        </div>
+function useToast() {
+  const [msg, setMsg] = useState(null);
+  const show = (text, ok = true) => { setMsg({ text, ok }); setTimeout(() => setMsg(null), 4000); };
+  const node = msg && (
+    <div style={{ position: "fixed", top: 70, right: 20, zIndex: 300, padding: "10px 16px", borderRadius: 12, fontSize: 13, fontWeight: 700,
+      background: msg.ok ? "#0d2b1a" : "#2b0d14", color: msg.ok ? "#39ff88" : "#ff3355", border: `1px solid ${msg.ok ? "#39ff8855" : "#ff335555"}` }}>{msg.text}</div>
+  );
+  return [show, node];
+}
+
+// ================= CONNECTION =================
+const tid = () => Number(getActiveTenantId()) || 1;
+
+function Connection({ isSuper, toast }) {
+  const [t, setT] = useState(null);
+  const [st, setSt] = useState({});
+  const [form, setForm] = useState({ url: "", username: "", password: "", topicRoot: "", commandTopic: "" });
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(async () => {
+    try {
+      const d = await apiCall(`/tenants/${tid()}`);
+      setT(d.tenant); setSt(d.status || {}); setErr("");
+      if (d.tenant?.mqtt) setForm({ ...d.tenant.mqtt, password: "" });
+    } catch (e) { setErr(e.message); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  async function save() {
+    setBusy(true);
+    try {
+      const d = await apiCall(`/tenants/${tid()}`, { method: "PUT", body: JSON.stringify({ mqtt: form }) });
+      setT(d.tenant); setSt(d.status || {}); setForm({ ...d.tenant.mqtt, password: "" }); toast("Saved — connecting to the broker…");
+      setTimeout(load, 4000);
+    } catch (e) { toast(e.message, false); } finally { setBusy(false); }
+  }
+  const connected = st.connected === true;
+  const age = st.secondsSinceLastMessage;
+  return (
+    <Card title="MQTT connection" badge={<Badge color={err ? "#ff3355" : connected ? "#39ff88" : "#ffb938"}>{err ? "unavailable" : connected ? "connected" : "disconnected"}</Badge>}>
+      <Note>
+        {isSuper ? "This client's data gateway. Save the broker details here and the platform connects straight away — nothing to change on the server."
+                 : "Status of this plant's data gateway."}
+      </Note>
+      {st.shared && <div style={{ marginBottom: 10 }}><Badge color="#ffb938">shared platform broker</Badge></div>}
+      {isSuper && t ? (
+        <>
+          <MqttFields value={form} onChange={setForm} hasPassword={t.mqtt?.hasPassword} />
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 }}>
+            <button disabled={busy} style={pill("#c6ff00", "#000")} onClick={save}>{busy ? "Connecting…" : "Save & connect"}</button>
+            <button style={pill("var(--secondary)", "var(--foreground)", { border: "1px solid var(--border)" })} onClick={load}>Refresh status</button>
+          </div>
+        </>
       ) : (
         <>
-          {/* System Status Section */}
-          <Section title="System Status (Live)" isMobile={isMobile}>
-            <SettingRow label="System Operation" isMobile={isMobile}>
-              <StatusBadge label="Status" value={systemOperation} warning={0.5} critical={0.8} unit="" isMobile={isMobile} />
-            </SettingRow>
-            <SettingRow label="Current Recovery" isMobile={isMobile}>
-              <StatusBadge
-                label="Recovery"
-                value={currentRecovery}
-                warning={parseFloat(form.lowRecoveryWarn)}
-                critical={parseFloat(form.lowRecoveryWarn) - 5}
-                unit="%"
-                isMobile={isMobile}
-              />
-            </SettingRow>
-            <SettingRow label="Current Dosing Rate" isMobile={isMobile}>
-              <span style={{ fontSize: isMobile ? 10 : 11, fontFamily: 'var(--font-mono)', color: '#a78bfa' }}>
-                {currentDosing.toFixed(2)} mg/L
-              </span>
-            </SettingRow>
-            <SettingRow label="Filter Delta P" isMobile={isMobile}>
-              <StatusBadge label="ΔP" value={filterDelta} warning={parseFloat(form.filterDpWarn)} critical={parseFloat(form.filterDpCrit)} unit="bar" isMobile={isMobile} />
-            </SettingRow>
-            <SettingRow label="Last Sensor Update" isMobile={isMobile}>
-              <span style={{ fontSize: isMobile ? 10 : 11, fontFamily: 'var(--font-mono)', color: 'var(--muted-foreground)' }}>
-                {lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--'}
-              </span>
-            </SettingRow>
-            {settingsMeta?.updatedAt && (
-              <SettingRow label="Settings Last Saved" isMobile={isMobile}>
-                <span style={{ fontSize: isMobile ? 10 : 11, fontFamily: 'var(--font-mono)', color: 'var(--muted-foreground)' }}>
-                  {format(new Date(settingsMeta.updatedAt), 'yyyy-MM-dd HH:mm:ss')}
-                </span>
-              </SettingRow>
-            )}
-          </Section>
-
-          {/* Grid - Single column on mobile, 2 columns on desktop */}
-          <div className="grid gap-3 sm:gap-4" style={{ gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr" }}>
-
-            {/* Plant Configuration */}
-            <Section title="Plant Configuration" isMobile={isMobile}>
-              <SettingRow label="Plant Name" desc="Display name for the facility" isMobile={isMobile}>
-                <input value={form.plantName} onChange={set("plantName")} disabled={!isAdmin} style={{ ...inputStyle }} />
-              </SettingRow>
-              <SettingRow label="Operator ID" desc="Licensed operator number" isMobile={isMobile}>
-                <input value={form.operatorId} onChange={set("operatorId")} disabled={!isAdmin} style={{ ...monoInput }} />
-              </SettingRow>
-              <SettingRow label="Production Target" desc="Daily target in m³" isMobile={isMobile}>
-                <div className="flex items-center gap-1">
-                  <input value={form.productionTarget} onChange={set("productionTarget")} disabled={!isAdmin} style={{ ...monoInput, width: isMobile ? '60%' : 80 }} />
-                  <span style={{ fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)" }}>m³/day</span>
-                </div>
-              </SettingRow>
-              <SettingRow label="Recovery Target" desc="System recovery percentage" isMobile={isMobile}>
-                <div className="flex items-center gap-1">
-                  <input value={form.recoveryTarget} onChange={set("recoveryTarget")} disabled={!isAdmin} style={{ ...monoInput, width: isMobile ? '50%' : 60 }} />
-                  <span style={{ fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)" }}>%</span>
-                </div>
-              </SettingRow>
-            </Section>
-
-            {/* Alert Thresholds */}
-            <Section title="Alert Thresholds" isMobile={isMobile}>
-              {[
-                { label: "Filter ΔP Warning", key: "filterDpWarn", unit: "bar" },
-                { label: "Filter ΔP Critical", key: "filterDpCrit", unit: "bar" },
-                { label: "Low Recovery Warning", key: "lowRecoveryWarn", unit: "%" },
-                { label: "Low Chemical Alert", key: "lowChemAlert", unit: "%" },
-                { label: "Min Dosing Rate", key: "minDosing", unit: "mg/L" },
-                { label: "Max Dosing Rate", key: "maxDosing", unit: "mg/L" },
-              ].map(t => (
-                <SettingRow key={t.key} label={t.label} isMobile={isMobile}>
-                  <div className="flex items-center gap-1">
-                    <input value={form[t.key]} onChange={set(t.key)} disabled={!isAdmin} style={{ ...monoInput, width: isMobile ? '50%' : 70 }} />
-                    <span style={{ fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)" }}>{t.unit}</span>
-                  </div>
-                </SettingRow>
-              ))}
-            </Section>
-
-            {/* User Management */}
-            <Section
-              title="User Management"
-              isMobile={isMobile}
-              action={
-                <Link 
-                  to="/app/user" 
-                  style={{ display: "flex", alignItems: "center", gap: 4, fontSize: isMobile ? 9 : 10, color: "#0ea5e9", textDecoration: "none" }}
-                >
-                  Open <ExternalLink size={isMobile ? 10 : 11} />
-                </Link>
-              }
-            >
-              <div className="flex flex-col items-center justify-center gap-2" style={{ padding: isMobile ? "16px 0" : "24px 0", color: "var(--muted-foreground)" }}>
-                <Users size={isMobile ? 18 : 22} style={{ opacity: 0.4 }} />
-                <p style={{ fontSize: isMobile ? 10 : 11, textAlign: "center" }}>
-                  User accounts, roles, and access are managed on the dedicated User Management page.
-                </p>
-              </div>
-            </Section>
-
-            {/* System Information */}
-            <Section title="System Information" isMobile={isMobile}>
-              <SettingRow label="Environment" isMobile={isMobile}>
-                <span style={{ fontSize: isMobile ? 10 : 11, fontFamily: "var(--font-mono)", color: "#0ea5e9" }}>
-                  {systemInfo?.environment ?? '—'}
-                </span>
-              </SettingRow>
-              <SettingRow label="Server Uptime" isMobile={isMobile}>
-                <span style={{ fontSize: isMobile ? 10 : 11, fontFamily: "var(--font-mono)", color: "#0ea5e9" }}>
-                  {systemInfo?.uptime != null ? formatUptime(systemInfo.uptime) : '—'}
-                </span>
-              </SettingRow>
-              <SettingRow label="MQTT Connection" isMobile={isMobile}>
-                <span style={{ fontSize: isMobile ? 10 : 11, fontFamily: "var(--font-mono)", color: mqttStatus?.connected ? "#22c55e" : "#ef4444" }}>
-                  {mqttStatus ? (mqttStatus.connected ? 'Connected' : 'Disconnected') : '—'}
-                </span>
-              </SettingRow>
-              <SettingRow label="Broker" isMobile={isMobile}>
-                <span style={{ fontSize: isMobile ? 10 : 11, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)" }}>
-                  {mqttStatus?.broker ?? '—'}
-                </span>
-              </SettingRow>
-              <SettingRow label="Data Points Received" isMobile={isMobile}>
-                <span style={{ fontSize: isMobile ? 10 : 11, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)" }}>
-                  {mqttStatus?.dataPoints?.toLocaleString() ?? '—'}
-                </span>
-              </SettingRow>
-              <SettingRow label="Server Timestamp" isMobile={isMobile}>
-                <span style={{ fontSize: isMobile ? 10 : 11, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)" }}>
-                  {systemInfo?.timestamp ? format(new Date(systemInfo.timestamp), 'yyyy-MM-dd HH:mm:ss') : '—'}
-                </span>
-              </SettingRow>
-            </Section>
-          </div>
-
-          {/* Actions */}
-          {isAdmin && (
-            <div className="flex flex-col sm:flex-row justify-end gap-2">
-              <button
-                onClick={handleReset}
-                className="px-3 sm:px-4 py-2 rounded w-full sm:w-auto"
-                style={{ background: "var(--secondary)", border: "1px solid var(--border)", fontSize: isMobile ? 10 : 11, color: "var(--muted-foreground)", cursor: "pointer" }}
-              >
-                Discard Changes
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="px-3 sm:px-4 py-2 rounded w-full sm:w-auto"
-                style={{ background: saving ? "var(--muted)" : "#0ea5e9", color: saving ? "var(--muted-foreground)" : "#020810", fontSize: isMobile ? 10 : 11, fontWeight: 600, border: "none", cursor: saving ? "not-allowed" : "pointer" }}
-              >
-                {saving ? 'Saving…' : 'Save Changes'}
-              </button>
-            </div>
-          )}
+          <span style={lbl}>Broker</span><input style={{ ...fld, opacity: 0.8 }} readOnly value={st.brokerHost || "Shared platform broker"} />
+          <div style={{ marginTop: 14 }}><button style={pill("var(--secondary)", "var(--foreground)", { border: "1px solid var(--border)" })} onClick={load}>Refresh status</button></div>
         </>
       )}
+      <div style={{ fontSize: 13, color: "var(--muted-foreground)", marginTop: 14, lineHeight: 1.6 }}>
+        Topic: <b>{st.topicRoot ? `${st.topicRoot}/#` : "—"}</b> · Tags received: <b>{st.dataPoints ?? 0}</b> · Last message: <b>{age == null ? "none yet" : age < 90 ? `${age}s ago` : `${Math.round(age / 60)} min ago`}</b>
+      </div>
+      {err && <div style={{ color: "#ff3355", fontSize: 13, marginTop: 10 }}>{err}</div>}
+    </Card>
+  );
+}
 
-      <Toast toast={toast} />
+// ================= WHAT THIS CLIENT OFFERS (super admin) =================
+function TenantSetup({ toast }) {
+  const [t, setT] = useState(null);
+  const [name, setName] = useState("");
+  const [pages, setPages] = useState([]);
+  const [systems, setSystems] = useState([]);
+  useEffect(() => {
+    apiCall(`/tenants/${tid()}`).then((d) => { setT(d.tenant); setName(d.tenant.name); setPages(d.tenant.config.pages); setSystems(d.tenant.config.systems); }).catch(() => {});
+  }, []);
+  if (!t) return null;
+  async function save() {
+    try {
+      const d = await apiCall(`/tenants/${tid()}`, { method: "PUT", body: JSON.stringify({ name, config: { pages, systems } }) });
+      setTenantConfig(d.tenant.config); toast("Client saved — reload to see the new menu");
+    } catch (e) { toast(e.message, false); }
+  }
+  async function del() {
+    const typed = window.prompt(`This deletes "${t.name}" and ALL of its stored readings. It cannot be undone.\n\nType the client's name to confirm:`);
+    if (typed === null) return;
+    if (typed.trim() !== t.name) { toast("Name did not match — nothing was deleted", false); return; }
+    try {
+      await apiCall(`/tenants/${tid()}`, { method: "DELETE" });
+      setActiveTenantId(1); window.location.reload();
+    } catch (e) { toast(e.message, false); }
+  }
+  return (
+    <>
+      <Card title="CLIENT">
+        <span style={lbl}>Client name</span><input style={fld} value={name} onChange={(e) => setName(e.target.value)} />
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16, justifyContent: "space-between" }}>
+          <button style={pill("#c6ff00", "#000")} onClick={save}>Save</button>
+          {tid() !== 1
+            ? <button style={pill("#ff3355", "#fff")} onClick={del}>Delete client</button>
+            : <span style={{ fontSize: 12.5, color: "var(--muted-foreground)", alignSelf: "center" }}>The main plant can't be deleted.</span>}
+        </div>
+      </Card>
+      <Card title="TENANT PAGE ACCESS"><Note>Pages this client's dashboard shows. Their users can only open what is ticked here.</Note>
+        <PagesEditor value={pages} onChange={setPages} />
+      </Card>
+      <Card title="TREATMENT SYSTEMS"><Note>What this client offers and which chemicals each system doses.</Note>
+        <SystemsEditor value={systems} onChange={setSystems} />
+        <button style={pill("#c6ff00", "#000", { marginTop: 16 })} onClick={save}>Save</button>
+      </Card>
+    </>
+  );
+}
+
+// ================= NOTIFICATIONS =================
+function Notifications({ isAdmin, toast }) {
+  const [me, setMe] = useState(null);
+  const [mine, setMine] = useState(true);
+  const [tenant, setTenant] = useState(true);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { apiCall("/notifications/me").then((d) => { setMe(d); setMine(d.emailAlerts); setTenant(d.tenantEnabled); }).catch(() => {}); }, []);
+  const smtp = me?.smtpConfigured;
+  return (
+    <Card title="Email alerts" badge={me && <Badge color={smtp ? "#39ff88" : "#ffb938"}>{smtp ? "SMTP ready" : "SMTP not set — logged on server"}</Badge>}>
+      <Note>Alarms are emailed to registered users who have alerts on (default: operators and admins). The same alarm repeats at most every 15 min.</Note>
+      <Check checked={mine} onChange={setMine}>Send alerts to my email ({me?.email || "…"})</Check>
+      <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10, margin: "8px 0 4px" }}>
+        <button disabled={busy} style={pill("var(--secondary)", "var(--foreground)", { border: "1px solid var(--border)" })}
+          onClick={async () => { setBusy(true); try { await apiCall("/notifications/me", { method: "PUT", body: JSON.stringify({ emailAlerts: mine }) }); toast("Saved"); } catch (e) { toast(e.message, false); } finally { setBusy(false); } }}>Save</button>
+        <button disabled={busy} style={pill("var(--secondary)", "var(--foreground)", { border: "1px solid var(--border)" })}
+          onClick={async () => { setBusy(true); try { const d = await apiCall("/notifications/test", { method: "POST" }); toast(d.message); } catch (e) { toast(e.message, false); } finally { setBusy(false); } }}>Send test email</button>
+      </div>
+      {isAdmin && (
+        <>
+          <Check checked={tenant} onChange={setTenant}>Email alerts enabled for this plant</Check>
+          <button style={pill("#c6ff00", "#000", { marginTop: 8 })}
+            onClick={async () => { try { await apiCall("/settings-extra", { method: "PUT", body: JSON.stringify({ emailAlertsEnabled: tenant }) }); toast("Plant settings saved"); } catch (e) { toast(e.message, false); } }}>Save plant settings</button>
+        </>
+      )}
+    </Card>
+  );
+}
+
+// ================= ACCOUNT =================
+function Account({ user, toast }) {
+  const [cur, setCur] = useState(""); const [next, setNext] = useState(""); const [busy, setBusy] = useState(false);
+  const role = user?.isSuperAdmin ? "superadmin" : user?.role;
+  async function change() {
+    if (!cur || next.length < 8) { toast("Enter your current password and a new one (min 8)", false); return; }
+    setBusy(true);
+    try { await apiCall("/auth/change-password", { method: "POST", body: JSON.stringify({ currentPassword: cur, newPassword: next }) }); setCur(""); setNext(""); toast("Password changed"); }
+    catch (e) { toast(e.message, false); } finally { setBusy(false); }
+  }
+  return (
+    <Card title={user?.email} badge={<Badge>{role}</Badge>}>
+      <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: "0.18em", color: "var(--muted-foreground)", margin: "10px 0 8px" }}>CHANGE PASSWORD</div>
+      <input type="password" placeholder="Current password" value={cur} onChange={(e) => setCur(e.target.value)} style={{ ...fld, marginBottom: 10 }} autoComplete="current-password" />
+      <input type="password" placeholder="New password (min 8)" value={next} onChange={(e) => setNext(e.target.value)} style={fld} autoComplete="new-password" />
+      <button disabled={busy} onClick={change} style={pill("#c6ff00", "#000", { marginTop: 14 })}>{busy ? "Saving…" : "Change password"}</button>
+    </Card>
+  );
+}
+
+// ================= ADMINISTRATION =================
+const NUM = (v) => (v === "" || v === null || v === undefined ? "" : String(v));
+
+function Targets({ toast }) {
+  const main = tid() === 1;
+  const [s, setS] = useState(null); const [x, setX] = useState(null);
+  useEffect(() => {
+    if (main) Promise.all([apiCall("/settings"), apiCall("/settings-extra")]).then(([a, b]) => { setS(a.settings); setX(b.extra); }).catch((e) => toast(e.message, false));
+    else apiCall(`/tenants/${tid()}`).then((d) => { const c = d.tenant.config; setS({ productionTarget: c.productionTarget, recoveryTarget: c.recoveryTarget }); setX({ feedTankCapacity: c.feedTankCapacity, flushTankCapacity: c.flushTankCapacity }); }).catch((e) => toast(e.message, false));
+  }, []);
+  if (!s || !x) return <Card title="Targets & capacity"><Note>Loading…</Note></Card>;
+  const set = (k) => (e) => setS({ ...s, [k]: e.target.value });
+  const setE = (k) => (e) => setX({ ...x, [k]: e.target.value });
+  async function save() {
+    try {
+      if (main) {
+        await apiCall("/settings", { method: "PUT", body: JSON.stringify({ productionTarget: s.productionTarget, recoveryTarget: s.recoveryTarget }) });
+        await apiCall("/settings-extra", { method: "PUT", body: JSON.stringify({ feedTankCapacity: x.feedTankCapacity, flushTankCapacity: x.flushTankCapacity }) });
+      } else {
+        await apiCall(`/tenants/${tid()}`, { method: "PUT", body: JSON.stringify({ config: { productionTarget: s.productionTarget, recoveryTarget: s.recoveryTarget, feedTankCapacity: x.feedTankCapacity, flushTankCapacity: x.flushTankCapacity } }) });
+      }
+      toast("Targets & capacity saved");
+    } catch (e) { toast(e.message, false); }
+  }
+  return (
+    <Card title="TARGETS & CAPACITY">
+      <span style={lbl}>Daily production target (m³)</span><input style={fld} type="number" value={NUM(s.productionTarget)} onChange={set("productionTarget")} />
+      <span style={lbl}>Recovery target (%)</span><input style={fld} type="number" value={NUM(s.recoveryTarget)} onChange={set("recoveryTarget")} />
+      <span style={lbl}>Feed tank capacity (m³)</span><input style={fld} type="number" value={NUM(x.feedTankCapacity)} onChange={setE("feedTankCapacity")} />
+      <span style={lbl}>Flush tank capacity (m³)</span><input style={fld} type="number" value={NUM(x.flushTankCapacity)} onChange={setE("flushTankCapacity")} />
+      <button style={pill("#c6ff00", "#000", { marginTop: 16 })} onClick={save}>Save</button>
+    </Card>
+  );
+}
+
+function Thresholds({ toast }) {
+  const [s, setS] = useState(null);
+  useEffect(() => { apiCall("/settings").then((a) => setS(a.settings)).catch(() => {}); }, []);
+  if (!s) return null;
+  const f = (k, label) => (<div key={k}><span style={lbl}>{label}</span><input style={fld} type="number" step="any" value={NUM(s[k])} onChange={(e) => setS({ ...s, [k]: e.target.value })} /></div>);
+  async function save() {
+    try {
+      const body = {}; ["plantName", "operatorId", "filterDpWarn", "filterDpCrit", "lowRecoveryWarn", "lowChemAlert", "minDosing", "maxDosing"].forEach((k) => (body[k] = s[k]));
+      await apiCall("/settings", { method: "PUT", body: JSON.stringify(body) }); toast("Alert thresholds saved");
+    } catch (e) { toast(e.message, false); }
+  }
+  return (
+    <Card title="ALERT THRESHOLDS & DOSING">
+      <span style={lbl}>Plant name</span><input style={fld} value={s.plantName || ""} onChange={(e) => setS({ ...s, plantName: e.target.value })} />
+      <span style={lbl}>Operator ID</span><input style={fld} value={s.operatorId || ""} onChange={(e) => setS({ ...s, operatorId: e.target.value })} />
+      {f("filterDpWarn", "Filter ΔP warning (bar)")}{f("filterDpCrit", "Filter ΔP critical (bar)")}
+      {f("lowRecoveryWarn", "Low recovery warning (%)")}{f("lowChemAlert", "Low chemical alert (%)")}
+      {f("minDosing", "Min dosing rate")}{f("maxDosing", "Max dosing rate")}
+      <button style={pill("#c6ff00", "#000", { marginTop: 16 })} onClick={save}>Save</button>
+    </Card>
+  );
+}
+
+// ================= PAGE =================
+export function Settings() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
+  const [toast, toastNode] = useToast();
+  return (
+    <div className="overflow-auto h-full" style={{ padding: "4px 4px 40px" }}>
+      {toastNode}
+      <div style={{ maxWidth: 1100, width: "100%", margin: "0 auto" }}>
+        <Section title="Connection"><Connection isSuper={!!user?.isSuperAdmin} toast={toast} /></Section>
+        {tid() === 1 && <Section title="Notifications"><Notifications isAdmin={isAdmin} toast={toast} /></Section>}
+        <Section title="Account"><Account user={user} toast={toast} /></Section>
+        <Section title="About">
+          <Card><div style={{ fontSize: 17, fontWeight: 800 }}>Aqua System Tech</div><div style={{ fontSize: 13.5, color: "var(--muted-foreground)", marginTop: 4 }}>Water Management · RO monitoring v1.0</div></Card>
+        </Section>
+        {user?.isSuperAdmin && <Section title="Client setup"><TenantSetup toast={toast} /></Section>}
+        {isAdmin && (
+          <Section title="Administration">
+            <Targets toast={toast} />
+            {tid() === 1 && <Thresholds toast={toast} />}
+          </Section>
+        )}
+      </div>
     </div>
   );
 }

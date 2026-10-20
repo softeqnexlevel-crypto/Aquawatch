@@ -691,6 +691,8 @@ export function Analytics() {
   // ── Render ─────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col gap-3 sm:gap-4 p-2 sm:p-4 overflow-auto h-full" style={{ scrollbarWidth: 'none' }}>
+       <div style={{ maxWidth: 1600, width: "100%", margin: "0 auto", display: "flex", flexDirection: "column", gap: 14 }}>
+
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .print-report { display: none; }
@@ -981,6 +983,7 @@ export function Analytics() {
       />
 
       <Toast toast={toast} />
+      </div>
     </div>
   );
 }

@@ -249,6 +249,8 @@ export default function Billing() {
 
   return (
     <div className="bg-black text-neutral-100 p-8 min-h-screen">
+      <div style={{ maxWidth: 1600, width: "100%", margin: "0 auto", display: "flex", flexDirection: "column", gap: 14 }}>
+
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-2xl font-bold">Upgrade your plan</h1>
@@ -585,6 +587,7 @@ export default function Billing() {
           </div>
         </div>
       )}
+    </div>
     </div>
   );
 }

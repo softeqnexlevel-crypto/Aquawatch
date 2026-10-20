@@ -1,4 +1,6 @@
 // components/FeedTankManagement.jsx
+// Card grid of tanks. Tapping a card opens a detail view (full screen on
+// phones, centred panel on larger screens) with level, 24h usage and history.
 
 import React, { useState, useMemo, useEffect } from "react";
 
@@ -7,206 +9,834 @@ import {
   Bar,
   XAxis,
   YAxis,
-  CartesianGrid,
+  Cell,
+  LabelList,
   Tooltip,
-  ResponsiveContainer,
   LineChart,
   Line,
+  ResponsiveContainer,
 } from "recharts";
 
-import {
-  MapPin,
-  ChevronRight,
-  Wrench,
-  Droplet,
-  Filter,
-  ChevronLeft,
-} from "lucide-react";
+import { ChevronLeft, X } from "lucide-react";
+import { format } from "date-fns";
 
+import { API_BASE_URL } from "../config";
 import { useData } from "../contexts/DataContext";
-
-import { format, subDays } from "date-fns";
 
 import { rawToPercent } from "./dashboardComponents/feedTankCalibration";
 
-// ── Flush tank calibration (tag RO5-FlushTank): 0 = 0%, 126 = 100% ──
+/* ============================================================
+   CALIBRATION
+   ============================================================ */
+
+// Flush tank (tag RO5-FlushTank): RAW 0 = 0%, RAW 126 = 100%
 const FLUSH_RAW_EMPTY = 0;
 const FLUSH_RAW_FULL = 126;
+
 function flushRawToPercent(raw) {
   const n = Number(raw);
   if (!Number.isFinite(n)) return null;
-  const pct = ((n - FLUSH_RAW_EMPTY) / (FLUSH_RAW_FULL - FLUSH_RAW_EMPTY)) * 100;
+  const pct =
+    ((n - FLUSH_RAW_EMPTY) / (FLUSH_RAW_FULL - FLUSH_RAW_EMPTY)) * 100;
   return Math.min(100, Math.max(0, pct));
 }
 
+const clampPct = (p) =>
+  p !== null && Number.isFinite(p) ? Math.min(100, Math.max(0, p)) : null;
+
 /* ============================================================
-   STATUS BADGE
+   STATUS + COLOURS
    ============================================================ */
 
-const StatusBadge = ({ status }) => {
-  const cfg =
-    {
-      Active: {
-        bg: "rgba(34,197,94,0.1)",
-        color: "#22c55e",
-        dot: "#22c55e",
-      },
+const STATUS_COLORS = {
+  Active: "#22c55e",
+  Standby: "#94a3b8",
+  Warning: "#f59e0b",
+  Empty: "#ef4444",
+  Offline: "#64748b",
+};
 
-      Maintenance: {
-        bg: "rgba(234,179,8,0.1)",
-        color: "#eab308",
-        dot: "#eab308",
-      },
+const getStatus = (level, hasData) => {
+  if (!hasData) return "Offline";
+  if (level <= 0) return "Empty";
+  if (level > 70) return "Active";
+  if (level > 40) return "Standby";
+  if (level > 15) return "Warning";
+  return "Empty";
+};
 
-      Standby: {
-        bg: "rgba(14,165,233,0.1)",
-        color: "#0ea5e9",
-        dot: "#0ea5e9",
-      },
+// Tank colour by fill level: full = green, mid = blue, low = red
+const getLevelColor = (level, hasData) => {
+  if (!hasData) return "#64748b";
+  if (level > 50) return "#22c55e";
+  if (level > 25) return "#0ea5e9";
+  return "#ef4444";
+};
 
-      Offline: {
-        bg: "rgba(239,68,68,0.1)",
-        color: "#ef4444",
-        dot: "#ef4444",
-      },
+const FILTERS = ["All", "Active", "Standby", "Warning", "Empty"];
 
-      Warning: {
-        bg: "rgba(245,158,11,0.1)",
-        color: "#f59e0b",
-        dot: "#f59e0b",
-      },
+const CYAN = "#00e5ff";
+const LABEL = "var(--muted-foreground, #94a3b8)";
+const CARD_BG = "var(--card, #0b1220)";
+const CARD_BORDER = "var(--border, rgba(148,163,184,0.15))";
 
-      Empty: {
-        bg: "rgba(239,68,68,0.15)",
-        color: "#ef4444",
-        dot: "#ef4444",
-      },
+/* ============================================================
+   24H LEVEL POINTS + WATER USED
+   ============================================================ */
 
-      Refilling: {
-        bg: "rgba(14,165,233,0.1)",
-        color: "#0ea5e9",
-        dot: "#0ea5e9",
-      },
-    }[status] || {
-      bg: "rgba(77,122,158,0.1)",
-      color: "#4d7a9e",
-      dot: "#4d7a9e",
+// Sensor jitter smaller than this (in % of tank) is ignored, otherwise
+// tiny up/down wobbles add up to a huge fake "usage" figure.
+const NOISE_DEADBAND_PCT = 0.5;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// history entries look like { time: Date, value: rawNumber } (DataContext).
+function toLevelPoints(history, toPercent) {
+  if (!Array.isArray(history)) return [];
+  const cutoff = Date.now() - DAY_MS;
+  return history
+    .map((d) => ({ ts: new Date(d.time).getTime(), pct: toPercent(d.value) }))
+    .filter((p) => Number.isFinite(p.ts) && p.pct !== null && p.ts >= cutoff);
+}
+
+// Returns { used: m³, spanHours: how much history was actually available }.
+function computeWaterUsed(points, capacity) {
+  if (points.length < 2) return { used: 0, spanHours: 0 };
+
+  // Hysteresis: only count a drop once it exceeds the deadband.
+  // Rises (refills) just move the reference level up.
+  let ref = points[0].pct;
+  let dropPct = 0;
+  for (let i = 1; i < points.length; i++) {
+    const p = points[i].pct;
+    if (p > ref) {
+      ref = p;
+    } else if (ref - p >= NOISE_DEADBAND_PCT) {
+      dropPct += ref - p;
+      ref = p;
+    }
+  }
+
+  const spanHours =
+    (points[points.length - 1].ts - points[0].ts) / (60 * 60 * 1000);
+
+  return { used: (dropPct / 100) * capacity, spanHours };
+}
+
+// Real volume that left the tank = feed flow (m³/h) integrated over time.
+// Gaps longer than FLOW_MAX_GAP_MS (data outage) are skipped, not guessed.
+const FLOW_MAX_GAP_MS = 15 * 60 * 1000;
+
+function computeFlowVolume(history) {
+  if (!Array.isArray(history)) return { used: 0, spanHours: 0, ok: false };
+  const cutoff = Date.now() - DAY_MS;
+  const pts = history
+    .map((d) => ({ ts: new Date(d.time).getTime(), v: Number(d.value) }))
+    .filter((p) => Number.isFinite(p.ts) && Number.isFinite(p.v) && p.ts >= cutoff)
+    .sort((a, b) => a.ts - b.ts);
+  if (pts.length < 2) return { used: 0, spanHours: 0, ok: false };
+
+  let used = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const dt = pts[i].ts - pts[i - 1].ts;
+    if (dt <= 0 || dt > FLOW_MAX_GAP_MS) continue;
+    const avg = (Math.max(0, pts[i - 1].v) + Math.max(0, pts[i].v)) / 2; // m³/h
+    used += (avg * dt) / (60 * 60 * 1000);
+  }
+  const spanHours = (pts[pts.length - 1].ts - pts[0].ts) / (60 * 60 * 1000);
+  return { used, spanHours, ok: true };
+}
+
+// A refill = the level climbs by at least REFILL_RISE_PCT from its lowest point
+// since the last refill. It then has to fall by the same amount before the next
+// one can count, so sensor wobble is not counted.
+const REFILL_RISE_PCT = 20;
+
+function countRefills(points) {
+  if (!points || points.length < 2) return 0;
+  let refills = 0;
+  let state = "down";
+  let lo = points[0].pct;
+  let hi = points[0].pct;
+  for (let i = 1; i < points.length; i++) {
+    const p = points[i].pct;
+    if (state === "down") {
+      if (p < lo) lo = p;
+      else if (p - lo >= REFILL_RISE_PCT) {
+        refills += 1;
+        state = "up";
+        hi = p;
+      }
+    } else if (p > hi) {
+      hi = p;
+    } else if (hi - p >= REFILL_RISE_PCT) {
+      state = "down";
+      lo = p;
+    }
+  }
+  return refills;
+}
+
+/* ============================================================
+   STORED HISTORY (same route LiveTrendChart uses)
+   GET /api/history/:tag?hours=24  ->  [{ t, value }, ...]
+   ============================================================ */
+
+// config may or may not end with /api, so strip it before adding our own.
+const API_ROOT = String(API_BASE_URL || "").replace(/\/api\/?$/, "");
+
+// Returns history entries shaped like DataContext's { time: Date, value },
+// made of the stored readings plus any live readings newer than the last stored one.
+function useMergedHistory(tag, liveHistory, hours = 24) {
+  const [stored, setStored] = useState([]);
+
+  useEffect(() => {
+    let stop = false;
+
+    const load = async () => {
+      try {
+        let token = null;
+        try { token = localStorage.getItem("accessToken"); } catch { /* ignore */ }
+        const r = await fetch(
+          `${API_ROOT}/api/history/${encodeURIComponent(tag)}?hours=${hours}`,
+          { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+        );
+        if (!r.ok) return;
+        const rows = await r.json();
+        if (stop || !Array.isArray(rows)) return;
+        setStored(
+          rows
+            .map((row) => ({ time: new Date(row.t), value: Number(row.value) }))
+            .filter((p) => Number.isFinite(p.time.getTime()) && Number.isFinite(p.value))
+            .sort((a, b) => a.time - b.time)
+        );
+      } catch {
+        /* keep whatever we already have */
+      }
     };
 
+    load();
+    const timer = setInterval(load, 60000);
+    return () => {
+      stop = true;
+      clearInterval(timer);
+    };
+  }, [tag, hours]);
+
+  return useMemo(() => {
+    const live = Array.isArray(liveHistory) ? liveHistory : [];
+    if (stored.length === 0) return live;
+    const lastT = stored[stored.length - 1].time.getTime();
+    return [
+      ...stored,
+      ...live.filter((d) => new Date(d.time).getTime() > lastT),
+    ];
+  }, [stored, liveHistory]);
+}
+
+/* ============================================================
+   SMALL COMPONENTS
+   ============================================================ */
+
+/* Exact 24h usage (from the server) and the capacities saved in Settings */
+function useTankUsage() {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    let stop = false;
+    const load = async () => {
+      try {
+        let token = null;
+        try { token = localStorage.getItem("accessToken"); } catch { /* ignore */ }
+        const r = await fetch(`${API_ROOT}/api/tank-usage?hours=24`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+        if (!r.ok) return;
+        const d = await r.json();
+        if (!stop) setData(d);
+      } catch { /* keep the last result */ }
+    };
+    load();
+    const timer = setInterval(load, 60000);
+    return () => { stop = true; clearInterval(timer); };
+  }, []);
+  return data;
+}
+
+const StatusPill = ({ status }) => {
+  const color = STATUS_COLORS[status] || STATUS_COLORS.Offline;
   return (
     <span
-      className="flex items-center gap-1 rounded px-1.5 py-0.5"
-      style={{ background: cfg.bg }}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        padding: "3px 10px",
+        borderRadius: 999,
+        border: `1px solid ${color}55`,
+        background: `${color}14`,
+        color,
+        fontSize: 11,
+        fontWeight: 600,
+        whiteSpace: "nowrap",
+      }}
     >
-      <span
-        style={{
-          width: 5,
-          height: 5,
-          borderRadius: "50%",
-          background: cfg.dot,
-          display: "inline-block",
-        }}
-      />
-
-      <span
-        style={{
-          fontSize: 10,
-          color: cfg.color,
-          fontWeight: 500,
-        }}
-      >
-        {status}
-      </span>
+      <span style={{ fontSize: 8, lineHeight: 1 }}>●</span>
+      {status}
     </span>
   );
 };
 
-/* ============================================================
-   HEALTH BAR
-   ============================================================ */
-
-const HealthBar = ({ value }) => {
-  const safeValue = Number.isFinite(value) ? value : 0;
-
-  const color =
-    safeValue >= 80
-      ? "#22c55e"
-      : safeValue >= 60
-        ? "#eab308"
-        : "#ef4444";
-
-  return (
-    <div className="flex items-center gap-2">
-      <div
-        style={{
-          width: 60,
-          height: 4,
-          background: "var(--secondary)",
-          borderRadius: 2,
-          overflow: "hidden",
-        }}
-      >
+const TankIcon = ({ level, color, width = 62, height = 105, ticks = false }) => (
+  <div
+    aria-hidden="true"
+    style={{
+      position: "relative",
+      width,
+      height,
+      flexShrink: 0,
+      borderRadius: Math.round(width * 0.26),
+      border: `3px solid ${ticks ? `${color}99` : "rgba(148,163,184,0.55)"}`,
+      background: "rgba(0,12,20,0.9)",
+      overflow: "hidden",
+    }}
+  >
+    <div
+      style={{
+        position: "absolute",
+        left: 0,
+        right: 0,
+        bottom: 0,
+        height: `${level}%`,
+        background: `linear-gradient(180deg, ${color}cc, ${color}77)`,
+        borderTop: level > 0 && level < 100 ? `2px solid ${color}` : "none",
+        transition: "height 0.6s ease",
+      }}
+    />
+    {ticks &&
+      [25, 50, 75].map((t) => (
         <div
+          key={t}
           style={{
-            width: `${Math.min(Math.max(safeValue, 0), 100)}%`,
-            height: "100%",
-            background: color,
-            borderRadius: 2,
+            position: "absolute",
+            left: 0,
+            width: 10,
+            bottom: `${t}%`,
+            height: 2,
+            background: "rgba(255,255,255,0.35)",
           }}
         />
-      </div>
+      ))}
+  </div>
+);
 
-      <span
+/* ============================================================
+   TANK CARD (grid item)
+   ============================================================ */
+
+const TankCard = ({ tank, onOpen, isMobile }) => {
+  const color = getLevelColor(tank.level, tank.hasData);
+  const level = tank.hasData ? tank.level : 0;
+  const left = tank.hasData ? tank.volume : 0;
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => onOpen(tank.id)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen(tank.id);
+        }
+      }}
+      aria-label={`Open details for ${tank.name}`}
+      style={{
+        position: "relative",
+        padding: isMobile ? "12px 14px 12px 16px" : "16px 18px 16px 20px",
+        borderRadius: 16,
+        background: CARD_BG,
+        border: `1px solid ${CARD_BORDER}`,
+        borderLeft: `3px solid ${color}`,
+        boxShadow: `0 0 22px ${color}14`,
+        cursor: "pointer",
+      }}
+    >
+      <div
         style={{
-          fontSize: 10,
-          fontFamily: "var(--font-mono)",
-          color,
-          minWidth: 28,
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 10,
         }}
       >
-        {Math.round(safeValue)}%
-      </span>
+        <span
+          style={{
+            padding: "2px 8px",
+            borderRadius: 6,
+            background: "rgba(14,165,233,0.15)",
+            color: "#38bdf8",
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+          }}
+        >
+          {tank.id}
+        </span>
+        <StatusPill status={tank.status} />
+      </div>
+
+      <div style={{ display: "flex", gap: isMobile ? 14 : 18, alignItems: "center" }}>
+        <TankIcon
+          level={level}
+          color={color}
+          width={isMobile ? 54 : 72}
+          height={isMobile ? 92 : 120}
+        />
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 17,
+              fontWeight: 700,
+              color: "var(--foreground, #fff)",
+            }}
+          >
+            {tank.name}
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "baseline",
+              gap: 6,
+              marginTop: 6,
+            }}
+          >
+            <span
+              style={{
+                fontSize: isMobile ? 28 : 34,
+                fontWeight: 700,
+                fontFamily: "var(--font-mono)",
+                color: tank.hasData ? color : "#64748b",
+                lineHeight: 1,
+              }}
+            >
+              {tank.hasData ? Math.round(level) : "--"}
+            </span>
+            <span style={{ fontSize: 12, color: LABEL }}>
+              % of {tank.capacity} m³
+            </span>
+          </div>
+
+          <div
+            role="progressbar"
+            aria-valuenow={Math.round(level)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            style={{
+              height: 8,
+              marginTop: 14,
+              borderRadius: 999,
+              background: "rgba(148,163,184,0.15)",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                width: `${level}%`,
+                height: "100%",
+                borderRadius: 999,
+                background: color,
+                transition: "width 0.6s ease",
+              }}
+            />
+          </div>
+
+          <div
+            style={{
+              marginTop: 10,
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 8,
+              fontSize: 12,
+              color: LABEL,
+            }}
+          >
+            <span>
+              ≈ {left < 10 ? left.toFixed(1) : left.toFixed(0)} m³ left
+            </span>
+            <span>Used 24h: {tank.waterUsed24h.toFixed(1)} m³</span>
+          </div>
+        </div>
+      </div>
     </div>
   );
 };
 
 /* ============================================================
-   CHART TOOLTIP
+   TANK DETAIL VIEW
    ============================================================ */
 
-const CustomTooltip = ({ active, payload, label }) => {
-  if (!active || !payload?.length) return null;
+const StatBox = ({ label, value, accent }) => (
+  <div
+    style={{
+      padding: "14px 16px",
+      borderRadius: 14,
+      background: CARD_BG,
+      border: `1px solid ${CARD_BORDER}`,
+    }}
+  >
+    <div
+      style={{
+        fontSize: 11,
+        letterSpacing: "0.08em",
+        textTransform: "uppercase",
+        color: LABEL,
+        marginBottom: 8,
+      }}
+    >
+      {label}
+    </div>
+    <div
+      style={{
+        fontSize: 24,
+        fontWeight: 700,
+        fontFamily: "var(--font-mono)",
+        color: accent || "var(--foreground, #fff)",
+      }}
+    >
+      {value}
+    </div>
+  </div>
+);
+
+const TankDetail = ({ tank, lastUpdate, isMobile, onClose }) => {
+  const color = getLevelColor(tank.level, tank.hasData);
+  const level = tank.hasData ? tank.level : 0;
+  const left = tank.hasData ? tank.volume : 0;
+
+  const shareOfCapacity =
+    tank.capacity > 0 ? (tank.waterUsed24h / tank.capacity) * 100 : 0;
+  const methodText =
+    tank.usageMethod === "flow"
+      ? "Used = water that flowed out to the plant (feed flow m³/h × time). The tank is refilled continuously, so this can be many times its capacity."
+      : "Used = level drop × tank capacity.";
+
+  // Chart data: real history points, thinned so the chart stays light.
+  const end = Date.now();
+  const step = Math.max(1, Math.ceil(tank.levelPoints.length / 120));
+  const chartData = tank.levelPoints
+    .filter((_, i) => i % step === 0)
+    .map((p) => ({ ts: p.ts, pct: Math.round(p.pct * 10) / 10 }));
+
+  // The history only exists since this page was opened, so zoom the time axis
+  // to the data we really have (up to 24h) instead of squeezing it into a corner.
+  const firstTs = chartData.length ? chartData[0].ts : end;
+  const hasFullDay = end - firstTs >= DAY_MS * 0.95;
+  const start = hasFullDay ? end - DAY_MS : firstTs;
+  const tickCount = 5;
+  const ticks = Array.from(
+    { length: tickCount },
+    (_, i) => Math.round(start + ((end - start) * i) / (tickCount - 1))
+  );
+  const spanLabel = hasFullDay
+    ? null
+    : (() => {
+        const mins = Math.max(1, Math.round((end - firstTs) / 60000));
+        return mins < 90 ? `${mins} min` : `${(mins / 60).toFixed(1)} h`;
+      })();
+
+  // Zoom the level axis to the data so small changes are visible
+  const pcts = chartData.map((d) => d.pct);
+  const dataMin = pcts.length ? Math.min(...pcts) : 0;
+  const dataMax = pcts.length ? Math.max(...pcts) : 100;
+  let yMin = Math.max(0, Math.floor(dataMin - 3));
+  let yMax = Math.min(100, Math.ceil(dataMax + 3));
+  if (yMax - yMin < 10) {
+    yMin = Math.max(0, Math.min(yMin, yMax - 10));
+    yMax = Math.min(100, yMin + 10);
+  }
+
+  const panelStyle = isMobile
+    ? {
+        position: "absolute",
+        inset: 0,
+        overflowY: "auto",
+        padding: "16px 16px 32px",
+        background: "var(--background, #04070d)",
+      }
+    : {
+        position: "relative",
+        width: "100%",
+        maxWidth: 480,
+        maxHeight: "92vh",
+        overflowY: "auto",
+        padding: "18px 20px 24px",
+        borderRadius: 20,
+        background: "var(--background, #060b14)",
+        border: `1px solid ${CARD_BORDER}`,
+        boxShadow: "0 24px 60px rgba(0,0,0,0.6)",
+      };
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${tank.name} details`}
+      onClick={onClose}
       style={{
-        background: "#0a1828",
-        border: "1px solid rgba(14,165,233,0.2)",
-        borderRadius: 4,
-        padding: "6px 10px",
+        position: "fixed",
+        inset: 0,
+        zIndex: 1000,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: isMobile ? 0 : 16,
+        background: isMobile ? "transparent" : "rgba(0,0,0,0.65)",
       }}
     >
-      <p
-        style={{
-          fontSize: 10,
-          color: "#4d7a9e",
-        }}
-      >
-        {label}
-      </p>
-
-      {payload.map((p, i) => (
-        <p
-          key={i}
+      <div onClick={(e) => e.stopPropagation()} style={panelStyle}>
+        {/* Back + close */}
+        <div
           style={{
-            fontSize: 11,
-            fontFamily: "var(--font-mono)",
-            color: p.color,
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 18,
           }}
         >
-          {p.value?.toLocaleString()} m³
-        </p>
-      ))}
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              background: "none",
+              border: "none",
+              color: LABEL,
+              fontSize: 15,
+              cursor: "pointer",
+              padding: 0,
+            }}
+          >
+            <ChevronLeft size={20} />
+            Back to Tanks
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              background: "none",
+              border: "none",
+              color: LABEL,
+              cursor: "pointer",
+              padding: 4,
+            }}
+          >
+            <X size={24} />
+          </button>
+        </div>
+
+        {/* Header */}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+          }}
+        >
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 26,
+              fontWeight: 700,
+              color: "#38bdf8",
+              letterSpacing: "0.04em",
+            }}
+          >
+            {tank.id}
+          </span>
+          <StatusPill status={tank.status} />
+        </div>
+        <div
+          style={{
+            fontSize: 20,
+            fontWeight: 700,
+            color: "var(--foreground, #fff)",
+            marginTop: 2,
+          }}
+        >
+          {tank.name}
+        </div>
+        <div style={{ fontSize: 13, color: LABEL, marginTop: 4 }}>
+          Live sensor · Updated:{" "}
+          {lastUpdate ? format(new Date(lastUpdate), "HH:mm") : "--"}
+        </div>
+
+        {/* Tank level */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 24,
+            marginTop: 18,
+            padding: "22px 22px",
+            borderRadius: 16,
+            background: `linear-gradient(135deg, ${color}2e, ${color}0f)`,
+            border: `1px solid ${color}66`,
+          }}
+        >
+          <div style={{ alignSelf: "flex-start", marginBottom: 6 }}>
+            <div
+              style={{
+                fontSize: 11,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: LABEL,
+                marginBottom: 12,
+              }}
+            >
+              Tank level
+            </div>
+            <TankIcon level={level} color={color} width={100} height={170} ticks />
+          </div>
+
+          <div style={{ minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: 52,
+                fontWeight: 700,
+                fontFamily: "var(--font-mono)",
+                lineHeight: 1,
+                color: tank.hasData ? color : "#64748b",
+              }}
+            >
+              {tank.hasData ? `${Math.round(level)}%` : "--"}
+            </div>
+            <div style={{ marginTop: 14, fontSize: 14, color: LABEL }}>
+              ≈ {left < 10 ? left.toFixed(1) : left.toFixed(0)} m³ left of{" "}
+              {tank.capacity} m³
+            </div>
+            <div style={{ marginTop: 8, fontSize: 14, color: LABEL }}>
+              Raw:{" "}
+              <span style={{ color: "var(--foreground, #fff)" }}>
+                {tank.rawDisplay}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Stats */}
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 12,
+            marginTop: 14,
+          }}
+        >
+          <StatBox
+            label="Used · last 24h"
+            value={`${tank.waterUsed24h.toFixed(1)} m³`}
+            accent="#38bdf8"
+          />
+          {tank.showRefills ? (
+            <StatBox label="Refills · last 24h" value={`${tank.refills}`} />
+          ) : (
+            <StatBox
+              label={tank.usageMethod === "flow" ? "Times refilled · 24h" : "Share of capacity"}
+              value={
+                tank.usageMethod === "flow"
+                  ? `${(tank.capacity > 0 ? tank.waterUsed24h / tank.capacity : 0).toFixed(1)}×`
+                  : `${shareOfCapacity.toFixed(1)}%`
+              }
+            />
+          )}
+        </div>
+        <div style={{ marginTop: 6, fontSize: 11, color: LABEL }}>{methodText}</div>
+
+        {/* Level history */}
+        <div
+          style={{
+            marginTop: 14,
+            padding: "16px 12px 10px 16px",
+            borderRadius: 14,
+            background: CARD_BG,
+            border: `1px solid ${CARD_BORDER}`,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              color: LABEL,
+              marginBottom: 10,
+            }}
+          >
+            Level history · last 24h
+          </div>
+
+          {chartData.length < 2 ? (
+            <div style={{ padding: "40px 8px", textAlign: "center", fontSize: 13, color: LABEL }}>
+              Collecting data. The history builds up while this page is open.
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart
+                data={chartData}
+                margin={{ top: 6, right: 16, left: 0, bottom: 0 }}
+              >
+                <XAxis
+                  dataKey="ts"
+                  type="number"
+                  scale="time"
+                  domain={[start, end]}
+                  ticks={ticks}
+                  tickFormatter={(v) => format(new Date(v), "HH:mm")}
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fontSize: 11, fill: "#64748b" }}
+                  interval={0}
+                />
+                <YAxis
+                  domain={[yMin, yMax]}
+                  allowDecimals={false}
+                  tickCount={4}
+                  tickFormatter={(v) => `${Math.round(v)}%`}
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fontSize: 11, fill: "#64748b" }}
+                  width={40}
+                />
+                <Tooltip
+                  labelFormatter={(v) => format(new Date(v), "HH:mm:ss")}
+                  formatter={(v) => [`${v}%`, "Level"]}
+                  contentStyle={{
+                    background: "#0b1220",
+                    border: "1px solid rgba(148,163,184,0.25)",
+                    borderRadius: 8,
+                    fontSize: 12,
+                  }}
+                  labelStyle={{ color: "#94a3b8" }}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="pct"
+                  stroke="#06b6d4"
+                  strokeWidth={2}
+                  dot={chartData.length <= 12 ? { r: 3, fill: "#06b6d4" } : false}
+                  isAnimationActive={false}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+
+          {spanLabel && chartData.length >= 2 && (
+            <div style={{ marginTop: 6, fontSize: 11, color: LABEL }}>
+              Showing the last {spanLabel} of data.
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
@@ -218,2032 +848,357 @@ const CustomTooltip = ({ active, payload, label }) => {
 export function FeedTankManagement() {
   const { sensorData, getValue, getHistory, lastUpdate } = useData();
 
-  const [selected, setSelected] = useState(null);
   const [filterStatus, setFilterStatus] = useState("All");
+  const [selectedId, setSelectedId] = useState(null);
   const [isMobile, setIsMobile] = useState(false);
-  const [showDetail, setShowDetail] = useState(false);
-
-  /* ============================================================
-     MOBILE DETECTION
-     ============================================================ */
 
   useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768);
-    };
-
-    checkMobile();
-
-    window.addEventListener("resize", checkMobile);
-
-    return () => {
-      window.removeEventListener("resize", checkMobile);
-    };
+    const check = () => setIsMobile(window.innerWidth < 768);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
   }, []);
 
-  /* ============================================================
-     OTHER LIVE VALUES
-     ============================================================ */
+  // Escape closes the detail view
+  useEffect(() => {
+    if (!selectedId) return undefined;
+    const onKey = (e) => {
+      if (e.key === "Escape") setSelectedId(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedId]);
 
-  const feedFlow = Number(getValue("RO5-FEEDFlow")) || 0;
-
-  const recovery = Number(getValue("RO5-SystemRecovery")) || 0;
-
-  const stage1Delta = Number(getValue("RO5-Stage1Delta")) || 0;
-
-  /* ============================================================
-     LIVE FEED TANK LEVEL
-     ============================================================
-
-     IMPORTANT:
-
-     The RAW transmitter is the single source of truth.
-
-     Calibration:
-
-       RAW 4.9  = 0%
-       RAW 10.0 = 100%
-
-     Formula is handled by:
-
-       rawToPercent()
-
-     We deliberately DO NOT use:
-
-       - RO5-SystemActive
-       - getDisplayedTankLevelPct()
-       - DATA_FRESHNESS_WINDOW_MS
-       - RO5-FeedTankLevel as the primary value
-
-     This ensures Tank Management uses exactly the same
-     calculation as the Dashboard.
-     ============================================================ */
-
+  /* ---------- Feed tank (Tank A) ---------- */
+  // RAW transmitter is the single source of truth (same as Dashboard).
   const rawTankValue = getValue("RO5-FeedTankLevelRaw");
-
   const rawTankNum =
-    typeof rawTankValue === "number"
-      ? rawTankValue
-      : parseFloat(rawTankValue);
-
-  const hasRawTankReading = Number.isFinite(rawTankNum);
-
-  const calibratedPct = hasRawTankReading
-    ? rawToPercent(rawTankNum)
+    typeof rawTankValue === "number" ? rawTankValue : parseFloat(rawTankValue);
+  const tankALevelPct = Number.isFinite(rawTankNum)
+    ? clampPct(rawToPercent(rawTankNum))
     : null;
+  const tankARawText = Number.isFinite(rawTankNum) ? rawTankNum.toFixed(3) : "--";
 
-  /*
-   * This is the actual value used everywhere in this page.
-   */
-  const displayLevel =
-    calibratedPct !== null && Number.isFinite(calibratedPct)
-      ? Math.min(100, Math.max(0, calibratedPct))
-      : null;
-
-  const tankHasData = displayLevel !== null;
-
-  /* ============================================================
-     LIVE FLUSH TANK LEVEL
-     ============================================================
-     Real transmitter: RO5-FlushTank (own calibration,
-     as the feed tank: RAW 0 = 0%, RAW 126 = 100%).
-     ============================================================ */
-
+  /* ---------- Flush tank (Tank B) ---------- */
   // getValue() turns a missing tag into 0, so read sensorData directly
   const flushRawValue = sensorData?.["RO5-FlushTank"]?.value;
-
   const flushRawNum =
     typeof flushRawValue === "number"
       ? flushRawValue
       : parseFloat(flushRawValue);
-
-  const hasFlushRawReading = Number.isFinite(flushRawNum);
-
-  const calibratedFlushPct = hasFlushRawReading
-    ? flushRawToPercent(flushRawNum)
+  const tankBLevelPct = Number.isFinite(flushRawNum)
+    ? clampPct(flushRawToPercent(flushRawNum))
     : null;
+  const tankBRawText = Number.isFinite(flushRawNum) ? flushRawNum.toFixed(1) : "--";
 
-  const flushDisplayLevel =
-    calibratedFlushPct !== null && Number.isFinite(calibratedFlushPct)
-      ? Math.min(100, Math.max(0, calibratedFlushPct))
-      : null;
+  /* ---------- History ---------- */
+  const liveFeedHistory = getHistory("RO5-FeedTankLevelRaw");
+  const liveFlushHistory = getHistory("RO5-FlushTank");
+  // Stored readings from the database + live ones, so the 24h views survive a page refresh
+  const feedHistory = useMergedHistory("RO5-FeedTankLevelRaw", liveFeedHistory);
+  const flushHistory = useMergedHistory("RO5-FlushTank", liveFlushHistory);
+  // Feed flow (m³/h) = water leaving the feed tank; used for the real 24h volume
+  const feedFlowHistory = useMergedHistory("RO5-FEEDFlow", getHistory("RO5-FEEDFlow"));
+  const usageApi = useTankUsage();
+  const feedCap = Number(usageApi?.capacities?.feed) || 300;
+  const flushCap = Number(usageApi?.capacities?.flush) || 2;
 
-  const flushHasData = flushDisplayLevel !== null;
-  const scaledFlushLevel = flushHasData ? flushDisplayLevel : 0;
-
-  /*
-   * Never allow undefined/null into the tank calculations.
-   */
-  const scaledTankLevel = tankHasData ? displayLevel : 0;
-
-  /* ============================================================
-     HISTORY
-     ============================================================ */
-
-  const tankHistory = getHistory("RO5-FeedTankLevel");
-
-  /* ============================================================
-     TANK DEFINITIONS
-     ============================================================ */
-
+  /* ---------- Tank definitions ---------- */
   const feedTanks = useMemo(() => {
-    const now = new Date();
-
-    /*
-     * MAIN FEED TANK A
-     *
-     * This is the REAL physical tank connected to:
-     *
-     * RO5-FeedTankLevelRaw
-     *
-     * Its percentage is therefore the authoritative
-     * Feed Tank Management percentage.
-     */
-
-    const tankALevel = scaledTankLevel;
-
-    /*
-     * FLUSH TANK (Tank B)
-     *
-     * Real transmitter: RO5-FlushTank.
-     */
-
-    const tankBLevel = scaledFlushLevel;
-
-    /* ------------------------------------------------------------
-       STATUS
-       ------------------------------------------------------------ */
-
-    const getStatus = (level, hasData) => {
-      if (!hasData) return "Offline";
-
-      if (level <= 0) return "Empty";
-
-      if (level > 70) return "Active";
-
-      if (level > 40) return "Standby";
-
-      if (level > 15) return "Warning";
-
-      return "Empty";
-    };
-
-    /* ------------------------------------------------------------
-       HEALTH
-       ------------------------------------------------------------ */
-
-    const getHealth = (level, hasData) => {
-      if (!hasData) return 0;
-
-      const baseHealth = (level / 100) * 70 + 30;
-
-      const recoveryBonus = Math.min(
-        20,
-        (recovery / 100) * 20
-      );
-
-      return Math.min(
-        100,
-        baseHealth +
-          recoveryBonus -
-          (stage1Delta > 0.5 ? 10 : 0)
-      );
+    const build = (
+      id,
+      name,
+      capacity,
+      levelPct,
+      history,
+      toPercent,
+      rawDisplay,
+      opts = {}
+    ) => {
+      const hasData = levelPct !== null;
+      const level = hasData ? levelPct : 0;
+      const levelPoints = toLevelPoints(history, toPercent);
+      const levelUsage = computeWaterUsed(levelPoints, capacity);
+      // Feed tank: real flow x time when flow history exists, else level drop.
+      const flow = opts.flowHistory ? computeFlowVolume(opts.flowHistory) : null;
+      const useFlow = Boolean(flow && flow.ok);
+      let usage = useFlow ? flow : levelUsage;
+      let method = useFlow ? "flow" : "level";
+      let refills = countRefills(levelPoints);
+      // The server works on every stored reading (no averaging), so prefer its figure.
+      const srv = opts.server;
+      if (srv && srv.points > 1) {
+        usage = { used: srv.used, spanHours: srv.spanHours };
+        method = opts.serverMethod;
+        if (Number.isFinite(srv.refills)) refills = srv.refills;
+      }
+      return {
+        id,
+        name,
+        capacity,
+        hasData,
+        level,
+        volume: (level / 100) * capacity,
+        status: getStatus(level, hasData),
+        rawDisplay,
+        levelPoints,
+        waterUsed24h: usage.used,
+        spanHours: usage.spanHours,
+        usageMethod: method,
+        refills,
+        showRefills: Boolean(opts.showRefills),
+      };
     };
 
     return [
-      {
-        id: "FT-A",
-
-        name: "Main Feed Tank A",
-
-        //location: "North Plant",
-
-        hasData: tankHasData,
-
-        status: getStatus(
-          tankALevel,
-          tankHasData
-        ),
-
-        level: tankALevel,
-
-        capacity: 300,
-
-        volume:
-          (tankALevel / 100) * 300,
-
-        dailyConsumption: tankHasData
-          ? feedFlow * 24 * 0.4
-          : 0,
-
-        monthlyConsumption: tankHasData
-          ? feedFlow * 24 * 30 * 0.4
-          : 0,
-
-        health: getHealth(
-          tankALevel,
-          tankHasData
-        ),
-
-        lastMaintenance: format(
-          subDays(now, 45),
-          "yyyy-MM-dd"
-        ),
-
-        nextMaintenance: format(
-          subDays(now, -15),
-          "yyyy-MM-dd"
-        ),
-      },
-
-      {
-        id: "FT-B",
-
-        name: "Flush Tank",
-
-        //location: "East Plant",
-
-        hasData: flushHasData,
-
-        status: getStatus(
-          tankBLevel,
-          flushHasData
-        ),
-
-        level: tankBLevel,
-
-        capacity: 2,
-
-        volume:
-          (tankBLevel / 100) * 2,
-
-        dailyConsumption: flushHasData
-          ? feedFlow * 24 * 0.35
-          : 0,
-
-        monthlyConsumption: flushHasData
-          ? feedFlow * 24 * 30 * 0.35
-          : 0,
-
-        health: getHealth(
-          tankBLevel,
-          flushHasData
-        ),
-
-        lastMaintenance: format(
-          subDays(now, 30),
-          "yyyy-MM-dd"
-        ),
-
-        nextMaintenance: format(
-          subDays(now, -20),
-          "yyyy-MM-dd"
-        ),
-      },
+      build(
+        "FT-A",
+        "Main Feed Tank A",
+        feedCap,
+        tankALevelPct,
+        feedHistory,
+        (v) => {
+          const n = Number(v);
+          return Number.isFinite(n) ? clampPct(rawToPercent(n)) : null;
+        },
+        tankARawText,
+        { flowHistory: feedFlowHistory, server: usageApi?.feed, serverMethod: "flow" }
+      ),
+      build(
+        "FT-B",
+        "Flush Tank",
+        flushCap,
+        tankBLevelPct,
+        flushHistory,
+        (v) => clampPct(flushRawToPercent(v)),
+        tankBRawText,
+        { showRefills: true, server: usageApi?.flush, serverMethod: "level" }
+      ),
     ];
   }, [
-    scaledTankLevel,
-    tankHasData,
-    scaledFlushLevel,
-    flushHasData,
-    feedFlow,
-    recovery,
-    stage1Delta,
+    tankALevelPct,
+    tankBLevelPct,
+    feedHistory,
+    flushHistory,
+    tankARawText,
+    tankBRawText,
+    feedFlowHistory,
+    usageApi,
+    feedCap,
+    flushCap,
   ]);
 
-  /* ============================================================
-     SELECT FIRST TANK
-     ============================================================ */
-
-  useEffect(() => {
-    if (feedTanks.length > 0 && !selected) {
-      setSelected(feedTanks[0]);
-    }
-  }, [feedTanks, selected]);
-
-  /* ============================================================
-     KEEP SELECTED TANK UPDATED
-     ============================================================ */
-
-  useEffect(() => {
-    if (!selected) return;
-
-    const updated = feedTanks.find(
-      (t) => t.id === selected.id
-    );
-
-    if (updated && updated !== selected) {
-      setSelected(updated);
-    }
-  }, [feedTanks, selected]);
-
-  /* ============================================================
-     FILTERED TANKS
-     ============================================================ */
-
-  const filteredTanks = useMemo(() => {
-    if (filterStatus === "All") {
-      return feedTanks;
-    }
-
-    return feedTanks.filter(
-      (t) => t.status === filterStatus
-    );
-  }, [feedTanks, filterStatus]);
-
-  /* ============================================================
-     CONSUMPTION HISTORY
-     ============================================================ */
-
-  const tankHistoryData = useMemo(() => {
-    const months = [
-      "Jan",
-      "Feb",
-      "Mar",
-      "Apr",
-      "May",
-      "Jun",
-      "Jul",
-      "Aug",
-      "Sep",
-      "Oct",
-      "Nov",
-      "Dec",
-    ];
-
-    const currentMonth = new Date().getMonth();
-
-    return months.slice(0, 6).map((month, i) => {
-      const monthIndex =
-        (currentMonth - 5 + i + 12) % 12;
-
-      const monthName = months[monthIndex];
-
-      let consumption =
-        30000 + Math.random() * 5000;
-
-      if (
-        tankHistory &&
-        tankHistory.length > 0
-      ) {
-        const numericHistory =
-          tankHistory.filter(
-            (d) => Number.isFinite(Number(d.value))
-          );
-
-        if (numericHistory.length > 0) {
-          const avgLevel =
-            numericHistory.reduce(
-              (sum, d) =>
-                sum + Number(d.value),
-              0
-            ) / numericHistory.length;
-
-          consumption =
-            avgLevel *
-            100 *
-            (0.8 + Math.random() * 0.4);
-        }
-      }
-
-      return {
-        month: monthName,
-        consumption: Math.round(consumption),
-      };
-    });
-  }, [tankHistory]);
-
-  /* ============================================================
-     FILTER OPTIONS
-     ============================================================ */
-
-  const statusFilters = [
-    "All",
-    "Active",
-    "Standby",
-    "Warning",
-    "Empty",
-    "Maintenance",
-  ];
-
-  /* ============================================================
-     OVERALL TANK INFORMATION
-     ============================================================
-
-     IMPORTANT:
-
-     Tank B is currently a derived placeholder and has no
-     independent transmitter.
-
-     Therefore the overall Feed Tank level MUST NOT average
-     Tank A and Tank B.
-
-     The Dashboard is displaying the real Feed Tank sensor,
-     so the overall value here is also Tank A's real calibrated
-     value.
-
-     This is what makes the two pages agree.
-     ============================================================ */
-
-  const mainFeedTank = feedTanks.find(
-    (tank) => tank.id === "FT-A"
+  const filteredTanks = useMemo(
+    () =>
+      filterStatus === "All"
+        ? feedTanks
+        : feedTanks.filter((t) => t.status === filterStatus),
+    [feedTanks, filterStatus]
   );
 
-  const totalCapacity =
-    mainFeedTank?.capacity || 0;
+  const chartData = useMemo(
+    () =>
+      filteredTanks.map((t) => ({
+        id: t.id,
+        used: Math.round(t.waterUsed24h * 10) / 10,
+      })),
+    [filteredTanks]
+  );
 
-  const totalVolume =
-    mainFeedTank?.volume || 0;
+  // History lives in memory (500 points, cleared on page refresh), so the
+  // chart may cover less than 24h. Tell the user how much it really covers.
+  const spanHours = Math.max(0, ...feedTanks.map((t) => t.spanHours));
+  const methodNote = filteredTanks
+    .map(
+      (t) =>
+        `${t.id}: ${t.usageMethod === "flow" ? "feed flow × time" : "level drop × capacity"}`
+    )
+    .join(" · ");
 
-  const overallLevel = tankHasData
-    ? scaledTankLevel
-    : 0;
-
-  /* ============================================================
-     TANK SELECT
-     ============================================================ */
-
-  const handleTankSelect = (tank) => {
-    setSelected(tank);
-
-    if (isMobile) {
-      setShowDetail(true);
-    }
-  };
-
-  /* ============================================================
-     BACK BUTTON
-     ============================================================ */
-
-  const handleBack = () => {
-    setShowDetail(false);
-  };
+  // Always the live version of the selected tank
+  const selectedTank = feedTanks.find((t) => t.id === selectedId) || null;
 
   /* ============================================================
      RENDER
      ============================================================ */
 
   return (
-    <div className="flex h-full overflow-hidden flex-col md:flex-row">
-
-      {/* ========================================================
-          LEFT / MAIN AREA
-          ======================================================== */}
-
+    <div
+      className="h-full overflow-auto"
+      style={{
+        padding: isMobile ? 12 : 20,
+        scrollbarWidth: "none",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      {/* Fills the screen height; the chart card takes all leftover space.
+          If the screen is too short, the page scrolls instead of squashing. */}
       <div
-        className={`flex flex-col flex-1 min-w-0 overflow-auto p-2 sm:p-4 ${
-          isMobile && showDetail ? "hidden" : "flex"
-        }`}
         style={{
-          scrollbarWidth: "none",
+          flex: "1 0 auto",
+          width: "100%",
+          maxWidth: 1600,
+          margin: "0 auto",
+          display: "flex",
+          flexDirection: "column",
+          gap: isMobile ? 10 : 14,
         }}
       >
-
-        {/* ======================================================
-            HEADER
-            ====================================================== */}
-
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-2 sm:mb-3 gap-2">
-
-          <div>
-
-            <h2
-              style={{
-                fontSize: isMobile ? 10 : 11,
-                fontWeight: 600,
-                color: "var(--muted-foreground)",
-                letterSpacing: "0.1em",
-                textTransform: "uppercase",
-              }}
-            >
-              <Droplet
-                size={isMobile ? 12 : 14}
-                style={{
-                  display: "inline",
-                  marginRight: 4,
-                }}
-              />
-
-              Feed Tank Overview ·{" "}
-              {feedTanks.length} Tanks
-            </h2>
-
-            <div
-              style={{
-                fontSize: isMobile ? 8 : 10,
-                color: "var(--muted-foreground)",
-                marginTop: 2,
-              }}
-            >
-              Total Capacity:{" "}
-              {totalCapacity.toLocaleString()} m³
-              {" · "}
-              Current Volume:{" "}
-              {totalVolume.toFixed(0)} m³
-              {" · "}
-              Overall Level:{" "}
-
-              <span
-                style={{
-                  color: !tankHasData
-                    ? "#64748b"
-                    : overallLevel > 50
-                      ? "#22c55e"
-                      : overallLevel > 25
-                        ? "#eab308"
-                        : "#ef4444",
-
-                  fontWeight: 600,
-                }}
-              >
-                {tankHasData
-                  ? `${overallLevel.toFixed(1)}%`
-                  : "No Data"}
-              </span>
-
-              {!isMobile && (
-                <span
-                  style={{
-                    fontSize: 9,
-                    color:
-                      "var(--muted-foreground)",
-                    marginLeft: 8,
-                  }}
-                >
-                  (
-                  Raw:{" "}
-                  {hasRawTankReading
-                    ? rawTankNum.toFixed(3)
-                    : "--"}
-
-                  {" → "}
-
-                  {hasRawTankReading &&
-                  calibratedPct !== null
-                    ? calibratedPct.toFixed(1)
-                    : "--"}
-                  %)
-                </span>
-              )}
-            </div>
-
-          </div>
-
-          {/* ====================================================
-              FILTERS
-              ==================================================== */}
-
-          <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
-
-            <Filter
-              size={isMobile ? 10 : 12}
-              style={{
-                color:
-                  "var(--muted-foreground)",
-              }}
-            />
-
-            {statusFilters.map((f) => (
+        {/* ---------- Pill filters ---------- */}
+        <div
+          role="group"
+          aria-label="Filter tanks by status"
+          style={{ display: "flex", flexWrap: "wrap", gap: 8 }}
+        >
+          {FILTERS.map((f) => {
+            const active = filterStatus === f;
+            return (
               <button
                 key={f}
-                onClick={() =>
-                  setFilterStatus(f)
-                }
-                className="px-1.5 sm:px-2 py-0.5 sm:py-1 rounded text-xs transition-colors"
+                type="button"
+                onClick={() => setFilterStatus(f)}
+                aria-pressed={active}
                 style={{
-                  background:
-                    filterStatus === f
-                      ? "#0ea5e9"
-                      : "var(--secondary)",
-
-                  color:
-                    filterStatus === f
-                      ? "white"
-                      : "var(--muted-foreground)",
-
-                  border:
-                    "1px solid var(--border)",
-
-                  fontSize: isMobile ? 7 : 9,
-
+                  padding: "7px 16px",
+                  borderRadius: 999,
+                  fontSize: 12,
+                  fontWeight: 700,
                   cursor: "pointer",
-
-                  whiteSpace: "nowrap",
+                  border: active
+                    ? `1px solid ${CYAN}`
+                    : `1px solid var(--border, rgba(148,163,184,0.2))`,
+                  background: active ? CYAN : CARD_BG,
+                  color: active ? "#00141a" : LABEL,
+                  boxShadow: active ? `0 0 14px ${CYAN}66` : "none",
+                  transition: "all 0.15s ease",
                 }}
               >
-                {isMobile && f !== "All"
-                  ? f.charAt(0)
-                  : f}
+                {f}
               </button>
-            ))}
-
-            <span
-              style={{
-                fontSize: isMobile ? 7 : 9,
-                color:
-                  "var(--muted-foreground)",
-                marginLeft: 2,
-              }}
-            >
-              {filteredTanks.length} shown
-            </span>
-
-          </div>
-
+            );
+          })}
         </div>
 
-        {/* ======================================================
-            TANK TABLE
-            ====================================================== */}
-
+        {/* ---------- Tank cards: 2 columns on desktop, 1 on phones ---------- */}
         <div
-          className="rounded overflow-hidden"
           style={{
-            border:
-              "1px solid var(--border)",
-            flex: 1,
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 420px), 1fr))",
+            gap: 14,
+            alignItems: "stretch",
           }}
         >
+          {filteredTanks.map((t) => (
+            <TankCard key={t.id} tank={t} onOpen={setSelectedId} isMobile={isMobile} />
+          ))}
+        </div>
 
+        {filteredTanks.length === 0 && (
           <div
             style={{
-              overflowX: "auto",
+              padding: 24,
+              textAlign: "center",
+              borderRadius: 16,
+              border: `1px solid ${CARD_BORDER}`,
+              color: LABEL,
+              fontSize: 13,
             }}
           >
-
-            <table
-              style={{
-                width: "100%",
-                borderCollapse: "collapse",
-                minWidth: isMobile
-                  ? 500
-                  : "auto",
-              }}
-            >
-
-              <thead>
-
-                <tr
-                  style={{
-                    background:
-                      "var(--muted)",
-                  }}
-                >
-
-                  {isMobile ? (
-                    <>
-                      <th
-                        style={{
-                          padding:
-                            "6px 8px",
-                          textAlign: "left",
-                          fontSize: 8,
-                          fontWeight: 600,
-                          color:
-                            "var(--muted-foreground)",
-                          borderBottom:
-                            "1px solid var(--border)",
-                        }}
-                      >
-                        ID
-                      </th>
-
-                      <th
-                        style={{
-                          padding:
-                            "6px 8px",
-                          textAlign: "left",
-                          fontSize: 8,
-                          fontWeight: 600,
-                          color:
-                            "var(--muted-foreground)",
-                          borderBottom:
-                            "1px solid var(--border)",
-                        }}
-                      >
-                        Status
-                      </th>
-
-                      <th
-                        style={{
-                          padding:
-                            "6px 8px",
-                          textAlign: "right",
-                          fontSize: 8,
-                          fontWeight: 600,
-                          color:
-                            "var(--muted-foreground)",
-                          borderBottom:
-                            "1px solid var(--border)",
-                        }}
-                      >
-                        Level
-                      </th>
-
-                      <th
-                        style={{
-                          padding:
-                            "6px 8px",
-                          textAlign: "right",
-                          fontSize: 8,
-                          fontWeight: 600,
-                          color:
-                            "var(--muted-foreground)",
-                          borderBottom:
-                            "1px solid var(--border)",
-                        }}
-                      >
-                        Volume
-                      </th>
-
-                      <th
-                        style={{
-                          padding:
-                            "6px 8px",
-                          textAlign: "right",
-                          fontSize: 8,
-                          fontWeight: 600,
-                          color:
-                            "var(--muted-foreground)",
-                          borderBottom:
-                            "1px solid var(--border)",
-                        }}
-                      >
-                        Consumption
-                      </th>
-
-                      <th
-                        style={{
-                          padding:
-                            "6px 8px",
-                          textAlign: "center",
-                          fontSize: 8,
-                          fontWeight: 600,
-                          color:
-                            "var(--muted-foreground)",
-                          borderBottom:
-                            "1px solid var(--border)",
-                        }}
-                      >
-                        Health
-                      </th>
-
-                      <th
-                        style={{
-                          padding:
-                            "6px 8px",
-                          textAlign: "center",
-                          fontSize: 8,
-                          fontWeight: 600,
-                          color:
-                            "var(--muted-foreground)",
-                          borderBottom:
-                            "1px solid var(--border)",
-                        }}
-                      />
-                    </>
-                  ) : (
-                    <>
-                      <th
-                        style={{
-                          padding:
-                            "8px 10px",
-                          textAlign: "left",
-                          fontSize: 9,
-                          fontWeight: 600,
-                          color:
-                            "var(--muted-foreground)",
-                          letterSpacing:
-                            "0.08em",
-                          textTransform:
-                            "uppercase",
-                          borderBottom:
-                            "1px solid var(--border)",
-                        }}
-                      >
-                        ID
-                      </th>
-
-                      <th
-                        style={{
-                          padding:
-                            "8px 10px",
-                          textAlign: "left",
-                          fontSize: 9,
-                          fontWeight: 600,
-                          color:
-                            "var(--muted-foreground)",
-                          letterSpacing:
-                            "0.08em",
-                          textTransform:
-                            "uppercase",
-                          borderBottom:
-                            "1px solid var(--border)",
-                        }}
-                      >
-                        Name
-                      </th>
-
-                      <th
-                        style={{
-                          padding:
-                            "8px 10px",
-                          textAlign: "left",
-                          fontSize: 9,
-                          fontWeight: 600,
-                          color:
-                            "var(--muted-foreground)",
-                          letterSpacing:
-                            "0.08em",
-                          textTransform:
-                            "uppercase",
-                          borderBottom:
-                            "1px solid var(--border)",
-                        }}
-                      >
-                        Location
-                      </th>
-
-                      <th
-                        style={{
-                          padding:
-                            "8px 10px",
-                          textAlign: "left",
-                          fontSize: 9,
-                          fontWeight: 600,
-                          color:
-                            "var(--muted-foreground)",
-                          letterSpacing:
-                            "0.08em",
-                          textTransform:
-                            "uppercase",
-                          borderBottom:
-                            "1px solid var(--border)",
-                        }}
-                      >
-                        Status
-                      </th>
-
-                      <th
-                        style={{
-                          padding:
-                            "8px 10px",
-                          textAlign: "left",
-                          fontSize: 9,
-                          fontWeight: 600,
-                          color:
-                            "var(--muted-foreground)",
-                          letterSpacing:
-                            "0.08em",
-                          textTransform:
-                            "uppercase",
-                          borderBottom:
-                            "1px solid var(--border)",
-                        }}
-                      >
-                        Level
-                      </th>
-
-                      <th
-                        style={{
-                          padding:
-                            "8px 10px",
-                          textAlign: "left",
-                          fontSize: 9,
-                          fontWeight: 600,
-                          color:
-                            "var(--muted-foreground)",
-                          letterSpacing:
-                            "0.08em",
-                          textTransform:
-                            "uppercase",
-                          borderBottom:
-                            "1px solid var(--border)",
-                        }}
-                      >
-                        Volume
-                      </th>
-
-                      <th
-                        style={{
-                          padding:
-                            "8px 10px",
-                          textAlign: "left",
-                          fontSize: 9,
-                          fontWeight: 600,
-                          color:
-                            "var(--muted-foreground)",
-                          letterSpacing:
-                            "0.08em",
-                          textTransform:
-                            "uppercase",
-                          borderBottom:
-                            "1px solid var(--border)",
-                        }}
-                      >
-                        Capacity
-                      </th>
-
-                      <th
-                        style={{
-                          padding:
-                            "8px 10px",
-                          textAlign: "left",
-                          fontSize: 9,
-                          fontWeight: 600,
-                          color:
-                            "var(--muted-foreground)",
-                          letterSpacing:
-                            "0.08em",
-                          textTransform:
-                            "uppercase",
-                          borderBottom:
-                            "1px solid var(--border)",
-                        }}
-                      >
-                        Consumption
-                      </th>
-
-                      <th
-                        style={{
-                          padding:
-                            "8px 10px",
-                          textAlign: "left",
-                          fontSize: 9,
-                          fontWeight: 600,
-                          color:
-                            "var(--muted-foreground)",
-                          letterSpacing:
-                            "0.08em",
-                          textTransform:
-                            "uppercase",
-                          borderBottom:
-                            "1px solid var(--border)",
-                        }}
-                      >
-                        Health
-                      </th>
-
-                      <th
-                        style={{
-                          padding:
-                            "8px 10px",
-                          textAlign: "center",
-                          fontSize: 9,
-                          fontWeight: 600,
-                          color:
-                            "var(--muted-foreground)",
-                          letterSpacing:
-                            "0.08em",
-                          textTransform:
-                            "uppercase",
-                          borderBottom:
-                            "1px solid var(--border)",
-                        }}
-                      />
-                    </>
-                  )}
-
-                </tr>
-
-              </thead>
-
-              <tbody>
-
-                {filteredTanks.map((t, i) => (
-                  <tr
-                    key={t.id}
-                    onClick={() =>
-                      handleTankSelect(t)
-                    }
-                    className="cursor-pointer transition-colors"
-                    style={{
-                      background:
-                        selected?.id === t.id
-                          ? "rgba(14,165,233,0.06)"
-                          : i % 2 === 0
-                            ? "var(--card)"
-                            : "var(--muted)",
-
-                      borderLeft:
-                        selected?.id === t.id
-                          ? "2px solid #0ea5e9"
-                          : "2px solid transparent",
-                    }}
-                  >
-
-                    {isMobile ? (
-                      <>
-                        <td
-                          style={{
-                            padding:
-                              "5px 8px",
-                            fontSize: 10,
-                            fontFamily:
-                              "var(--font-mono)",
-                            color: "#0ea5e9",
-                            borderBottom:
-                              "1px solid var(--border)",
-                          }}
-                        >
-                          {t.id}
-                        </td>
-
-                        <td
-                          style={{
-                            padding:
-                              "5px 8px",
-                            borderBottom:
-                              "1px solid var(--border)",
-                          }}
-                        >
-                          <StatusBadge
-                            status={t.status}
-                          />
-                        </td>
-
-                        <td
-                          style={{
-                            padding:
-                              "5px 8px",
-                            fontSize: 10,
-                            fontFamily:
-                              "var(--font-mono)",
-                            fontWeight: 600,
-                            textAlign: "right",
-                            color:
-                              !t.hasData
-                                ? "#64748b"
-                                : t.level > 50
-                                  ? "#22c55e"
-                                  : t.level > 25
-                                    ? "#eab308"
-                                    : "#ef4444",
-                            borderBottom:
-                              "1px solid var(--border)",
-                          }}
-                        >
-                          {t.hasData
-                            ? `${t.level.toFixed(0)}%`
-                            : "--"}
-                        </td>
-
-                        <td
-                          style={{
-                            padding:
-                              "5px 8px",
-                            fontSize: 10,
-                            fontFamily:
-                              "var(--font-mono)",
-                            textAlign: "right",
-                            color:
-                              "var(--foreground)",
-                            borderBottom:
-                              "1px solid var(--border)",
-                          }}
-                        >
-                          {t.hasData
-                            ? t.volume.toFixed(0)
-                            : "--"}
-                        </td>
-
-                        <td
-                          style={{
-                            padding:
-                              "5px 8px",
-                            fontSize: 10,
-                            fontFamily:
-                              "var(--font-mono)",
-                            textAlign: "right",
-                            color:
-                              "var(--foreground)",
-                            borderBottom:
-                              "1px solid var(--border)",
-                          }}
-                        >
-                          {t.hasData
-                            ? t.dailyConsumption.toFixed(
-                                0
-                              )
-                            : "--"}
-                        </td>
-
-                        <td
-                          style={{
-                            padding:
-                              "5px 8px",
-                            textAlign: "center",
-                            borderBottom:
-                              "1px solid var(--border)",
-                          }}
-                        >
-                          <HealthBar
-                            value={t.health}
-                          />
-                        </td>
-
-                        <td
-                          style={{
-                            padding:
-                              "5px 8px",
-                            textAlign: "center",
-                            borderBottom:
-                              "1px solid var(--border)",
-                          }}
-                        >
-                          <ChevronRight
-                            size={14}
-                            style={{
-                              color:
-                                "var(--muted-foreground)",
-                            }}
-                          />
-                        </td>
-                      </>
-                    ) : (
-                      <>
-                        <td
-                          style={{
-                            padding:
-                              "7px 10px",
-                            fontSize: 11,
-                            fontFamily:
-                              "var(--font-mono)",
-                            color: "#0ea5e9",
-                            borderBottom:
-                              "1px solid var(--border)",
-                          }}
-                        >
-                          {t.id}
-                        </td>
-
-                        <td
-                          style={{
-                            padding:
-                              "7px 10px",
-                            fontSize: 11,
-                            color:
-                              "var(--foreground)",
-                            fontWeight: 500,
-                            borderBottom:
-                              "1px solid var(--border)",
-                          }}
-                        >
-                          {t.name}
-                        </td>
-
-                        <td
-                          style={{
-                            padding:
-                              "7px 10px",
-                            fontSize: 10,
-                            color:
-                              "var(--muted-foreground)",
-                            borderBottom:
-                              "1px solid var(--border)",
-                          }}
-                        >
-                          <div className="flex items-center gap-1">
-                            <MapPin size={9} />
-                            
-                          </div>
-                        </td>
-
-                        <td
-                          style={{
-                            padding:
-                              "7px 10px",
-                            borderBottom:
-                              "1px solid var(--border)",
-                          }}
-                        >
-                          <StatusBadge
-                            status={t.status}
-                          />
-                        </td>
-
-                        <td
-                          style={{
-                            padding:
-                              "7px 10px",
-                            fontSize: 11,
-                            fontFamily:
-                              "var(--font-mono)",
-                            fontWeight: 600,
-                            color:
-                              !t.hasData
-                                ? "#64748b"
-                                : t.level > 50
-                                  ? "#22c55e"
-                                  : t.level > 25
-                                    ? "#eab308"
-                                    : "#ef4444",
-                            borderBottom:
-                              "1px solid var(--border)",
-                          }}
-                        >
-                          {t.hasData
-                            ? `${t.level.toFixed(1)}%`
-                            : "--"}
-                        </td>
-
-                        <td
-                          style={{
-                            padding:
-                              "7px 10px",
-                            fontSize: 11,
-                            fontFamily:
-                              "var(--font-mono)",
-                            color:
-                              "var(--foreground)",
-                            borderBottom:
-                              "1px solid var(--border)",
-                          }}
-                        >
-                          {t.hasData
-                            ? t.volume.toFixed(0)
-                            : "--"}
-                        </td>
-
-                        <td
-                          style={{
-                            padding:
-                              "7px 10px",
-                            fontSize: 11,
-                            fontFamily:
-                              "var(--font-mono)",
-                            color:
-                              "var(--muted-foreground)",
-                            borderBottom:
-                              "1px solid var(--border)",
-                          }}
-                        >
-                          {t.capacity}
-                        </td>
-
-                        <td
-                          style={{
-                            padding:
-                              "7px 10px",
-                            fontSize: 11,
-                            fontFamily:
-                              "var(--font-mono)",
-                            color:
-                              "var(--foreground)",
-                            borderBottom:
-                              "1px solid var(--border)",
-                          }}
-                        >
-                          {t.hasData
-                            ? `${t.dailyConsumption.toFixed(
-                                0
-                              )} m³/day`
-                            : "--"}
-                        </td>
-
-                        <td
-                          style={{
-                            padding:
-                              "7px 10px",
-                            borderBottom:
-                              "1px solid var(--border)",
-                          }}
-                        >
-                          <HealthBar
-                            value={t.health}
-                          />
-                        </td>
-
-                        <td
-                          style={{
-                            padding:
-                              "7px 10px",
-                            textAlign: "center",
-                            borderBottom:
-                              "1px solid var(--border)",
-                          }}
-                        >
-                          <ChevronRight
-                            size={12}
-                            style={{
-                              color:
-                                "var(--muted-foreground)",
-                            }}
-                          />
-                        </td>
-                      </>
-                    )}
-
-                  </tr>
-                ))}
-
-                {filteredTanks.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={
-                        isMobile ? 7 : 10
-                      }
-                      style={{
-                        padding: "20px",
-                        textAlign: "center",
-                        color:
-                          "var(--muted-foreground)",
-                        fontSize: 11,
-                      }}
-                    >
-                      No tanks found with status:{" "}
-                      {filterStatus}
-                    </td>
-                  </tr>
-                )}
-
-              </tbody>
-
-            </table>
-
+            No tanks with status “{filterStatus}”. Choose All to see every tank.
           </div>
+        )}
 
-        </div>
-
-        {/* ======================================================
-            DAILY CONSUMPTION
-            ====================================================== */}
-
-        <div
-          className="rounded p-3 mt-4"
-          style={{
-            background: "var(--card)",
-            border:
-              "1px solid var(--border)",
-          }}
-        >
-
-          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-
-            <h3
+        {/* ---------- Water used chart ---------- */}
+        {filteredTanks.length > 0 && (
+          <div
+            style={{
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              minHeight: isMobile ? 260 : 240,
+              padding: isMobile ? 12 : 16,
+              borderRadius: 16,
+              background: CARD_BG,
+              border: `1px solid ${CARD_BORDER}`,
+            }}
+          >
+            <div
               style={{
-                fontSize: isMobile ? 10 : 11,
-                fontWeight: 600,
-                color:
-                  "var(--muted-foreground)",
+                fontSize: 11,
+                fontWeight: 700,
                 letterSpacing: "0.1em",
                 textTransform: "uppercase",
+                color: LABEL,
+                marginBottom: 8,
               }}
             >
-              Daily Consumption by Tank
-            </h3>
+              Water used · last 24h
+            </div>
 
-            <span
-              style={{
-                fontSize: isMobile ? 8 : 9,
-                color:
-                  "var(--muted-foreground)",
-              }}
-            >
-              Based on real-time feed flow data
-            </span>
+            <div style={{ position: "relative", flex: 1, minHeight: isMobile ? 180 : 160 }}>
+            <div style={{ position: "absolute", inset: 0 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={chartData}
+                margin={{ top: 28, right: isMobile ? 8 : 24, left: isMobile ? 8 : 24, bottom: 0 }}
+                barCategoryGap="30%"
+              >
+                <XAxis
+                  dataKey="id"
+                  axisLine={false}
+                  tickLine={false}
+                  tick={{ fontSize: 14, fill: "#64748b" }}
+                />
+                {/* Minimum scale of 1 m³ so a tiny use (e.g. 0.1) does not fill the chart */}
+                <YAxis
+                  hide
+                  domain={[0, (dataMax) => Math.max(dataMax * 1.25, 1)]}
+                />
+                <Bar
+                  dataKey="used"
+                  radius={[8, 8, 0, 0]}
+                  minPointSize={2}
+                  barSize={isMobile ? 56 : 90}
+                  isAnimationActive={false}
+                >
+                  {chartData.map((d) => (
+                    <Cell
+                      key={d.id}
+                      fill={CYAN}
+                      style={{ filter: `drop-shadow(0 0 8px ${CYAN}99)` }}
+                    />
+                  ))}
+                  <LabelList
+                    dataKey="used"
+                    position="top"
+                    formatter={(v) => `${Number(v).toFixed(1)} m³`}
+                    style={{ fill: "#fff", fontSize: isMobile ? 12 : 14 }}
+                  />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+            </div>
+            </div>
 
+            <div style={{ marginTop: 8, fontSize: 12, color: LABEL }}>
+              {methodNote}
+              {spanHours < 23.5 &&
+                ` · based on the last ${spanHours.toFixed(1)}h of data available`}
+            </div>
           </div>
-
-          <ResponsiveContainer
-            width="100%"
-            height={isMobile ? 120 : 150}
-          >
-
-            <BarChart
-              data={filteredTanks.filter(
-                (t) =>
-                  t.dailyConsumption > 0
-              )}
-              margin={{
-                top: 4,
-                right: 4,
-                left: -10,
-                bottom: 0,
-              }}
-            >
-
-              <CartesianGrid
-                strokeDasharray="3 3"
-                stroke="rgba(14,165,233,0.06)"
-                vertical={false}
-              />
-
-              <XAxis
-                dataKey="id"
-                tick={{
-                  fontSize: isMobile
-                    ? 8
-                    : 9,
-                  fill: "#4d7a9e",
-                }}
-                axisLine={false}
-                tickLine={false}
-              />
-
-              <YAxis
-                tick={{
-                  fontSize: isMobile
-                    ? 8
-                    : 9,
-                  fill: "#4d7a9e",
-                  fontFamily:
-                    "var(--font-mono)",
-                }}
-                axisLine={false}
-                tickLine={false}
-                tickFormatter={(v) =>
-                  v + " m³"
-                }
-              />
-
-              <Tooltip
-                content={<CustomTooltip />}
-              />
-
-              <Bar
-                dataKey="dailyConsumption"
-                fill="#06b6d4"
-                radius={[
-                  3,
-                  3,
-                  0,
-                  0,
-                ]}
-                name="Daily Consumption (m³)"
-              />
-
-            </BarChart>
-
-          </ResponsiveContainer>
-
-        </div>
-
+        )}
       </div>
 
-      {/* ========================================================
-          DETAIL PANEL
-          ======================================================== */}
-
-      {selected && (
-        <div
-          className={`flex flex-col overflow-auto p-3 sm:p-4 gap-3 sm:gap-4 ${
-            isMobile
-              ? "fixed inset-0 z-50"
-              : ""
-          }`}
-          style={{
-            width: isMobile
-              ? "100%"
-              : 280,
-
-            background:
-              "var(--muted)",
-
-            borderLeft: isMobile
-              ? "none"
-              : "1px solid var(--border)",
-
-            flexShrink: 0,
-
-            display:
-              isMobile && !showDetail
-                ? "none"
-                : "flex",
-          }}
-        >
-
-          {/* ====================================================
-              MOBILE BACK
-              ==================================================== */}
-
-          {isMobile && (
-            <button
-              onClick={handleBack}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                padding: "8px 0",
-                background: "none",
-                border: "none",
-                color:
-                  "var(--muted-foreground)",
-                cursor: "pointer",
-                fontSize: 12,
-              }}
-            >
-              <ChevronLeft size={18} />
-              Back to Tanks
-            </button>
-          )}
-
-          {/* ====================================================
-              TANK HEADER
-              ==================================================== */}
-
-          <div>
-
-            <div className="flex items-center justify-between mb-1">
-
-              <span
-                style={{
-                  fontFamily:
-                    "var(--font-mono)",
-                  fontSize: isMobile
-                    ? 18
-                    : 16,
-                  fontWeight: 700,
-                  color: "#0ea5e9",
-                }}
-              >
-                {selected.id}
-              </span>
-
-              <StatusBadge
-                status={selected.status}
-              />
-
-            </div>
-
-            <div
-              style={{
-                fontSize: isMobile
-                  ? 15
-                  : 13,
-                fontWeight: 600,
-                color:
-                  "var(--foreground)",
-                marginBottom: 2,
-              }}
-            >
-              {selected.name}
-            </div>
-
-            <div
-              className="flex items-center gap-1"
-              style={{
-                fontSize: 10,
-                color:
-                  "var(--muted-foreground)",
-              }}
-            >
-              <MapPin size={9} />
-            
-            </div>
-
-            <div
-              style={{
-                fontSize: 9,
-                color:
-                  "var(--muted-foreground)",
-                marginTop: 2,
-              }}
-            >
-              Updated:{" "}
-              {lastUpdate
-                ? format(
-                    new Date(lastUpdate),
-                    "HH:mm:ss"
-                  )
-                : "--"}
-            </div>
-
-          </div>
-
-          {/* ====================================================
-              TANK LEVEL CARD
-              ==================================================== */}
-
-          <div
-            className="rounded p-3"
-            style={{
-              background:
-                "var(--card)",
-              border:
-                "1px solid var(--border)",
-            }}
-          >
-
-            <div
-              style={{
-                fontSize: 9,
-                color:
-                  "var(--muted-foreground)",
-                textTransform:
-                  "uppercase",
-                letterSpacing:
-                  "0.06em",
-                marginBottom: 6,
-              }}
-            >
-              Tank Level
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-              }}
-            >
-
-              <div
-                style={{
-                  flex: 1,
-                  height: 8,
-                  background:
-                    "var(--secondary)",
-                  borderRadius: 4,
-                  overflow: "hidden",
-                }}
-              >
-                <div
-                  style={{
-                    width: `${
-                      selected.hasData
-                        ? Math.min(
-                            selected.level,
-                            100
-                          )
-                        : 0
-                    }%`,
-
-                    height: "100%",
-
-                    background:
-                      !selected.hasData
-                        ? "#64748b"
-                        : selected.level >
-                            50
-                          ? "#22c55e"
-                          : selected.level >
-                              25
-                            ? "#eab308"
-                            : "#ef4444",
-
-                    borderRadius: 4,
-
-                    transition:
-                      "width 0.5s ease",
-                  }}
-                />
-              </div>
-
-              <span
-                style={{
-                  fontSize: isMobile
-                    ? 18
-                    : 16,
-
-                  fontFamily:
-                    "var(--font-mono)",
-
-                  fontWeight: 700,
-
-                  color:
-                    !selected.hasData
-                      ? "#64748b"
-                      : selected.level >
-                          50
-                        ? "#22c55e"
-                        : selected.level >
-                            25
-                          ? "#eab308"
-                          : "#ef4444",
-                }}
-              >
-                {selected.hasData
-                  ? `${selected.level.toFixed(
-                      0
-                    )}%`
-                  : "--"}
-              </span>
-
-            </div>
-
-            <div
-              style={{
-                display: "flex",
-                justifyContent:
-                  "space-between",
-                marginTop: 4,
-              }}
-            >
-
-              <span
-                style={{
-                  fontSize: 8,
-                  color:
-                    "var(--muted-foreground)",
-                }}
-              >
-                {selected.hasData
-                  ? `${selected.volume.toFixed(
-                      0
-                    )} m³`
-                  : "--"}
-              </span>
-
-              <span
-                style={{
-                  fontSize: 8,
-                  color:
-                    "var(--muted-foreground)",
-                }}
-              >
-                Capacity:{" "}
-                {selected.capacity} m³
-              </span>
-
-            </div>
-
-          </div>
-
-          {/* ====================================================
-              METRICS
-              ==================================================== */}
-
-          <div
-            className="grid gap-2"
-            style={{
-              gridTemplateColumns:
-                "1fr 1fr",
-            }}
-          >
-
-            {[
-              {
-                label:
-                  "Daily Consumption",
-
-                value: selected.hasData
-                  ? `${selected.dailyConsumption.toFixed(
-                      0
-                    )} m³`
-                  : "--",
-              },
-
-              {
-                label:
-                  "Monthly Usage",
-
-                value: selected.hasData
-                  ? `${Math.round(
-                      selected.monthlyConsumption
-                    ).toLocaleString()} m³`
-                  : "--",
-              },
-
-              {
-                label:
-                  "Health Score",
-
-                value: selected.hasData
-                  ? `${Math.round(
-                      selected.health
-                    )}%`
-                  : "--",
-              },
-            ].map((m) => (
-              <div
-                key={m.label}
-                className="rounded p-2"
-                style={{
-                  background:
-                    "var(--card)",
-                  border:
-                    "1px solid var(--border)",
-                }}
-              >
-
-                <div
-                  style={{
-                    fontSize: isMobile
-                      ? 8
-                      : 9,
-                    color:
-                      "var(--muted-foreground)",
-                    marginBottom: 4,
-                    textTransform:
-                      "uppercase",
-                    letterSpacing:
-                      "0.06em",
-                  }}
-                >
-                  {m.label}
-                </div>
-
-                <div
-                  style={{
-                    fontSize: isMobile
-                      ? 14
-                      : 13,
-                    fontFamily:
-                      "var(--font-mono)",
-                    fontWeight: 700,
-                    color:
-                      "var(--foreground)",
-                  }}
-                >
-                  {m.value}
-                </div>
-
-              </div>
-            ))}
-
-          </div>
-
-          {/* ====================================================
-              CONSUMPTION HISTORY
-              ==================================================== */}
-
-          <div
-            className="rounded p-2"
-            style={{
-              background:
-                "var(--card)",
-              border:
-                "1px solid var(--border)",
-            }}
-          >
-
-            <div
-              style={{
-                fontSize: 10,
-                fontWeight: 600,
-                color:
-                  "var(--muted-foreground)",
-                marginBottom: 8,
-                textTransform:
-                  "uppercase",
-                letterSpacing:
-                  "0.08em",
-              }}
-            >
-              Consumption History
-            </div>
-
-            <ResponsiveContainer
-              width="100%"
-              height={isMobile ? 100 : 90}
-            >
-
-              <LineChart
-                data={tankHistoryData}
-                margin={{
-                  top: 4,
-                  right: 4,
-                  left: -28,
-                  bottom: 0,
-                }}
-              >
-
-                <XAxis
-                  dataKey="month"
-                  tick={{
-                    fontSize: 8,
-                    fill: "#4d7a9e",
-                  }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-
-                <YAxis
-                  tick={{
-                    fontSize: 8,
-                    fill: "#4d7a9e",
-                  }}
-                  axisLine={false}
-                  tickLine={false}
-                  tickFormatter={(v) =>
-                    (v / 1000).toFixed(0) +
-                    "k"
-                  }
-                />
-
-                <Tooltip
-                  content={
-                    <CustomTooltip />
-                  }
-                />
-
-                <Line
-                  type="monotone"
-                  dataKey="consumption"
-                  stroke="#06b6d4"
-                  strokeWidth={1.5}
-                  dot={{
-                    r: 2,
-                    fill: "#06b6d4",
-                  }}
-                  name="Consumption"
-                />
-
-              </LineChart>
-
-            </ResponsiveContainer>
-
-          </div>
-
-          {/* ====================================================
-              MAINTENANCE
-              ==================================================== */}
-
-          <div
-            className="rounded p-3"
-            style={{
-              background:
-                "var(--card)",
-              border:
-                "1px solid var(--border)",
-            }}
-          >
-
-            <div
-              style={{
-                fontSize: 10,
-                fontWeight: 600,
-                color:
-                  "var(--muted-foreground)",
-                marginBottom: 8,
-                textTransform:
-                  "uppercase",
-                letterSpacing:
-                  "0.08em",
-              }}
-            >
-              <Wrench
-                size={12}
-                style={{
-                  display: "inline",
-                  marginRight: 4,
-                }}
-              />
-
-              Maintenance
-            </div>
-
-            <div className="flex flex-col gap-2">
-
-              <div className="flex justify-between">
-
-                <span
-                  style={{
-                    fontSize: 10,
-                    color:
-                      "var(--muted-foreground)",
-                  }}
-                >
-                  Last Service
-                </span>
-
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontFamily:
-                      "var(--font-mono)",
-                    color:
-                      "var(--foreground)",
-                  }}
-                >
-                  {selected.lastMaintenance}
-                </span>
-
-              </div>
-
-              <div className="flex justify-between">
-
-                <span
-                  style={{
-                    fontSize: 10,
-                    color:
-                      "var(--muted-foreground)",
-                  }}
-                >
-                  Next Due
-                </span>
-
-                <span
-                  style={{
-                    fontSize: 10,
-                    fontFamily:
-                      "var(--font-mono)",
-                    color: "#eab308",
-                  }}
-                >
-                  {selected.nextMaintenance}
-                </span>
-
-              </div>
-
-            </div>
-
-          </div>
-
-        </div>
+      {/* ---------- Detail view ---------- */}
+      {selectedTank && (
+        <TankDetail
+          tank={selectedTank}
+          lastUpdate={lastUpdate}
+          isMobile={isMobile}
+          onClose={() => setSelectedId(null)}
+        />
       )}
-
     </div>
   );
 }

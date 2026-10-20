@@ -5,69 +5,87 @@
 
 /* @import "tailwindcss"; */
 
-:root {
+/* ============================================================
+   NEON-ON-BLACK THEME
+   The site reads its colours from these variables, so changing them here re-colours every page.
+   Both :root and .dark use the same neon palette, so it looks the same whichever mode is active.
+   (Your original light/dark values are kept in the comment block at the bottom if you ever need them.)
+   ============================================================ */
+:root,
+.dark {
   --font-size: 16px;
-  --background: #ffffff;
-  --foreground: oklch(0.145 0 0);
-  --card: #ffffff;
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: #030213;
-  --primary-foreground: oklch(1 0 0);
-  --secondary: oklch(0.95 0.0058 264.53);
-  --secondary-foreground: #030213;
-  --muted: #ececf0;
-  --muted-foreground: #717182;
-  --accent: #e9ebef;
-  --accent-foreground: #030213;
-  --destructive: #d4183d;
+
+  --background: #04060b;               /* near-black page */
+  --foreground: #f2f8ff;               /* soft white, cyan tint */
+  --card: #0b1526;                     /* panels */
+  --card-foreground: #f2f8ff;
+  --popover: #0b1526;
+  --popover-foreground: #e6faff;
+  --primary: #c6ff00;                  /* neon lime: main action buttons */
+  --primary-foreground: #000000;
+  --secondary: #101c33;
+  --secondary-foreground: #e6faff;
+  --muted: #0f192d;
+  --muted-foreground: #8798b3;
+  --accent: #10273a;
+  --accent-foreground: #22e5ff;
+  --destructive: #ff3355;              /* neon red: delete / alarm */
   --destructive-foreground: #ffffff;
-  --border: rgba(0, 0, 0, 0.1);
-  --input: transparent;
-  --input-background: #f3f3f5;
-  --switch-background: #cbced4;
-  --ring: oklch(0.708 0 0);
+  --border: #17253d;                   /* thin navy lines */
+  --input: #17253d;
+  --input-background: #050a12;
+  --switch-background: #1d2f4d;
+  --ring: #22e5ff;
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: #030213;
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --sidebar: #070d18;
+  --sidebar-foreground: #e6faff;
+  --sidebar-primary: #c6ff00;
+  --sidebar-primary-foreground: #000000;
+  --sidebar-accent: #12303c;
+  --sidebar-accent-foreground: #22e5ff;
+  --sidebar-border: #17253d;
+  --sidebar-ring: #22e5ff;
+
+  /* neon palette: use these for status colours anywhere in the site */
+  --neon-cyan: #00e5ff;
+  --neon-lime: #c6ff00;
+  --neon-green: #39ff88;
+  --neon-amber: #ffb938;
+  --neon-red: #ff3355;
+  --neon-violet: #b48cff;
 }
 
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.145 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.145 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.985 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.396 0.141 25.723);
-  --destructive-foreground: oklch(0.637 0.237 25.331);
-  --border: oklch(0.269 0 0);
-  --input: oklch(0.269 0 0);
-  --ring: oklch(0.439 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(0.269 0 0);
-  --sidebar-ring: oklch(0.439 0 0);
+/* soft glow behind the page */
+body {
+  background:
+    radial-gradient(1200px 600px at 15% -10%, rgba(34, 229, 255, 0.07), transparent 60%),
+    radial-gradient(900px 500px at 100% 0%, rgba(180, 140, 255, 0.05), transparent 60%),
+    var(--background);
+  color: var(--foreground);
 }
+
+/* every card gets a faint neon edge */
+[style*="var(--card)"] {
+  box-shadow: 0 0 0 1px rgba(34, 229, 255, 0.04), 0 0 18px rgba(34, 229, 255, 0.04);
+}
+
+
+/* ---- button / pill styles taken from the client's SCADA (use on any page: className="btn-neon") ---- */
+.btn-neon, .btn-danger, .btn-ghost {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 10px 20px; border-radius: 999px; border: 1px solid transparent; cursor: pointer;
+  font-weight: 800; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+}
+.btn-neon   { background: var(--neon-lime); color: #000; }
+.btn-neon:hover { filter: brightness(1.08); box-shadow: 0 0 14px rgba(198, 255, 0, 0.45); }
+.btn-danger { background: var(--neon-red); color: #fff; }
+.btn-ghost  { background: var(--secondary); color: var(--foreground); border-color: var(--border); }
+.pill-active { background: var(--neon-cyan); color: #00131a; box-shadow: 0 0 14px rgba(0, 229, 255, 0.55); }
+
+/* shared animations (used by the Process Mimic page) */
+@keyframes neon-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@keyframes neon-spin  { to { transform: rotate(360deg); } }
+@keyframes neon-flow  { to { stroke-dashoffset: -24; } }
 
 @theme inline {
   --color-background: var(--background);
@@ -122,13 +140,13 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(14, 165, 233, 0.3);
+  background: rgba(34, 229, 255, 0.3);
   border-radius: 3px;
   transition: background 0.2s ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(14, 165, 233, 0.5);
+  background: rgba(34, 229, 255, 0.55);
 }
 
 ::-webkit-scrollbar-corner {
@@ -138,13 +156,13 @@
 /* For Firefox */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(14, 165, 233, 0.3) transparent;
+  scrollbar-color: rgba(34, 229, 255, 0.3) transparent;
 }
 
 /* Optional: Hide scrollbar when not interacting */
 .scroll-container {
   scrollbar-width: thin;
-  scrollbar-color: rgba(14, 165, 233, 0.3) transparent;
+  scrollbar-color: rgba(34, 229, 255, 0.3) transparent;
 }
 
 .scroll-container::-webkit-scrollbar {
@@ -153,12 +171,12 @@
 }
 
 .scroll-container::-webkit-scrollbar-thumb {
-  background: rgba(14, 165, 233, 0.2);
+  background: rgba(34, 229, 255, 0.2);
   border-radius: 2px;
 }
 
 .scroll-container::-webkit-scrollbar-thumb:hover {
-  background: rgba(14, 165, 233, 0.4);
+  background: rgba(34, 229, 255, 0.45);
 }
 
 /* For the main content area */
@@ -167,7 +185,7 @@
   overflow-x: hidden;
   height: 100%;
   scrollbar-width: thin;
-  scrollbar-color: rgba(14, 165, 233, 0.3) transparent;
+  scrollbar-color: rgba(34, 229, 255, 0.3) transparent;
 }
 
 /* Hide scrollbar but still allow scrolling (clean UI) */
@@ -179,3 +197,15 @@
 .hide-scrollbar::-webkit-scrollbar {
   display: none; /* Chrome/Safari */
 }
+
+
+/* ============================================================
+   ORIGINAL THEME (kept for reference, not active)
+   :root  { --background:#ffffff; --foreground:oklch(0.145 0 0); --card:#ffffff; --primary:#030213;
+            --secondary:oklch(0.95 0.0058 264.53); --muted:#ececf0; --muted-foreground:#717182;
+            --accent:#e9ebef; --destructive:#d4183d; --border:rgba(0,0,0,0.1); --input-background:#f3f3f5;
+            --switch-background:#cbced4; --ring:oklch(0.708 0 0); ... }
+   .dark  { --background:oklch(0.145 0 0); --foreground:oklch(0.985 0 0); --card:oklch(0.145 0 0);
+            --primary:oklch(0.985 0 0); --secondary:oklch(0.269 0 0); --muted:oklch(0.269 0 0);
+            --muted-foreground:oklch(0.708 0 0); --border:oklch(0.269 0 0); ... }
+   ============================================================ */

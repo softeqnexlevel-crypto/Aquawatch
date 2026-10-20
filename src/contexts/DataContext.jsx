@@ -2,6 +2,7 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import { API_BASE_URL } from '../config';
+import { getActiveTenantId } from '../tenantFetch'; // also adds X-Tenant-Id to every API call
 
 const DataContext = createContext();
 
@@ -278,7 +279,7 @@ export const DataProvider = ({ children }) => {
 
     const socket = io(API_BASE_URL, {
       // Function form: the freshest token is read on every (re)connect
-      auth: (cb) => cb({ token: getToken() }),
+      auth: (cb) => cb({ token: getToken(), tenantId: Number(getActiveTenantId()) || undefined }),
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: 5,

@@ -43,23 +43,23 @@ export function Sidebar({ activePage, onNavigate, alertCount = 0 }) {
       style={{
         width: collapsed ? 56 : 220,
         background: "var(--sidebar)",
-        borderRight: "1px solid rgba(14,165,233,0.08)",
+        borderRight: "1px solid var(--border)",
       }}
     >
       {/* Logo */}
       <div
         className="flex items-center px-3 py-4 gap-2"
-        style={{ borderBottom: "1px solid rgba(14,165,233,0.08)", minHeight: 56 }}
+        style={{ borderBottom: "1px solid var(--border)", minHeight: 56 }}
       >
         <div
           className="flex items-center justify-center rounded"
-          style={{ width: 30, height: 30, background: "linear-gradient(135deg, #0ea5e9 0%, #06b6d4 100%)" }}
+          style={{ width: 30, height: 30, background: "linear-gradient(135deg, #00e5ff 0%, #c6ff00 100%)" }}
         >
           <Zap size={16} color="#020810" strokeWidth={2.5} />
         </div>
         {!collapsed && (
           <div>
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 700, color: "#0ea5e9", letterSpacing: "0.08em", lineHeight: 1 }}>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 700, color: "#00e5ff", letterSpacing: "0.08em", lineHeight: 1 }}>
               AQUASYSTEMTECH
             </div>
             <div style={{ fontSize: 9, color: "var(--muted-foreground)", letterSpacing: "0.12em", lineHeight: 1.2, marginTop: 1 }}>
@@ -105,9 +105,9 @@ export function Sidebar({ activePage, onNavigate, alertCount = 0 }) {
                     style={{
                       padding: collapsed ? "8px 0" : "7px 12px",
                       justifyContent: collapsed ? "center" : "flex-start",
-                      background: active ? "rgba(14,165,233,0.1)" : "transparent",
-                      borderLeft: active ? "2px solid #0ea5e9" : "2px solid transparent",
-                      color: active ? "#0ea5e9" : "var(--sidebar-foreground)",
+                      background: active ? "rgba(0,229,255,0.12)" : "transparent",
+                      borderLeft: active ? "2px solid #00e5ff" : "2px solid transparent",
+                      color: active ? "#00e5ff" : "var(--sidebar-foreground)",
                       opacity: active ? 1 : 0.7,
                     }}
                   >
@@ -148,7 +148,7 @@ export function Sidebar({ activePage, onNavigate, alertCount = 0 }) {
       <button
         onClick={() => setCollapsed(!collapsed)}
         className="flex items-center justify-center py-3 transition-colors"
-        style={{ borderTop: "1px solid rgba(14,165,233,0.08)", color: "var(--muted-foreground)" }}
+        style={{ borderTop: "1px solid var(--border)", color: "var(--muted-foreground)" }}
       >
         {collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
         {!collapsed && <span style={{ fontSize: 11, marginLeft: 6 }}>Collapse</span>}

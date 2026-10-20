@@ -10,8 +10,8 @@ import { TrialBanner } from "./components/TrialBanner";
 // import { AIAssistant } from "./components/ai/AIAssistant"; // ✅ ADDED — Aqua AI floating chat widget
 
 // Components
-import { Sidebar } from "./components/Sidebar";
 import { TopNav } from "./components/TopNav";
+import { BottomNav } from "./components/BottomNav";
 import { Dashboard } from "./components/Dashboard";
 import { FeedTankManagement } from "./components/BoreholeManagement";
 import { ProductionMonitoring } from "./components/ProductionMonitoring";
@@ -161,18 +161,6 @@ function DashboardLayoutInner() {
         position: "relative",
       }}
     >
-      {/* Sidebar - hidden on mobile when not open */}
-      <div style={{
-        flexShrink: 0,
-        zIndex: 50,
-      }}>
-        <Sidebar
-          activePage={currentPage}
-          onNavigate={handleNavigate}
-          alertCount={alertCount}
-        />
-      </div>
-
       {/* Main content */}
       <div style={{
         flex: 1,
@@ -192,7 +180,7 @@ function DashboardLayoutInner() {
 
         <ScrollContainer>
           <div style={{
-            padding: isMobile ? '8px' : '16px',
+            padding: isMobile ? '8px 8px 74px' : '16px 16px 78px',
             height: '100%',
             overflow: 'auto',
           }}>
@@ -200,6 +188,8 @@ function DashboardLayoutInner() {
           </div>
         </ScrollContainer>
       </div>
+
+      <BottomNav activePage={currentPage} onNavigate={handleNavigate} alertCount={alertCount} />
 
       {/* ✅ ADDED — Aqua AI floating chat widget. Rendered as a sibling of
           the Sidebar/main-content flex row (not nested inside either),

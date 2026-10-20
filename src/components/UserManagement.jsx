@@ -7,18 +7,26 @@ import { useAuth } from "../contexts/AuthContext";
 // ==================== ROLE PERMISSIONS ====================
 const ROLE_PERMISSIONS = {
   admin: [
-   "dashboard", "production", "antiscalant", "system recovery", "alerts", "tag manager", "billing", "analytics", "reports", "maintenance","filtration", "tank level", "settings", "user-management", 
+   "dashboard", "mimic", "production", "antiscalant", "system recovery", "alerts", "tag manager", "billing", "analytics", "reports", "maintenance","filtration", "tank level", "settings", "user-management", 
   ],
   operator: [
-    "dashboard", "maintenance", "reports"
+    "dashboard", "mimic", "maintenance", "reports"
   ],
   client: [
     "dashboard", "analytics"
   ],
 };
 
+// Same list and order as the client's SCADA. Tag Manager / Billing / Settings stay
+// admin-only and are not shown here (any already saved on a user are preserved).
+const PAGE_OPTIONS = [
+  ['dashboard','Dashboard'],['mimic','Mimic'],['tank level','Tanks'],['production','Production'],['antiscalant','Antiscalant'],
+  ['filtration','Filtration'],['system recovery','System Recovery'],['maintenance','Maintenance'],['analytics','Analytics'],
+  ['reports','Reports'],['alerts','Alerts'],
+];
+
 const   ALL_PAGES = [
-  "dashboard", "production", "antiscalant", "system recovery", "alerts", "tag manager", "billing", "analytics", "reports", "maintenance","filtration", "tank level", "settings", "user-management",
+  "dashboard", "mimic", "production", "antiscalant", "system recovery", "alerts", "tag manager", "billing", "analytics", "reports", "maintenance","filtration", "tank level", "settings", "user-management",
 ];
 
 const ROLE_COLORS = {
@@ -355,28 +363,22 @@ function UserDrawer({ open, onClose, onSave, initial, isEdit = false }) {
             <label style={{ display: "block", fontSize: isMobile ? 9 : 10, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 6 }}>
               Pages this user can access
             </label>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: isMobile ? "6px 12px" : "8px 16px" }}>
               {ALL_PAGES.map(page => {
                 const has = form.permissions?.includes(page);
                 return (
-                  <button
+                  <label
                     key={page}
-                    type="button"
-                    onClick={() => togglePage(page)}
-                    style={{
-                      fontSize: isMobile ? 8 : 9,
-                      fontWeight: 600,
-                      padding: "3px 8px",
-                      borderRadius: 4,
-                      textTransform: "capitalize",
-                      cursor: "pointer",
-                      background: has ? "rgba(34,197,94,0.1)" : "var(--muted)",
-                      color: has ? "#22c55e" : "var(--muted-foreground)",
-                      border: `1px solid ${has ? "rgba(34,197,94,0.3)" : "var(--border)"}`,
-                    }}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: isMobile ? 10 : 12, textTransform: "capitalize", color: has ? "var(--foreground)" : "var(--muted-foreground)" }}
                   >
-                    {has ? "✓ " : ""}{isMobile ? page.substring(0, 5) : page}
-                  </button>
+                    <input
+                      type="checkbox"
+                      checked={!!has}
+                      onChange={() => togglePage(page)}
+                      style={{ width: 15, height: 15, accentColor: "#c6ff00", cursor: "pointer" }}
+                    />
+                    {page}
+                  </label>
                 );
               })}
             </div>
@@ -387,7 +389,7 @@ function UserDrawer({ open, onClose, onSave, initial, isEdit = false }) {
         </div>
         <div style={{ padding: isMobile ? "12px 16px" : "16px 20px", borderTop: "1px solid var(--border)", display: "flex", gap: 8 }}>
           <button onClick={onClose} style={{ flex: 1, padding: isMobile ? "8px 0" : "9px 0", borderRadius: 6, border: "1px solid var(--border)", background: "var(--muted)", fontSize: isMobile ? 10 : 11, fontWeight: 600, color: "var(--muted-foreground)", cursor: "pointer" }}>Cancel</button>
-          <button onClick={handleSave} disabled={loading} style={{ flex: 2, padding: isMobile ? "8px 0" : "9px 0", borderRadius: 6, border: "none", background: loading ? "var(--muted)" : "#0ea5e9", fontSize: isMobile ? 10 : 11, fontWeight: 600, color: loading ? "var(--muted-foreground)" : "#020810", cursor: loading ? "not-allowed" : "pointer" }}>
+          <button onClick={handleSave} disabled={loading} style={{ flex: 2, padding: isMobile ? "8px 0" : "9px 0", borderRadius: 6, border: "none", background: loading ? "var(--muted)" : "#c6ff00", fontSize: isMobile ? 10 : 11, fontWeight: 800, letterSpacing: "0.06em", textTransform: "uppercase", color: loading ? "var(--muted-foreground)" : "#000", cursor: loading ? "not-allowed" : "pointer" }}>
             {loading ? 'Saving...' : 'Save User'}
           </button>
         </div>
@@ -397,6 +399,162 @@ function UserDrawer({ open, onClose, onSave, initial, isEdit = false }) {
 }
 
 // ==================== USER MANAGEMENT PAGE ====================
+// ==================== SHARED STYLES ====================
+const fld = {
+  background: "var(--input-background, #050a12)", border: "1px solid var(--border)", borderRadius: 12,
+  padding: "10px 14px", fontSize: 14, color: "var(--foreground)", outline: "none", boxSizing: "border-box",
+};
+const pill = (bg, color, extra = {}) => ({
+  background: bg, color, border: "1px solid transparent", borderRadius: 999, padding: "10px 20px", cursor: "pointer",
+  fontWeight: 800, fontSize: 12, letterSpacing: "0.08em", textTransform: "uppercase", ...extra,
+});
+
+function PagePicker({ value, onToggle, disabled }) {
+  return (
+    <>
+      <div style={{ fontSize: 12.5, color: "var(--muted-foreground)", margin: "10px 0 6px" }}>Pages</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 22px" }}>
+        {PAGE_OPTIONS.map(([key, label]) => (
+          <label key={key} style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 14, color: "var(--foreground)", cursor: disabled ? "default" : "pointer" }}>
+            <input type="checkbox" disabled={disabled} checked={value.includes(key)} onChange={() => onToggle(key)} style={{ width: 16, height: 16, colorScheme: "dark" }} />
+            {label}
+          </label>
+        ))}
+      </div>
+      <div style={{ fontSize: 12.5, color: "var(--muted-foreground)", margin: "12px 0 6px" }}>Systems</div>
+      <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 14, color: "var(--foreground)" }}>
+        <input type="checkbox" checked readOnly style={{ width: 16, height: 16, colorScheme: "dark" }} /> Reverse Osmosis
+      </label>
+    </>
+  );
+}
+
+function UserRow({ u, me, isAdmin, isMobile, busy, onChanged, onDelete, onPause }) {
+  const [email, setEmail] = useState(u.email || '');
+  const [role, setRole] = useState(u.isSuperAdmin ? 'superadmin' : u.role);
+  const [alerts, setAlerts] = useState(u.emailAlerts !== false);
+  const [perms, setPerms] = useState((u.permissions && u.permissions.length) ? u.permissions : (ROLE_PERMISSIONS[u.role] || []));
+  const [pw, setPw] = useState('');
+  const [saving, setSaving] = useState(false);
+  const isMe = u.id === me?.id;
+  const iAmSuper = !!me?.isSuperAdmin;
+  // normal admins cannot touch other admins / super admins
+  const locked = !isMe && u.role === 'admin' && !iAmSuper;
+  const paused = u.isActive === false;
+  const name = `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.email.split('@')[0];
+
+  const changeRole = (r) => { setRole(r); setPerms(ROLE_PERMISSIONS[r] || []); };
+  const toggle = (k) => setPerms(p => p.includes(k) ? p.filter(x => x !== k) : [...p, k]);
+
+  async function save() {
+    if (pw && pw.length < 8) { window.alert('Password must be at least 8 characters'); return; }
+    setSaving(true);
+    try {
+      await apiCall(`/auth/users/${u.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          email, role: role === 'superadmin' ? 'admin' : role, emailAlerts: alerts,
+          permissions: (role === 'admin' || role === 'superadmin') ? ROLE_PERMISSIONS.admin : perms,
+          ...(iAmSuper && (role === 'superadmin' || role === 'admin') ? { superAdmin: role === 'superadmin' } : {}),
+          ...(pw ? { password: pw } : {}),
+        }),
+      });
+      setPw('');
+      window.alert('Saved');
+      await onChanged();
+    } catch (e) { window.alert('Failed to save: ' + e.message); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div style={{ background: "var(--background)", border: "1px solid var(--border)", borderRadius: 16, padding: isMobile ? 12 : 14, marginBottom: 12, opacity: paused ? 0.6 : 1 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr auto 1fr auto", alignItems: "center", gap: 12 }}>
+        <div style={{ fontSize: 17, fontWeight: 800, color: "var(--foreground)" }}>
+          {name}{paused && <span style={{ marginLeft: 8, fontSize: 10, color: "#ffb938", letterSpacing: "0.1em" }}>PAUSED</span>}
+        </div>
+        <input value={email} disabled={!isAdmin || locked} onChange={e => setEmail(e.target.value)} style={{ ...fld, minWidth: isMobile ? 0 : 230 }} />
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 8, justifySelf: "center", fontSize: 15, color: "var(--muted-foreground)" }}>
+          <input type="checkbox" disabled={!isAdmin} checked={alerts} onChange={e => setAlerts(e.target.checked)} style={{ width: 16, height: 16, colorScheme: "dark" }} /> alerts
+        </label>
+        <select value={role} disabled={!isAdmin || isMe || locked} onChange={e => changeRole(e.target.value)} style={{ ...fld, minWidth: 150 }}>
+          {iAmSuper && <option value="superadmin">superadmin</option>}
+          <option value="admin" disabled={!iAmSuper && role !== 'admin'}>{iAmSuper ? 'admin' : 'admin'}</option>
+          <option value="operator">operator</option>
+          <option value="client">client</option>
+        </select>
+      </div>
+
+      {(role === 'admin' || role === 'superadmin') ? (
+        <div style={{ fontSize: 13, color: "var(--muted-foreground)", margin: "10px 0 8px" }}>
+          {role === 'superadmin' ? 'Super admins see every page and system, and are the only ones who can manage admin accounts.' : 'Admins see every page and system enabled for the tenant.'}
+        </div>
+      ) : (
+        <PagePicker value={perms} onToggle={toggle} disabled={!isAdmin || locked} />
+      )}
+
+      {isAdmin && !locked && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+          <input type="text" placeholder="New password (min 8)" value={pw} onChange={e => setPw(e.target.value)} autoComplete="new-password" style={{ ...fld, width: 225 }} />
+          <button type="button" onClick={() => setPw(generatePassword())} style={pill("var(--secondary)", "var(--foreground)", { border: "1px solid var(--border)" })}>Gen</button>
+          <div style={{ flex: 1 }} />
+          {!isMe && (
+            <button type="button" disabled={busy} onClick={onPause} style={pill("var(--secondary)", "var(--foreground)", { border: "1px solid var(--border)" })}>{paused ? 'Resume' : 'Pause'}</button>
+          )}
+          <button type="button" disabled={saving} onClick={save} style={pill("#c6ff00", "#000")}>{saving ? 'Saving…' : 'Save'}</button>
+          {!isMe && <button type="button" onClick={onDelete} style={pill("#ff3355", "#fff")}>Delete</button>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AddLogin({ isMobile, onCreated, iAmSuper }) {
+  const [email, setEmail] = useState('');
+  const [pw, setPw] = useState('');
+  const [role, setRole] = useState('client');
+  const [perms, setPerms] = useState(ROLE_PERMISSIONS.client);
+  const [busy, setBusy] = useState(false);
+
+  const changeRole = (r) => { setRole(r); setPerms(ROLE_PERMISSIONS[r] || []); };
+  const toggle = (k) => setPerms(p => p.includes(k) ? p.filter(x => x !== k) : [...p, k]);
+
+  async function create() {
+    if (!email || !email.includes('@')) { window.alert('Enter a valid email'); return; }
+    if (pw.length < 8) { window.alert('Password must be at least 8 characters'); return; }
+    setBusy(true);
+    try {
+      await apiCall('/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({ firstName: email.split('@')[0], lastName: '', email, password: pw, role: role === 'superadmin' ? 'admin' : role, superAdmin: role === 'superadmin', permissions: (role === 'admin' || role === 'superadmin') ? ROLE_PERMISSIONS.admin : perms }),
+      });
+      setEmail(''); setPw('');
+      window.alert('Login created');
+      await onCreated();
+    } catch (e) { window.alert('Failed to create login: ' + e.message); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div style={{ background: "var(--background)", border: "1px solid var(--border)", borderRadius: 16, padding: isMobile ? 12 : 14 }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <input placeholder="email (used to log in)" value={email} onChange={e => setEmail(e.target.value)} style={{ ...fld, flex: 1, minWidth: 200 }} />
+        <input type="text" placeholder="password (min 8)" value={pw} onChange={e => setPw(e.target.value)} autoComplete="new-password" style={{ ...fld, width: 225 }} />
+        <button type="button" onClick={() => setPw(generatePassword())} style={pill("var(--secondary)", "var(--foreground)", { border: "1px solid var(--border)" })}>Gen</button>
+        <select value={role} onChange={e => changeRole(e.target.value)} style={{ ...fld, minWidth: 150 }}>
+          {iAmSuper && <option value="superadmin">superadmin</option>}
+          {iAmSuper && <option value="admin">admin</option>}
+          <option value="operator">operator</option>
+          <option value="client">client</option>
+        </select>
+      </div>
+      {(role === 'admin' || role === 'superadmin')
+        ? <div style={{ fontSize: 13, color: "var(--muted-foreground)", margin: "10px 0 8px" }}>{role === 'superadmin' ? 'Super admins see every page and system, and can manage admin accounts.' : 'Admins see every page and system enabled for the tenant.'}</div>
+        : <PagePicker value={perms} onToggle={toggle} />}
+      <button type="button" disabled={busy} onClick={create} style={pill("#c6ff00", "#000", { marginTop: 14 })}>{busy ? 'Creating…' : 'Create login'}</button>
+    </div>
+  );
+}
+
 export function UserManagement() {
   const { user: me } = useAuth();
   const isAdmin = me?.role === "admin";
@@ -520,374 +678,36 @@ export function UserManagement() {
     setDrawerOpen(true);
   }
 
-  // ==================== STATS ====================
-  const stats = {
-    total: users.length,
-    active: users.filter(u => u.isActive === true).length,
-    paused: users.filter(u => u.isActive === false).length,
-    admins: users.filter(u => u.role === "admin").length,
-    operators: users.filter(u => u.role === "operator").length,
-    clients: users.filter(u => u.role === "client").length,
-  };
-
   // ==================== RENDER ====================
   return (
-    <div className="flex flex-col gap-3 sm:gap-4 p-2 sm:p-4 overflow-auto h-full">
-      {/* Read-only banner */}
+    <div className="flex flex-col gap-3 p-2 sm:p-4 overflow-auto h-full" style={{ paddingBottom: 40 }}>
       {!isAdmin && (
         <div className="flex items-center gap-2 rounded p-2 sm:p-2.5" style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}>
-          <Lock size={isMobile ? 11 : 13} style={{ color: "#ef4444" }} />
-          <span style={{ fontSize: isMobile ? 10 : 11, color: "#ef4444" }}>
-            {isMobile ? "Read-only mode" : "You're viewing in read-only mode. Only Admins can manage users."}
-          </span>
+          <Lock size={13} style={{ color: "#ef4444" }} />
+          <span style={{ fontSize: 11, color: "#ef4444" }}>You're viewing in read-only mode. Only Admins can manage users.</span>
         </div>
       )}
+      {error && <div style={{ fontSize: 12, color: "#ff3355" }}>{error}</div>}
 
-      {/* KPIs - Responsive */}
-      <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(6, 1fr)" }}>
-        {[
-          { label: isMobile ? "Total" : "Total Users", value: stats.total, color: "#0ea5e9" },
-          { label: "Active", value: stats.active, color: "#22c55e" },
-          { label: "Paused", value: stats.paused, color: "#f59e0b" },
-          { label: "Admins", value: stats.admins, color: "#0ea5e9" },
-          { label: isMobile ? "Ops" : "Operators", value: stats.operators, color: "#22c55e" },
-          { label: "Clients", value: stats.clients, color: "#a78bfa" },
-        ].map(c => (
-          <div key={c.label} className="rounded p-2 sm:p-3 flex gap-2 sm:gap-3 items-start" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-            <div className="rounded p-1 sm:p-1.5 mt-0.5" style={{ background: `${c.color}15` }}>
-              <User size={isMobile ? 12 : 14} style={{ color: c.color }} />
-            </div>
-            <div>
-              <div style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{c.label}</div>
-              <div style={{ fontFamily: "var(--font-mono)", fontSize: isMobile ? 18 : 22, fontWeight: 700, color: c.color, lineHeight: 1.2 }}>{c.value}</div>
-            </div>
-          </div>
-        ))}
-      </div>
+      <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 20, padding: isMobile ? 12 : 18, maxWidth: 1600, width: "100%", margin: "0 auto" }}>
+        <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.18em", color: "var(--muted-foreground)", marginBottom: 14, textTransform: "uppercase" }}>
+          Users &amp; Logins{(me?.clientName || me?.tenantName) ? <> &middot; <span style={{ letterSpacing: "0.1em" }}>{me.clientName || me.tenantName}</span></> : null}
+        </div>
 
-      {/* Tab bar - Responsive */}
-      <div className="flex items-center gap-1" style={{ borderBottom: "1px solid var(--border)" }}>
-        {[
-          { id: "users", label: isMobile ? "Users" : "Users" },
-          { id: "permissions", label: isMobile ? "Roles" : "Role Permissions" }
-        ].map(t => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            style={{
-              padding: isMobile ? "6px 10px" : "8px 14px",
-              fontSize: isMobile ? 10 : 11,
-              fontWeight: tab === t.id ? 600 : 400,
-              color: tab === t.id ? "#0ea5e9" : "var(--muted-foreground)",
-              borderBottom: tab === t.id ? "2px solid #0ea5e9" : "2px solid transparent",
-              marginBottom: -1,
-              background: "none",
-              border: "none",
-              cursor: "pointer"
-            }}
-          >
-            {t.label}
-          </button>
+        {loading ? (
+          <div style={{ fontSize: 12, color: "var(--muted-foreground)", padding: 16 }}>Loading users…</div>
+        ) : users.map(u => (
+          <UserRow key={u.id + ':' + (u.updatedAt || '')} u={u} me={me} isAdmin={isAdmin} isMobile={isMobile}
+            busy={busyId === u.id} onChanged={fetchUsers} onDelete={() => handleDelete(u.id)} onPause={() => handlePauseToggle(u)} />
         ))}
-        <div className="flex-1" />
+
         {isAdmin && (
-          <button
-            onClick={openNew}
-            className="flex items-center gap-1 px-2 sm:px-3 py-1 sm:py-1.5 rounded mb-1"
-            style={{ background: "#0ea5e9", color: "#020810", fontSize: isMobile ? 10 : 11, fontWeight: 600, border: "none", cursor: "pointer" }}
-          >
-            <Plus size={isMobile ? 10 : 12} /> {isMobile ? "Add" : "New User"}
-          </button>
+          <>
+            <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.18em", color: "var(--muted-foreground)", margin: "18px 0 8px", textTransform: "uppercase" }}>Add Login</div>
+            <AddLogin isMobile={isMobile} onCreated={fetchUsers} iAmSuper={!!me?.isSuperAdmin} />
+          </>
         )}
       </div>
-
-      {tab === "users" ? (
-        <div className="rounded overflow-hidden" style={{ border: "1px solid var(--border)" }}>
-          {loading ? (
-            <div style={{ padding: "40px", textAlign: "center", color: "var(--muted-foreground)" }}>
-              <RefreshCw size={24} className="animate-spin" style={{ margin: "0 auto 12px" }} />
-              <p>Loading users...</p>
-            </div>
-          ) : error ? (
-            <div style={{ padding: "40px", textAlign: "center", color: "#ef4444" }}>
-              <p>{error}</p>
-              <button onClick={fetchUsers} style={{ marginTop: 8, padding: "6px 16px", background: "var(--secondary)", border: "1px solid var(--border)", borderRadius: 4, cursor: "pointer" }}>
-                Retry
-              </button>
-            </div>
-          ) : (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: isMobile ? 500 : 'auto' }}>
-                <thead>
-                  <tr style={{ background: "var(--muted)" }}>
-                    {isMobile ? (
-                      <>
-                        <th style={{ padding: "6px 8px", textAlign: "left", fontSize: 8, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.08em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>User</th>
-                        <th style={{ padding: "6px 8px", textAlign: "left", fontSize: 8, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.08em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>Role</th>
-                        <th style={{ padding: "6px 8px", textAlign: "center", fontSize: 8, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.08em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>Status</th>
-                        {isAdmin && <th style={{ padding: "6px 8px", textAlign: "center", fontSize: 8, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.08em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>Actions</th>}
-                      </>
-                    ) : (
-                      <>
-                        <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.08em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>User</th>
-                        <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.08em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>Email</th>
-                        <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.08em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>Role</th>
-                        <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.08em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>Pages</th>
-                        <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.08em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>Joined</th>
-                        <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.08em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>Status</th>
-                        {isAdmin && <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 9, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.08em", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>Actions</th>}
-                      </>
-                    )}
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.map((u, i) => {
-                    const rc = ROLE_COLORS[u.role] || ROLE_COLORS.operator;
-                    // Show actual effective pages (custom permissions if set,
-                    // otherwise role defaults) — matches roles.middleware.js
-                    // and AuthContext's canAccess() so the count shown here
-                    // isn't misleading when an admin has customized access.
-                    const pages = (u.permissions && u.permissions.length > 0)
-                      ? u.permissions
-                      : (ROLE_PERMISSIONS[u.role] || []);
-
-                    if (isMobile) {
-                      return (
-                        <tr key={u.id} style={{ background: i % 2 === 0 ? "var(--card)" : "var(--muted)", opacity: u.isActive === false ? 0.6 : 1 }}>
-                          <td style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <div style={{ width: 22, height: 22, borderRadius: "50%", background: `${rc.color}20`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                                <User size={10} style={{ color: rc.color }} />
-                              </div>
-                              <div>
-                                <div style={{ fontSize: 10, fontWeight: 500, color: "var(--foreground)" }}>
-                                  {u.firstName} {u.lastName}
-                                </div>
-                                <div style={{ fontSize: 8, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>{u.email}</div>
-                              </div>
-                            </div>
-                          </td>
-                          <td style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)" }}>
-                            <span style={{ fontSize: 8, fontWeight: 700, color: rc.color, background: rc.bg, borderRadius: 4, padding: "1px 6px", textTransform: "uppercase" }}>{u.role}</span>
-                          </td>
-                          <td style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)", textAlign: "center" }}>
-                            <span
-                                title={u.isActive === false ? "Paused: cannot sign in" : "Active"}
-                                style={{
-                                  fontSize: 8, fontWeight: 600,
-                                  color: u.isActive === false ? "#f59e0b" : "#22c55e",
-                                  background: u.isActive === false ? "rgba(245,158,11,0.1)" : "rgba(34,197,94,0.1)",
-                                  border: `1px solid ${u.isActive === false ? "rgba(245,158,11,0.3)" : "rgba(34,197,94,0.25)"}`,
-                                  borderRadius: 4, padding: "1px 6px"
-                                }}
-                              >
-                                {u.isActive === false ? "PAUSED" : "ACTIVE"}
-                              </span>
-                          </td>
-                          {isAdmin && (
-                            <td style={{ padding: "6px 8px", borderBottom: "1px solid var(--border)", textAlign: "center" }}>
-                              <div style={{ display: 'flex', gap: 4, justifyContent: 'center' }}>
-                                <button
-                                  onClick={() => openEdit(u)}
-                                  style={{
-                                    padding: "2px 4px",
-                                    borderRadius: 4,
-                                    fontSize: 8,
-                                    color: "#0ea5e9",
-                                    background: "rgba(14,165,233,0.1)",
-                                    border: "1px solid rgba(14,165,233,0.2)",
-                                    cursor: "pointer"
-                                  }}
-                                >
-                                  <Edit2 size={8} />
-                                </button>
-                                {u.id !== me?.id && (
-                                  <button
-                                    onClick={() => handlePauseToggle(u)}
-                                    disabled={busyId === u.id}
-                                    title={u.isActive === false ? "Resume" : "Pause"}
-                                    style={{
-                                      padding: "2px 4px", borderRadius: 4, fontSize: 8, cursor: "pointer",
-                                      color: u.isActive === false ? "#22c55e" : "#f59e0b",
-                                      background: u.isActive === false ? "rgba(34,197,94,0.1)" : "rgba(245,158,11,0.1)",
-                                      border: `1px solid ${u.isActive === false ? "rgba(34,197,94,0.25)" : "rgba(245,158,11,0.3)"}`
-                                    }}
-                                  >
-                                    {u.isActive === false ? <Play size={8} /> : <Pause size={8} />}
-                                  </button>
-                                )}
-                                {u.id !== me?.id && (
-                                  <button
-                                    onClick={() => handleDelete(u.id)}
-                                    style={{
-                                      padding: "2px 4px",
-                                      borderRadius: 4,
-                                      fontSize: 8,
-                                      color: "#ef4444",
-                                      background: "rgba(239,68,68,0.08)",
-                                      border: "1px solid rgba(239,68,68,0.2)",
-                                      cursor: "pointer"
-                                    }}
-                                  >
-                                    <Trash2 size={8} />
-                                  </button>
-                                )}
-                              </div>
-                            </td>
-                          )}
-                        </tr>
-                      );
-                    }
-
-                    return (
-                      <tr key={u.id} style={{ background: i % 2 === 0 ? "var(--card)" : "var(--muted)", opacity: u.isActive === false ? 0.6 : 1 }}>
-                        <td style={{ padding: "10px 12px", borderBottom: "1px solid var(--border)" }}>
-                          <div className="flex items-center gap-2">
-                            <div style={{ width: 26, height: 26, borderRadius: "50%", background: `${rc.color}20`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                              <User size={12} style={{ color: rc.color }} />
-                            </div>
-                            <span style={{ fontSize: 12, fontWeight: 500, color: "var(--foreground)" }}>
-                              {u.firstName} {u.lastName}
-                            </span>
-                          </div>
-                        </td>
-                        <td style={{ padding: "10px 12px", fontSize: 11, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)", borderBottom: "1px solid var(--border)" }}>{u.email}</td>
-                        <td style={{ padding: "10px 12px", borderBottom: "1px solid var(--border)" }}>
-                          <span style={{ fontSize: 9, fontWeight: 700, color: rc.color, background: rc.bg, borderRadius: 4, padding: "2px 8px", textTransform: "uppercase" }}>{u.role}</span>
-                        </td>
-                        <td style={{ padding: "10px 12px", borderBottom: "1px solid var(--border)" }}>
-                          <div className="flex items-center gap-1">
-                            <Eye size={11} style={{ color: "var(--muted-foreground)" }} />
-                            <span style={{ fontSize: 10, color: "var(--muted-foreground)" }}>{pages.length} pages</span>
-                          </div>
-                        </td>
-                        <td style={{ padding: "10px 12px", fontSize: 10, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)", borderBottom: "1px solid var(--border)" }}>
-                          {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : '—'}
-                        </td>
-                        <td style={{ padding: "10px 12px", borderBottom: "1px solid var(--border)" }}>
-                          <span
-                                title={u.isActive === false ? "Paused: cannot sign in" : "Active"}
-                                style={{
-                                  fontSize: 9, fontWeight: 600,
-                                  color: u.isActive === false ? "#f59e0b" : "#22c55e",
-                                  background: u.isActive === false ? "rgba(245,158,11,0.1)" : "rgba(34,197,94,0.1)",
-                                  border: `1px solid ${u.isActive === false ? "rgba(245,158,11,0.3)" : "rgba(34,197,94,0.25)"}`,
-                                  borderRadius: 4, padding: "2px 8px"
-                                }}
-                              >
-                                {u.isActive === false ? "PAUSED" : "ACTIVE"}
-                              </span>
-                        </td>
-                        {isAdmin && (
-                          <td style={{ padding: "10px 12px", borderBottom: "1px solid var(--border)" }}>
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                onClick={() => openEdit(u)}
-                                style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: 4,
-                                  padding: "4px 8px",
-                                  borderRadius: 5,
-                                  fontSize: 10,
-                                  color: "#0ea5e9",
-                                  background: "rgba(14,165,233,0.1)",
-                                  border: "1px solid rgba(14,165,233,0.2)",
-                                  cursor: "pointer"
-                                }}
-                              >
-                                <Edit2 size={10} />Edit
-                              </button>
-                              {u.id !== me?.id && (
-                                <button
-                                  onClick={() => handlePauseToggle(u)}
-                                  disabled={busyId === u.id}
-                                  style={{
-                                    display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", borderRadius: 5, fontSize: 10, cursor: "pointer",
-                                    color: u.isActive === false ? "#22c55e" : "#f59e0b",
-                                    background: u.isActive === false ? "rgba(34,197,94,0.1)" : "rgba(245,158,11,0.1)",
-                                    border: `1px solid ${u.isActive === false ? "rgba(34,197,94,0.25)" : "rgba(245,158,11,0.3)"}`,
-                                    opacity: busyId === u.id ? 0.5 : 1
-                                  }}
-                                >
-                                  {u.isActive === false ? <><Play size={10} />Resume</> : <><Pause size={10} />Pause</>}
-                                </button>
-                              )}
-                              {u.id !== me?.id && (
-                                <button
-                                  onClick={() => handleDelete(u.id)}
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: 4,
-                                    padding: "4px 8px",
-                                    borderRadius: 5,
-                                    fontSize: 10,
-                                    color: "#ef4444",
-                                    background: "rgba(239,68,68,0.08)",
-                                    border: "1px solid rgba(239,68,68,0.2)",
-                                    cursor: "pointer"
-                                  }}
-                                >
-                                  <Trash2 size={10} />
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        )}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      ) : (
-        <div className="flex flex-col gap-3">
-          <div className="rounded p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-            <div style={{ fontSize: isMobile ? 10 : 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>
-              {isMobile ? "Role Permissions" : "Role → Page Access Matrix"}
-            </div>
-            <PermissionsMatrix isMobile={isMobile} />
-          </div>
-          <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: isMobile ? "1fr" : "repeat(3,1fr)" }}>
-            {["admin", "operator", "client"].map(role => {
-              const rc = ROLE_COLORS[role];
-              return (
-                <div key={role} className="rounded p-2 sm:p-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-                    <Shield size={isMobile ? 11 : 13} style={{ color: rc.color }} />
-                    <span style={{ fontSize: isMobile ? 10 : 11, fontWeight: 600, color: rc.color, textTransform: "uppercase", letterSpacing: "0.08em" }}>{role}</span>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    {ALL_PAGES.map(page => {
-                      const has = ROLE_PERMISSIONS[role]?.includes(page);
-                      return (
-                        <div key={page} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          {has ? <CheckCircle size={isMobile ? 10 : 11} style={{ color: rc.color }} /> : <X size={isMobile ? 10 : 11} style={{ color: "var(--muted-foreground)", opacity: 0.3 }} />}
-                          <span style={{ fontSize: isMobile ? 10 : 11, color: has ? "var(--foreground)" : "var(--muted-foreground)", textTransform: "capitalize", opacity: has ? 1 : 0.4 }}>{page}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Drawer */}
-      {isAdmin && (
-        <UserDrawer
-          open={drawerOpen}
-          onClose={() => setDrawerOpen(false)}
-          onSave={handleSave}
-          initial={editing}
-          isEdit={!!editing?.id}
-        />
-      )}
     </div>
   );
 }

@@ -381,7 +381,15 @@ export function SystemRecovery() {
   );
 
   return (
-    <div className="flex flex-col gap-3 sm:gap-4 p-2 sm:p-4 overflow-auto h-full" style={{ scrollbarWidth: "none" }}>
+    <div className="h-full overflow-auto systemrecovery-scroll">
+    <style>{`
+      .systemrecovery-scroll { scrollbar-width: thin; scrollbar-color: #1f3a5f transparent; }
+      .systemrecovery-scroll::-webkit-scrollbar { width: 8px; }
+      .systemrecovery-scroll::-webkit-scrollbar-track { background: transparent; }
+      .systemrecovery-scroll::-webkit-scrollbar-thumb { background: #1f3a5f; border-radius: 8px; }
+      .systemrecovery-scroll::-webkit-scrollbar-thumb:hover { background: #00e5ff; }
+    `}</style>
+    <div className="flex flex-col gap-3 sm:gap-4 p-2 sm:p-4" style={{ maxWidth: 1600, width: '100%', margin: '0 auto' }}>
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
@@ -569,6 +577,7 @@ export function SystemRecovery() {
           </div>
         )}
       </ChartPanel>
+      </div>
     </div>
   );
 }

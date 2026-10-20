@@ -5,7 +5,7 @@ import {
   CheckCircle, Gauge, Zap, Filter, TrendingUp, TrendingDown,
   Minus, RefreshCw, Power, AlertCircle, Settings,
   Wrench, LayoutDashboard, LineChart as LineChartIcon,
-  SlidersHorizontal, Bell, Clock
+  SlidersHorizontal, Bell, Clock, Network
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
@@ -32,6 +32,12 @@ import {
 } from './dashboardComponents/instrumentUtils';
 import { rawToPercent } from './dashboardComponents/feedTankCalibration';
 import { useDailySummary } from './dashboardComponents/useDailySummary';
+import { MimicEditor } from './MimicEditor';
+
+// ── Page layout: maximum content width (px) on wide screens ──────────────────
+// Used for the tab pills and the page content so they line up.
+// Use 1100 for tighter, 1400 for looser.
+const CONTENT_MAX_WIDTH = 1600;
 
 // ── Flush tank calibration (tag RO5-FlushTank): 0 = 0%, 126 = 100% ──
 const FLUSH_RAW_EMPTY = 0;
@@ -48,21 +54,71 @@ function flushRawToPercent(raw) {
 export { isActive };
 
 export const COLORS = {
-  primary: '#0ea5e9',
-  secondary: '#06b6d4',
-  success: '#22c55e',
-  warning: '#f59e0b',
-  danger: '#ef4444',
-  purple: '#a78bfa',
-  indigo: '#8b5cf6',
-  pink: '#ec4899',
-  orange: '#f97316',
-  yellow: '#eab308',
-  dark: '#0f172a',
-  card: '#1e293b',
-  border: '#334155',
-  muted: '#64748b',
+  primary: '#00e5ff',      // neon cyan (active tabs, highlights)
+  secondary: '#00b8d4',
+  success: '#39ff88',
+  warning: '#ffb938',
+  danger: '#ff3355',
+  purple: '#b48cff',
+  indigo: '#8c7bff',
+  pink: '#ff4fa3',
+  orange: '#ff8a3d',
+  yellow: '#ffe14d',
+  lime: '#c6ff00',         // main action buttons
+  dark: '#04060b',
+  card: '#0b1526',
+  border: '#17253d',
+  muted: '#6b7d99',
 };
+
+
+// ── Daily run hours: ignore the gateway's brief "0" ──────────────────────────
+// After a "PLC Data Lost" -> reconnect (and sometimes at random) the MQTT feed publishes a 0 for
+// RO5-SystemDailyRunHrs before the real counter value arrives, so the card flashed "0h 00m".
+// A drop is only believed if the lower value STILL stands after 15 minutes (a real reset at ~22:00).
+const RUN_DROP_CONFIRM_MS = 15 * 60 * 1000;
+// Slow tags (e.g. lifetime run hours) are only published every so often. Keep the last value seen
+// (in this browser) and, if there is none, ask the server for the latest stored reading.
+function useLastKnown(tag, live) {
+  const key = `lastknown:${tag}`;
+  const [val, setVal] = React.useState(() => {
+    try { const n = parseFloat(localStorage.getItem(key)); return Number.isFinite(n) ? n : null; } catch { return null; }
+  });
+  React.useEffect(() => {
+    if (Number.isFinite(live)) {
+      setVal(live);
+      try { localStorage.setItem(key, String(live)); } catch { /* ignore */ }
+    }
+  }, [live, key]);
+  React.useEffect(() => {
+    if (val !== null || Number.isFinite(live)) return;
+    let dead = false;
+    (async () => {
+      try {
+        const token = localStorage.getItem('accessToken');
+        const res = await fetch(`${API_BASE_URL}/api/last-reading/${tag}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+        if (!res.ok) return;
+        const row = await res.json();
+        const last = row && row.value !== null ? Number(row.value) : NaN;
+        if (!dead && Number.isFinite(last)) setVal(last);
+      } catch { /* ignore */ }
+    })();
+    return () => { dead = true; };
+  }, [tag, val, live]);
+  return Number.isFinite(live) ? live : val;
+}
+
+function useStableRunHours(live, seed) {
+  const st = React.useRef({ max: null, since: null });
+  const s = st.current;
+  // No live reading yet (the PLC only publishes this counter about once an hour): use the server's saved value.
+  if (live === null || !Number.isFinite(live)) return Number.isFinite(seed) ? seed : null;
+  if (s.max === null) s.max = Number.isFinite(seed) && seed > live ? seed : live;   // start from the server's saved value
+  if (live >= s.max) { s.max = live; s.since = null; return live; }
+  if (s.since === null) s.since = Date.now();
+  if (Date.now() - s.since >= RUN_DROP_CONFIRM_MS) { s.max = live; s.since = null; return live; }
+  return s.max;                                                                      // still inside the grace window
+}
 
 const safeFormat = (value, decimals = 1, fallback = '0.0') => {
   if (value === undefined || value === null) return fallback;
@@ -273,13 +329,13 @@ const RANGE_OPTIONS = [
 // ── Live Instruments layout ────────────────────────────────────────────────
 // Both the pressure dial and the tank bar share ONE visual height so their
 // tops and bottoms line up. Change these numbers to resize both together.
-const GAUGE_VISUAL_DESKTOP = 140;
+const GAUGE_VISUAL_DESKTOP = 170;
 const GAUGE_VISUAL_MOBILE = 90;
 
 // Shared body style so both instrument cards position their gauge identically.
 // Fixed height (not minHeight) so neither card can grow taller than the other.
 const INSTRUMENT_BODY_STYLE = (isMobile) => ({
-  height: isMobile ? 190 : 260,
+  height: isMobile ? 190 : 230,
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
@@ -331,20 +387,20 @@ function CircularGauge({ value, size = 88, strokeWidth = 7, color, label, status
 }
 
 function TopStatusCard({ icon: Icon, iconBg, iconColor, title, value, valueColor, sub, subColor, gauge, action }) {
-  const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
-
+  const accent = valueColor || iconColor || COLORS.primary;
   return (
-    <div className="rounded-lg p-3 sm:p-4 flex items-center justify-between gap-2 sm:gap-3" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-      <div style={{ display: "flex", gap: isMobile ? 8 : 12, alignItems: "flex-start" }}>
+    <div className="p-3 sm:p-4 flex items-center justify-between gap-2 sm:gap-3"
+      style={{ background: "var(--card)", border: "1px solid var(--border)", borderLeft: `4px solid ${accent}`, borderRadius: 16, boxShadow: `0 0 18px ${accent}14` }}>
+      <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
         {Icon && (
-          <div style={{ width: isMobile ? 26 : 30, height: isMobile ? 26 : 30, borderRadius: 8, background: iconBg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <Icon size={isMobile ? 12 : 14} color={iconColor} />
+          <div style={{ width: 36, height: 36, borderRadius: 10, background: iconBg || `${accent}22`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <Icon size={17} color={iconColor || accent} />
           </div>
         )}
         <div>
-          <div style={{ fontSize: isMobile ? 7.5 : 8.5, color: "var(--muted-foreground)", marginBottom: 2 }}>{title}</div>
-          <div style={{ fontFamily: "var(--font-mono)", fontSize: isMobile ? 13 : 15, fontWeight: 700, color: valueColor || "var(--foreground)", lineHeight: 1.1 }}>{value}</div>
-          {sub && <div style={{ fontSize: isMobile ? 7.5 : 8.5, color: subColor || "var(--muted-foreground)", marginTop: 2 }}>{sub}</div>}
+          <div style={{ fontSize: 10, color: "var(--muted-foreground)", fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", marginBottom: 3 }}>{title}</div>
+          <div style={{ fontFamily: "var(--font-mono)", fontSize: 20, fontWeight: 800, color: accent, lineHeight: 1.1 }}>{value}</div>
+          {sub && <div style={{ fontSize: 10, color: subColor || "var(--muted-foreground)", marginTop: 3 }}>{sub}</div>}
           {action}
         </div>
       </div>
@@ -354,40 +410,48 @@ function TopStatusCard({ icon: Icon, iconBg, iconColor, title, value, valueColor
 }
 
 function KPICardV2({ label, value, unit, icon: Icon, color, trend, statusText, statusOk }) {
-  const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
+  const accent = color || COLORS.primary;
+  const empty = value === undefined || value === null || value === '' || value === '--' || value === 'NaN';
   const TrendIcon = !trend ? null : trend.direction === "up" ? TrendingUp : trend.direction === "down" ? TrendingDown : Minus;
   const trendColor = !trend ? "var(--muted-foreground)" : trend.direction === "up" ? COLORS.success : trend.direction === "down" ? COLORS.danger : "var(--muted-foreground)";
 
   return (
-    <div className="rounded-lg p-2 sm:p-3 flex flex-col gap-1 sm:gap-2" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-      <div className="flex items-center justify-between">
-        <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 4 : 6 }}>
-          {Icon && <Icon size={isMobile ? 10 : 13} style={{ color }} />}
-          <span style={{ fontSize: isMobile ? 8 : 10.5, color: "var(--muted-foreground)", fontWeight: 600 }}>{label}</span>
-        </div>
-        {unit && <span style={{ fontSize: isMobile ? 7 : 9, color: "var(--muted-foreground)", background: "var(--secondary)", padding: "1px 5px", borderRadius: 4 }}>{unit}</span>}
-      </div>
-      <div style={{ fontFamily: "var(--font-mono)", fontSize: isMobile ? 18 : 24, fontWeight: 700, color, lineHeight: 1 }}>{value}</div>
-      <div className="flex items-center justify-between">
-        <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-          {trend ? (
-            <>
-              <TrendIcon size={isMobile ? 9 : 11} style={{ color: trendColor }} />
-              <span style={{ fontSize: isMobile ? 8 : 10, color: trendColor, fontFamily: "var(--font-mono)" }}>
-                {`${trend.pct > 0 ? '+' : ''}${trend.pct.toFixed(1)}%`}
-              </span>
-            </>
-          ) : (
-            <span style={{ fontSize: isMobile ? 8 : 10, color: "var(--muted-foreground)", fontFamily: "var(--font-mono)" }}>—</span>
-          )}
-        </div>
-        {statusText && (
-          <div style={{ display: "flex", alignItems: "center", gap: 2, fontSize: isMobile ? 8 : 10, color: statusOk ? COLORS.success : COLORS.warning }}>
-            {statusOk ? <CheckCircle size={isMobile ? 8 : 10} /> : <AlertCircle size={isMobile ? 8 : 10} />}
-            {statusText}
+    <div className="p-3 sm:p-4 flex flex-col gap-2"
+      style={{ background: "var(--card)", border: "1px solid var(--border)", borderLeft: `4px solid ${accent}`, borderRadius: 16, boxShadow: `0 0 18px ${accent}14` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+        {Icon && (
+          <div style={{ width: 30, height: 30, borderRadius: 9, background: `${accent}22`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <Icon size={15} style={{ color: accent }} />
           </div>
         )}
+        <span style={{ fontSize: 10, color: "var(--muted-foreground)", fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", lineHeight: 1.2, minWidth: 0 }}>{label}</span>
       </div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: "clamp(20px, 5.5vw, 26px)", fontWeight: 800, color: empty ? "var(--muted-foreground)" : accent, lineHeight: 1, textShadow: empty ? 'none' : `0 0 12px ${accent}55` }}>
+          {empty ? '—' : value}
+        </span>
+        {unit && !empty && <span style={{ fontSize: 11, color: "var(--muted-foreground)", fontWeight: 600 }}>{unit}</span>}
+      </div>
+      {(trend || statusText) && (
+        <div className="flex items-center justify-between">
+          <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+            {trend && (
+              <>
+                <TrendIcon size={11} style={{ color: trendColor }} />
+                <span style={{ fontSize: 10, color: trendColor, fontFamily: "var(--font-mono)" }}>
+                  {`${trend.pct > 0 ? '+' : ''}${trend.pct.toFixed(1)}%`}
+                </span>
+              </>
+            )}
+          </div>
+          {statusText && (
+            <div style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 10, color: statusOk ? COLORS.success : COLORS.warning }}>
+              {statusOk ? <CheckCircle size={10} /> : <AlertCircle size={10} />}
+              {statusText}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -531,7 +595,9 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const dailyProduction = productionSummary?.permeate?.daily ?? 0;
 
   const { activeAlerts: activeAlarmsList, counts: alertCounts } = useAlerts();
-  const { isExpired } = useAuth();
+  const { isExpired, user: authUser, canAccess } = useAuth();
+  // Mimic tab: admins always; everyone else only if the admin ticked "mimic" for them.
+  const canSeeMimic = authUser?.role === 'admin' || (typeof canAccess === 'function' ? canAccess('mimic') : true);
 
   const handleRefresh = () => {
     refresh();
@@ -549,10 +615,10 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const filterDeltaP = getNumber('RO5-MediaFilterDeltaP');
 
   // PLC-reported lifetime system run-hours
-  const systemRunHrs = getNumber('RO5-SystemRunhrs');
-  const hasRunHrs =
-    sensorData['RO5-SystemRunhrs']?.value !== undefined &&
-    sensorData['RO5-SystemRunhrs']?.value !== null;
+  const liveRunHrs = (sensorData['RO5-SystemRunhrs']?.value !== undefined && sensorData['RO5-SystemRunhrs']?.value !== null)
+    ? getNumber('RO5-SystemRunhrs') : null;
+  const systemRunHrs = useLastKnown('RO5-SystemRunhrs', liveRunHrs);
+  const hasRunHrs = Number.isFinite(systemRunHrs);
 
   // Saved daily record (run hours 24hrs ago) from the backend
   const dailySummary = useDailySummary();
@@ -561,10 +627,11 @@ export function Dashboard({ onViewAllAlerts } = {}) {
 
   // PLC-reported run-hours for today
   const systemDailyRunHrsRaw = getValue('RO5-SystemDailyRunHrs');
-  const systemDailyRunHrs = getNumber('RO5-SystemDailyRunHrs');
-  const hasDailyRunHrs =
-    sensorData['RO5-SystemDailyRunHrs']?.value !== undefined &&
-    sensorData['RO5-SystemDailyRunHrs']?.value !== null;
+  const liveDailyRunHrs = (sensorData['RO5-SystemDailyRunHrs']?.value !== undefined && sensorData['RO5-SystemDailyRunHrs']?.value !== null)
+    ? getNumber('RO5-SystemDailyRunHrs') : null;
+  const lastDailyRunHrs = useLastKnown('RO5-SystemDailyRunHrs', liveDailyRunHrs);
+  const systemDailyRunHrs = useStableRunHours(lastDailyRunHrs, null);
+  const hasDailyRunHrs = systemDailyRunHrs !== null;
 
   const systemOperation = getValue('RO5-SystemOperation');
   const systemMode = getValue('RO5-SystemMode');
@@ -876,9 +943,9 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           iconBg="rgba(14,165,233,0.12)"
           iconColor={COLORS.primary}
           title="Daily Run Hours"
-          value={hasDailyRunHrs && hasFreshData ? formatHoursFromHours(systemDailyRunHrs) : '--'}
-          valueColor={hasDailyRunHrs && hasFreshData ? COLORS.primary : COLORS.muted}
-          //sub={(hasDailyRunHrs && hasFreshData ? `${safeFormat(systemDailyRunHrs, 1)} hrs today` : 'No data') + (has24hAgo ? ` · 24h ago: ${formatHoursFromHours(runHrs24hAgo)}` : '')}
+          value={hasDailyRunHrs ? formatHoursFromHours(systemDailyRunHrs) : '--'}
+          valueColor={hasDailyRunHrs ? COLORS.primary : COLORS.muted}
+          //sub={(hasDailyRunHrs ? `${safeFormat(systemDailyRunHrs, 1)} hrs today` : 'No data') + (has24hAgo ? ` · 24h ago: ${formatHoursFromHours(runHrs24hAgo)}` : '')}
           subColor="var(--muted-foreground)"
         />
       </div>
@@ -922,7 +989,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
       {/* KPI grid */}
       <div>
         <SectionTitle>Key Performance Indicators</SectionTitle>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1.5 sm:gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 sm:gap-3">
           <KPICardV2 label="Feed Flow" unit="m³/h" icon={Droplets} value={safeFormat(feedFlow, 1)}
             color={feedFlow > 40 ? COLORS.success : feedFlow > 0 ? COLORS.warning : COLORS.danger}
             trend={getTrend(history, 'RO5-FEEDFlow')} statusText={feedFlow > 40 ? "Normal" : feedFlow > 0 ? "Check" : "No flow"} statusOk={feedFlow > 40} />
@@ -953,7 +1020,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           <KPICardV2 label="Daily Production" unit="m³" icon={TrendingUp} value={dailyProdDisplay}
             color={dailyProduction > 0 ? COLORS.success : COLORS.primary}
             trend={getTrend(history, 'RO5-Permeateflow', 60 * 60 * 1000)} statusText={summaryLoading ? "Loading" : `${safeFormat(permeateFlow, 1)} m³/h now`} statusOk={true} />
-          <KPICardV2 label="Feed Tank Raw" unit="" icon={Droplets} value={hasRawTankReading ? feedTankLevelRawNum.toFixed(2) : '--'}
+          <KPICardV2 label="Feed Tank Raw" unit="" icon={Droplets} value={hasRawTankReading ? feedTankLevelRawNum.toFixed(3) : '--'}
             color={COLORS.muted}
             trend={getTrend(history, 'RO5-FeedTankLevelRaw')}
             statusText={hasRawTankReading ? `≈ ${calibratedFeedTankPct.toFixed(1)}%` : 'No reading'}
@@ -969,9 +1036,9 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             iconBg="rgba(14,165,233,0.12)"
             iconColor={COLORS.primary}
             title="Service Run Hours"
-            value={hasRunHrs && hasFreshData ? formatHoursFromHours(systemRunHrs) : '--'}
-            valueColor={hasRunHrs && hasFreshData ? COLORS.primary : COLORS.muted}
-            //sub={hasRunHrs && hasFreshData ? `${safeFormat(systemRunHrs, 1)} hrs in service` : 'No data'}
+            value={hasRunHrs ? formatHoursFromHours(systemRunHrs) : '--'}
+            valueColor={hasRunHrs ? COLORS.primary : COLORS.muted}
+            //sub={hasRunHrs ? `${safeFormat(systemRunHrs, 1)} hrs in service` : 'No data'}
             subColor="var(--muted-foreground)"
           />
           {/* System run 24hrs ago: saved daily record from the backend */}
@@ -1315,73 +1382,73 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           </div>
         </div>
 
-        {/* Tab Navigation */}
-        <div className="flex overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
-          <button
-            onClick={() => setActiveTab('overview')}
-            style={{
-              flex: 1, padding: '10px 16px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-              background: activeTab === 'overview' ? 'var(--card)' : 'transparent',
-              color: activeTab === 'overview' ? COLORS.primary : 'var(--muted-foreground)',
-              border: 'none', borderBottom: activeTab === 'overview' ? `2px solid ${COLORS.primary}` : '2px solid transparent',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, whiteSpace: 'nowrap'
-            }}
-          >
-            <LayoutDashboard size={14} /> Overview
-          </button>
-          <button
-            onClick={() => setActiveTab('system')}
-            style={{
-              flex: 1, padding: '10px 16px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-              background: activeTab === 'system' ? 'var(--card)' : 'transparent',
-              color: activeTab === 'system' ? COLORS.primary : 'var(--muted-foreground)',
-              border: 'none', borderBottom: activeTab === 'system' ? `2px solid ${COLORS.primary}` : '2px solid transparent',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, whiteSpace: 'nowrap'
-            }}
-          >
-            <SlidersHorizontal size={14} /> System & Alerts
-            {activeAlarmsList.length > 0 && (
-              <span style={{ background: COLORS.danger, color: 'white', borderRadius: 10, padding: '1px 6px', fontSize: 9, fontWeight: 700 }}>
-                {activeAlarmsList.length}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab('analytics')}
-            style={{
-              flex: 1, padding: '10px 16px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
-              background: activeTab === 'analytics' ? 'var(--card)' : 'transparent',
-              color: activeTab === 'analytics' ? COLORS.primary : 'var(--muted-foreground)',
-              border: 'none', borderBottom: activeTab === 'analytics' ? `2px solid ${COLORS.primary}` : '2px solid transparent',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, whiteSpace: 'nowrap'
-            }}
-          >
-            <LineChartIcon size={14} /> Trends & Analytics
-          </button>
+        {/* Tab Navigation - pill style */}
+        <div
+          className="flex overflow-x-auto"
+          style={{
+            scrollbarWidth: 'none',
+            gap: 8,
+            padding: '10px 12px',
+            maxWidth: CONTENT_MAX_WIDTH,
+            width: '100%',
+            margin: '0 auto',
+          }}
+        >
+          {[
+            { id: 'overview', label: 'Overview', Icon: LayoutDashboard },
+            { id: 'system', label: 'System & Alerts', Icon: SlidersHorizontal, badge: activeAlarmsList.length },
+            { id: 'analytics', label: 'Trends & Analytics', Icon: LineChartIcon },
+            ...(canSeeMimic ? [{ id: 'mimic', label: 'Mimic', Icon: Network }] : []),
+          ].map(({ id, label, Icon, badge }) => {
+            const on = activeTab === id;
+            return (
+              <button
+                key={id}
+                onClick={() => setActiveTab(id)}
+                style={{
+                  flex: '1 1 0', minWidth: 'max-content', padding: '9px 18px', fontSize: 12, fontWeight: 800,
+                  letterSpacing: '0.04em', cursor: 'pointer', borderRadius: 999, whiteSpace: 'nowrap',
+                  background: on ? COLORS.primary : 'var(--secondary)',
+                  color: on ? '#00131a' : 'var(--muted-foreground)',
+                  border: `1px solid ${on ? COLORS.primary : 'var(--border)'}`,
+                  boxShadow: on ? '0 0 14px rgba(0,229,255,0.55)' : 'none',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                }}
+              >
+                <Icon size={14} /> {label}
+                {badge > 0 && (
+                  <span style={{ background: COLORS.danger, color: 'white', borderRadius: 10, padding: '1px 6px', fontSize: 9, fontWeight: 700 }}>{badge}</span>
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
 
       {/* Scrollable Content Area */}
       <div className="flex-1 overflow-auto p-3 sm:p-4">
-        {activeTab === 'overview' && renderOverviewTab()}
-        {activeTab === 'system' && renderSystemTab()}
-        {activeTab === 'analytics' && renderAnalyticsTab()}
+        <div style={{ maxWidth: CONTENT_MAX_WIDTH, width: '100%', margin: '0 auto' }}>
+          {activeTab === 'overview' && renderOverviewTab()}
+          {activeTab === 'system' && renderSystemTab()}
+          {activeTab === 'analytics' && renderAnalyticsTab()}
+          {activeTab === 'mimic' && canSeeMimic && <MimicEditor />}
 
-        {/* Footer */}
-        <div style={{
-          textAlign: "center",
-          padding: "12px 0",
-          borderTop: "1px solid var(--border)",
-          display: "flex",
-          justifyContent: "space-between",
-          fontSize: 10,
-          color: "var(--muted-foreground)",
-          flexWrap: "wrap",
-          gap: 8,
-          marginTop: 24
-        }}>
-          <span>RO System v2.0</span>
-          <span>© {new Date().getFullYear()} All rights reserved</span>
+          {/* Footer */}
+          <div style={{
+            textAlign: "center",
+            padding: "12px 0",
+            borderTop: "1px solid var(--border)",
+            display: "flex",
+            justifyContent: "space-between",
+            fontSize: 10,
+            color: "var(--muted-foreground)",
+            flexWrap: "wrap",
+            gap: 8,
+            marginTop: 24
+          }}>
+            <span>RO System v4.0</span>
+            <span>© {new Date().getFullYear()} All rights reserved</span>
+          </div>
         </div>
       </div>
 
