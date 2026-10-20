@@ -1398,7 +1398,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             { id: 'overview', label: 'Overview', Icon: LayoutDashboard },
             { id: 'system', label: 'System & Alerts', Icon: SlidersHorizontal, badge: activeAlarmsList.length },
             { id: 'analytics', label: 'Trends & Analytics', Icon: LineChartIcon },
-            ...(canSeeMimic ? [{ id: 'mimic', label: 'Mimic', Icon: Network }] : []),
+            ...(canSeeMimic ? [{ id: 'Visualization', label: 'Visualization', Icon: Network }] : []),
           ].map(({ id, label, Icon, badge }) => {
             const on = activeTab === id;
             return (
@@ -1431,7 +1431,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           {activeTab === 'overview' && renderOverviewTab()}
           {activeTab === 'system' && renderSystemTab()}
           {activeTab === 'analytics' && renderAnalyticsTab()}
-          {activeTab === 'mimic' && canSeeMimic && <MimicEditor />}
+          {activeTab === 'Visualization' && canSeeMimic && <MimicEditor />}
 
           {/* Footer */}
           <div style={{
