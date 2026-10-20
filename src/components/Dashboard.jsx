@@ -37,7 +37,7 @@ import { MimicEditor } from './MimicEditor';
 // ── Page layout: maximum content width (px) on wide screens ──────────────────
 // Used for the tab pills and the page content so they line up.
 // Use 1100 for tighter, 1400 for looser.
-const CONTENT_MAX_WIDTH = 1080;
+const CONTENT_MAX_WIDTH = 1400;
 
 // ── Flush tank calibration (tag RO5-FlushTank): 0 = 0%, 126 = 100% ──
 const FLUSH_RAW_EMPTY = 0;

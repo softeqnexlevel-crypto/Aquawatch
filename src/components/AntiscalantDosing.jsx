@@ -266,7 +266,7 @@ export function AntiscalantDosing() {
       .antiscalant-scroll::-webkit-scrollbar-thumb:hover { background: #00e5ff; }
     `}</style>
 
-    <div className="flex flex-col gap-3 sm:gap-4 p-2 sm:p-4" style={{ maxWidth: 1080, width: '100%', margin: '0 auto' }}>
+    <div className="flex flex-col gap-3 sm:gap-4 p-2 sm:p-4" style={{ maxWidth: 1400, width: '100%', margin: '0 auto' }}>
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">

@@ -248,7 +248,7 @@ export function FiltrationMonitoring() {
 
   return (
     <div className="flex flex-col gap-3 sm:gap-4 p-2 sm:p-4 overflow-auto h-full">
-       <div style={{ maxWidth: 1080, width: "100%", margin: "0 auto", display: "flex", flexDirection: "column", gap: 14 }}>
+       <div style={{ maxWidth: 1400, width: "100%", margin: "0 auto", display: "flex", flexDirection: "column", gap: 14 }}>
       {/* Header */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
         <div>

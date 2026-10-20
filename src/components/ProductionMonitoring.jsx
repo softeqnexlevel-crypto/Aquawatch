@@ -126,7 +126,7 @@ export function ProductionMonitoring() {
 
   return (
     <div className="overflow-auto h-full" style={{ padding: isMobile ? "4px 4px 24px" : "4px 4px 40px" }}>
-      <div style={{ maxWidth: 1080, width: "100%", margin: "0 auto", display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ maxWidth: 1400, width: "100%", margin: "0 auto", display: "flex", flexDirection: "column", gap: 14 }}>
         {/* period pills */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: isMobile ? 6 : 12 }}>
           {PERIODS.map(([id, label]) => {
