@@ -453,7 +453,8 @@ const TankCard = ({ tank, onOpen, isMobile }) => {
               marginTop: 10,
               display: "flex",
               justifyContent: "space-between",
-              gap: 8,
+              flexWrap: "wrap",
+              gap: 4,
               fontSize: 12,
               color: LABEL,
             }}
@@ -558,7 +559,7 @@ const TankDetail = ({ tank, lastUpdate, isMobile, onClose }) => {
         position: "absolute",
         inset: 0,
         overflowY: "auto",
-        padding: "16px 16px 32px",
+        padding: "16px 16px calc(32px + env(safe-area-inset-bottom, 0px))",
         background: "var(--background, #04070d)",
       }
     : {
@@ -852,8 +853,16 @@ export function FeedTankManagement() {
   const [selectedId, setSelectedId] = useState(null);
   const [isMobile, setIsMobile] = useState(false);
 
+  // Phone detection: a narrow screen OR a touch-first device. The second test also catches a
+  // phone that is showing the browser's "Desktop site" (it reports a wide screen but is still a phone).
   useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < 768);
+    const check = () => {
+      const narrow = window.innerWidth < 768;
+      const touchFirst =
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(pointer: coarse)").matches;
+      setIsMobile(narrow || touchFirst);
+    };
     check();
     window.addEventListener("resize", check);
     return () => window.removeEventListener("resize", check);
@@ -1027,16 +1036,16 @@ export function FeedTankManagement() {
       className="h-full overflow-auto"
       style={{
         padding: isMobile ? 12 : 20,
+        // room for the bottom navigation bar on phones
+        paddingBottom: isMobile ? "calc(28px + env(safe-area-inset-bottom, 0px))" : 20,
         scrollbarWidth: "none",
         display: "flex",
         flexDirection: "column",
       }}
     >
-      {/* Fills the screen height; the chart card takes all leftover space.
-          If the screen is too short, the page scrolls instead of squashing. */}
       <div
         style={{
-          flex: "1 0 auto",
+          flex: "0 0 auto",
           width: "100%",
           maxWidth: 1400,
           margin: "0 auto",
@@ -1060,9 +1069,9 @@ export function FeedTankManagement() {
                 onClick={() => setFilterStatus(f)}
                 aria-pressed={active}
                 style={{
-                  padding: "7px 16px",
+                  padding: isMobile ? "9px 18px" : "7px 16px",
                   borderRadius: 999,
-                  fontSize: 12,
+                  fontSize: isMobile ? 13 : 12,
                   fontWeight: 700,
                   cursor: "pointer",
                   border: active
@@ -1110,13 +1119,12 @@ export function FeedTankManagement() {
         )}
 
         {/* ---------- Water used chart ---------- */}
+        {/* A fixed chart height, so the chart can never stretch to fill a tall screen */}
         {filteredTanks.length > 0 && (
           <div
             style={{
-              flex: 1,
               display: "flex",
               flexDirection: "column",
-              minHeight: isMobile ? 260 : 240,
               padding: isMobile ? 12 : 16,
               borderRadius: 16,
               background: CARD_BG,
@@ -1125,7 +1133,7 @@ export function FeedTankManagement() {
           >
             <div
               style={{
-                fontSize: 11,
+                fontSize: isMobile ? 12 : 11,
                 fontWeight: 700,
                 letterSpacing: "0.1em",
                 textTransform: "uppercase",
@@ -1136,52 +1144,50 @@ export function FeedTankManagement() {
               Water used · last 24h
             </div>
 
-            <div style={{ position: "relative", flex: 1, minHeight: isMobile ? 180 : 160 }}>
-            <div style={{ position: "absolute", inset: 0 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={chartData}
-                margin={{ top: 28, right: isMobile ? 8 : 24, left: isMobile ? 8 : 24, bottom: 0 }}
-                barCategoryGap="30%"
-              >
-                <XAxis
-                  dataKey="id"
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fontSize: 14, fill: "#64748b" }}
-                />
-                {/* Minimum scale of 1 m³ so a tiny use (e.g. 0.1) does not fill the chart */}
-                <YAxis
-                  hide
-                  domain={[0, (dataMax) => Math.max(dataMax * 1.25, 1)]}
-                />
-                <Bar
-                  dataKey="used"
-                  radius={[8, 8, 0, 0]}
-                  minPointSize={2}
-                  barSize={isMobile ? 56 : 90}
-                  isAnimationActive={false}
+            <div style={{ width: "100%", height: isMobile ? 240 : 300 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={chartData}
+                  margin={{ top: 28, right: isMobile ? 8 : 24, left: isMobile ? 8 : 24, bottom: 0 }}
+                  barCategoryGap="30%"
                 >
-                  {chartData.map((d) => (
-                    <Cell
-                      key={d.id}
-                      fill={CYAN}
-                      style={{ filter: `drop-shadow(0 0 8px ${CYAN}99)` }}
-                    />
-                  ))}
-                  <LabelList
-                    dataKey="used"
-                    position="top"
-                    formatter={(v) => `${Number(v).toFixed(1)} m³`}
-                    style={{ fill: "#fff", fontSize: isMobile ? 12 : 14 }}
+                  <XAxis
+                    dataKey="id"
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fontSize: isMobile ? 13 : 14, fill: "#64748b" }}
                   />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-            </div>
+                  {/* Minimum scale of 1 m³ so a tiny use (e.g. 0.1) does not fill the chart */}
+                  <YAxis
+                    hide
+                    domain={[0, (dataMax) => Math.max(dataMax * 1.25, 1)]}
+                  />
+                  <Bar
+                    dataKey="used"
+                    radius={[8, 8, 0, 0]}
+                    minPointSize={2}
+                    barSize={isMobile ? 56 : 90}
+                    isAnimationActive={false}
+                  >
+                    {chartData.map((d) => (
+                      <Cell
+                        key={d.id}
+                        fill={CYAN}
+                        style={{ filter: `drop-shadow(0 0 8px ${CYAN}99)` }}
+                      />
+                    ))}
+                    <LabelList
+                      dataKey="used"
+                      position="top"
+                      formatter={(v) => `${Number(v).toFixed(1)} m³`}
+                      style={{ fill: "#fff", fontSize: isMobile ? 12 : 14 }}
+                    />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
             </div>
 
-            <div style={{ marginTop: 8, fontSize: 12, color: LABEL }}>
+            <div style={{ marginTop: 8, fontSize: isMobile ? 11 : 12, color: LABEL }}>
               {methodNote}
               {spanHours < 23.5 &&
                 ` · based on the last ${spanHours.toFixed(1)}h of data available`}

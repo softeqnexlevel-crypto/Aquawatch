@@ -7,7 +7,7 @@ import { useData } from "../contexts/DataContext";
 import { format, subDays, subMonths, startOfMonth, endOfMonth } from 'date-fns';
 
 // ===================== STATUS BADGE =====================
-const StatusBadge = ({ status }) => {
+const StatusBadge = ({ status, large }) => {
   const cfg = {
     "Completed": { bg: "rgba(34,197,94,0.1)", color: "#22c55e" },
     "In Progress": { bg: "rgba(14,165,233,0.1)", color: "#0ea5e9" },
@@ -21,10 +21,11 @@ const StatusBadge = ({ status }) => {
       className="rounded px-1.5 py-0.5" 
       style={{ 
         background: cfg.bg, 
-        fontSize: 9, 
+        fontSize: large ? 10 : 9, 
         fontWeight: 600, 
         color: cfg.color, 
-        letterSpacing: "0.06em" 
+        letterSpacing: "0.06em",
+        whiteSpace: "nowrap"
       }}
     >
       {status.toUpperCase()}
@@ -33,7 +34,7 @@ const StatusBadge = ({ status }) => {
 };
 
 // ===================== PRIORITY BADGE =====================
-const PriorityBadge = ({ priority }) => {
+const PriorityBadge = ({ priority, large }) => {
   const color = { 
     Critical: "#ef4444", 
     High: "#f97316", 
@@ -41,7 +42,7 @@ const PriorityBadge = ({ priority }) => {
     Low: "#22c55e" 
   }[priority] || "#4d7a9e";
   
-  return <span style={{ fontSize: 9, color, fontWeight: 600 }}>{priority}</span>;
+  return <span style={{ fontSize: large ? 11 : 9, color, fontWeight: 600 }}>{priority}</span>;
 };
 
 // ===================== TOOLTIP =====================
@@ -97,9 +98,14 @@ export function MaintenanceManagement() {
     return days;
   }, [firstDayIndex, daysInMonth]);
 
-  // Mobile detection
+  // Phone detection: a narrow screen OR a touch-first device. The second test also catches a
+  // phone that is showing the "Desktop site" (which reports a wide screen but is still a phone).
   useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    const checkMobile = () => {
+      const narrow = window.innerWidth < 768;
+      const touchFirst = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+      setIsMobile(narrow || touchFirst);
+    };
     checkMobile();
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
@@ -227,6 +233,7 @@ export function MaintenanceManagement() {
   const overdue = maintenanceWorkOrders.filter(w => w.status === "Overdue").length;
   const completed = maintenanceWorkOrders.filter(w => w.status === "Completed").length;
   const scheduled = maintenanceWorkOrders.filter(w => w.status === "Scheduled" || w.status === "In Progress").length;
+  const systemHealth = Math.round(100 - (overdue / (open + 1)) * 20);
 
   // ===================== FILTER WORK ORDERS =====================
   const filteredOrders = useMemo(() => {
@@ -235,14 +242,16 @@ export function MaintenanceManagement() {
   }, [maintenanceWorkOrders, filterStatus]);
 
   // ===================== GENERATE MAINTENANCE HOURS =====================
+  // The base values are fixed per month (not random), so the chart no longer jumps every time a
+  // live sensor value changes. The current month is adjusted by the live conditions.
   const maintenanceHoursMonthly = useMemo(() => {
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'];
     const currentMonthIndex = new Date().getMonth();
     
     return months.map((month, i) => {
-      const corrective = Math.floor(8 + (i * 1.5) + Math.random() * 4);
-      const preventive = Math.floor(10 + (i * 0.8) + Math.random() * 3);
-      const inspection = Math.floor(4 + Math.random() * 3);
+      const corrective = Math.floor(8 + (i * 1.5) + ((i * 7 + 3) % 4));
+      const preventive = Math.floor(10 + (i * 0.8) + ((i * 5 + 2) % 3));
+      const inspection = Math.floor(4 + ((i * 3 + 1) % 3));
       
       if (i === currentMonthIndex) {
         const totalIssues = (stage1Delta > 0.5 ? 1 : 0) + (stage2Delta > 0.5 ? 1 : 0) + (filterDeltaP > 0.3 ? 1 : 0);
@@ -259,11 +268,15 @@ export function MaintenanceManagement() {
   }, [stage1Delta, stage2Delta, filterDeltaP, roPressure, recovery]);
 
   // ===================== GENERATE CALENDAR EVENTS =====================
+  // Each open work order is placed on its real due date (when it falls in the month shown),
+  // instead of a random day that changed on every refresh.
   const maintenanceDays = useMemo(() => {
     const events = {};
     maintenanceWorkOrders.forEach(order => {
       if (order.status === "Completed") return;
-      const day = Math.floor(Math.random() * 28) + 1;
+      const due = new Date(`${order.dueDate}T00:00:00`);
+      if (due.getFullYear() !== currentYear || due.getMonth() + 1 !== currentMonth) return;
+      const day = due.getDate();
       const color = order.priority === "Critical" ? "#ef4444" :
                     order.priority === "High" ? "#f97316" :
                     order.priority === "Medium" ? "#eab308" : "#22c55e";
@@ -275,7 +288,7 @@ export function MaintenanceManagement() {
       });
     });
     return events;
-  }, [maintenanceWorkOrders]);
+  }, [maintenanceWorkOrders, currentYear, currentMonth]);
 
   // ===================== NEW WORK ORDER STATE =====================
   const [newWO, setNewWO] = useState({
@@ -301,8 +314,38 @@ export function MaintenanceManagement() {
 
   const statusFilters = ['All', 'Scheduled', 'In Progress', 'Overdue', 'Completed', 'Pending'];
 
+  // Shared look for the drawer form fields. 16px text on phones also stops iOS from zooming in on focus.
+  const fieldStyle = (extra = {}) => ({
+    width: "100%",
+    background: "var(--muted)",
+    border: "1px solid var(--border)",
+    borderRadius: isMobile ? 8 : 4,
+    padding: isMobile ? "11px 12px" : "8px 12px",
+    fontSize: isMobile ? 16 : 12,
+    color: "var(--foreground)",
+    outline: "none",
+    ...extra,
+  });
+  const labelStyle = {
+    fontSize: isMobile ? 11 : 10,
+    color: "var(--muted-foreground)",
+    fontWeight: 600,
+    textTransform: "uppercase",
+    letterSpacing: "0.06em",
+    display: "block",
+    marginBottom: 4,
+  };
+
+  const kpis = [
+    { label: "Open Work Orders", value: open, icon: Wrench, color: "#0ea5e9" },
+    { label: "Scheduled", value: scheduled, icon: Calendar, color: "#a78bfa" },
+    { label: "Overdue", value: overdue, icon: AlertTriangle, color: "#ef4444" },
+    { label: "Completed", value: completed, icon: CheckCircle, color: "#22c55e" },
+    { label: "System Health", value: `${systemHealth}%`, icon: Activity, color: overdue > 2 ? "#ef4444" : "#22c55e" },
+  ];
+
   return (
-    <div className="antiscalant-scroll h-full overflow-auto flex flex-col">
+    <div className="antiscalant-scroll h-full overflow-auto">
       <style>{`
         .antiscalant-scroll {
           scrollbar-width: thin;
@@ -314,61 +357,63 @@ export function MaintenanceManagement() {
         .antiscalant-scroll::-webkit-scrollbar-track { background: transparent; }
         .antiscalant-scroll::-webkit-scrollbar-thumb { background: #1f3a5f; border-radius: 8px; }
         .antiscalant-scroll::-webkit-scrollbar-thumb:hover { background: #00e5ff; }
+        /* status chips scroll sideways on phones, without a visible scrollbar */
+        .maint-chips { scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+        .maint-chips::-webkit-scrollbar { display: none; }
       `}</style>
 
-      <div className="flex flex-col flex-1 gap-3 sm:gap-4 p-2 sm:p-4" style={{ maxWidth: 1400, width: '100%', margin: '0 auto' }}>
+      <div
+        className="flex flex-col gap-3 sm:gap-4 p-2 sm:p-4"
+        style={{
+          maxWidth: 1400,
+          width: '100%',
+          margin: '0 auto',
+          // room for the bottom navigation bar on phones
+          ...(isMobile ? { paddingBottom: 'calc(24px + env(safe-area-inset-bottom, 0px))' } : {}),
+        }}
+      >
         
         {/* Header */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
           <div>
-            <h2 style={{ fontSize: isMobile ? 14 : 16, fontWeight: 700, color: "var(--foreground)" }}>
+            <h2 style={{ fontSize: isMobile ? 18 : 16, fontWeight: 700, color: "var(--foreground)" }}>
               Maintenance Management
             </h2>
-            <p style={{ fontSize: isMobile ? 10 : 11, color: "var(--muted-foreground)", marginTop: 2 }}>
+            <p style={{ fontSize: isMobile ? 12 : 11, color: "var(--muted-foreground)", marginTop: 2 }}>
               Real-time maintenance tracking • Last updated: {lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--'}
             </p>
           </div>
           <button
             onClick={() => setShowNewDrawer(true)}
-            className="flex items-center gap-1 px-3 sm:px-4 py-1.5 sm:py-2 rounded transition-colors hover:bg-cyan-600 w-full sm:w-auto justify-center"
-            style={{ background: "#0ea5e9", color: "#020810", fontSize: isMobile ? 11 : 12, fontWeight: 600 }}
+            className="flex items-center gap-1 px-3 sm:px-4 py-2 rounded transition-colors hover:bg-cyan-600 w-full sm:w-auto justify-center"
+            style={{ background: "#0ea5e9", color: "#020810", fontSize: isMobile ? 13 : 12, fontWeight: 600, minHeight: isMobile ? 42 : undefined }}
           >
-            <Plus size={isMobile ? 14 : 16} /> New Work Order
+            <Plus size={isMobile ? 16 : 16} /> New Work Order
           </button>
         </div>
 
-        {/* KPI Cards */}
+        {/* KPI Cards - 2 columns on phones (all 5 shown) */}
         <div className="grid gap-2 sm:gap-3" style={{ gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(5, 1fr)" }}>
-          {[
-            { label: "Open Work Orders", value: open, icon: Wrench, color: "#0ea5e9" },
-            { label: "Scheduled", value: scheduled, icon: Calendar, color: "#a78bfa" },
-            { label: "Overdue", value: overdue, icon: AlertTriangle, color: "#ef4444" },
-            { label: "Completed", value: completed, icon: CheckCircle, color: "#22c55e" },
-            { label: "System Health", value: `${Math.round(100 - (overdue / (open + 1)) * 20)}%`, icon: Activity, color: overdue > 2 ? "#ef4444" : "#22c55e" },
-          ].filter((_, idx) => isMobile ? idx < 4 : true).map(c => (
-            <div key={c.label} className="rounded p-2 sm:p-3 flex gap-2 sm:gap-3 items-start" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-              <div className="rounded p-1 sm:p-1.5 mt-0.5" style={{ background: `${c.color}15` }}>
-                <c.icon size={isMobile ? 12 : 14} style={{ color: c.color }} />
+          {kpis.map((c, idx) => (
+            <div
+              key={c.label}
+              className="rounded p-3 flex gap-2 sm:gap-3 items-start"
+              style={{
+                background: "var(--card)",
+                border: "1px solid var(--border)",
+                // on a 2-column phone grid the 5th card spans the full width
+                ...(isMobile && idx === kpis.length - 1 ? { gridColumn: "1 / -1" } : {}),
+              }}
+            >
+              <div className="rounded p-1.5 mt-0.5" style={{ background: `${c.color}15` }}>
+                <c.icon size={isMobile ? 16 : 14} style={{ color: c.color }} />
               </div>
               <div>
-                <div style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{c.label}</div>
-                <div style={{ fontFamily: "var(--font-mono)", fontSize: isMobile ? 16 : 20, fontWeight: 700, color: c.color, lineHeight: 2.0 }}>{c.value}</div>
+                <div style={{ fontSize: isMobile ? 10 : 9, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{c.label}</div>
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: isMobile ? 22 : 20, fontWeight: 700, color: c.color, lineHeight: isMobile ? 1.3 : 2.0 }}>{c.value}</div>
               </div>
             </div>
           ))}
-          {isMobile && (
-            <div key="health" className="rounded p-2 sm:p-3 flex gap-2 sm:gap-3 items-start" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-              <div className="rounded p-1 sm:p-1.5 mt-0.5" style={{ background: `${overdue > 2 ? "#ef4444" : "#22c55e"}15` }}>
-                <Activity size={isMobile ? 12 : 14} style={{ color: overdue > 2 ? "#ef4444" : "#22c55e" }} />
-              </div>
-              <div>
-                <div style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.06em" }}>System Health</div>
-                <div style={{ fontFamily: "var(--font-mono)", fontSize: isMobile ? 16 : 20, fontWeight: 700, color: overdue > 2 ? "#ef4444" : "#22c55e", lineHeight: 2.0 }}>
-                  {Math.round(100 - (overdue / (open + 1)) * 20)}%
-                </div>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Tab Bar */}
@@ -380,83 +425,116 @@ export function MaintenanceManagement() {
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className="px-2 sm:px-3 py-1.5 sm:py-2 transition-colors"
+              className="px-3 py-2 transition-colors"
               style={{
-                fontSize: isMobile ? 10 : 11,
+                fontSize: isMobile ? 13 : 11,
                 fontWeight: tab === t.id ? 600 : 400,
                 color: tab === t.id ? "#0ea5e9" : "var(--muted-foreground)",
                 borderBottom: tab === t.id ? "2px solid #0ea5e9" : "2px solid transparent",
                 marginBottom: -1,
+                minHeight: isMobile ? 42 : undefined,
               }}
             >
-              {isMobile && t.id === "workorders" ? "Orders" : t.label}
+              {t.label}
             </button>
           ))}
 
-          <div className="flex-1" />
-          
-          {/* Status Filter */}
-          <div className="flex items-center gap-0.5 sm:gap-1 flex-wrap">
-            <Filter size={isMobile ? 10 : 12} style={{ color: "var(--muted-foreground)" }} />
-            {statusFilters.map(status => (
-              <button
-                key={status}
-                onClick={() => setFilterStatus(status)}
-                style={{
-                  padding: isMobile ? '1px 5px' : '2px 8px',
-                  borderRadius: 10,
-                  fontSize: isMobile ? 7 : 8,
-                  fontWeight: filterStatus === status ? 600 : 400,
-                  background: filterStatus === status ? '#0ea5e9' : 'transparent',
-                  color: filterStatus === status ? 'white' : 'var(--muted-foreground)',
-                  border: '1px solid var(--border)',
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap'
-                }}
-              >
-                {isMobile ? (status === 'All' ? 'All' : status.charAt(0)) : status}
-              </button>
-            ))}
-          </div>
+          {/* Status filter: on desktop it sits at the right of the tab bar */}
+          {!isMobile && tab === "workorders" && (
+            <>
+              <div className="flex-1" />
+              <div className="flex items-center gap-1 flex-wrap">
+                <Filter size={12} style={{ color: "var(--muted-foreground)" }} />
+                {statusFilters.map(status => (
+                  <button
+                    key={status}
+                    onClick={() => setFilterStatus(status)}
+                    style={{
+                      padding: '2px 8px',
+                      borderRadius: 10,
+                      fontSize: 8,
+                      fontWeight: filterStatus === status ? 600 : 400,
+                      background: filterStatus === status ? '#0ea5e9' : 'transparent',
+                      color: filterStatus === status ? 'white' : 'var(--muted-foreground)',
+                      border: '1px solid var(--border)',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
+                    {status}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
         </div>
 
+        {/* Status filter on phones: its own row, scrolls sideways, full names */}
+        {isMobile && tab === "workorders" && (
+          <div className="flex items-center gap-2" style={{ minWidth: 0 }}>
+            <Filter size={14} style={{ color: "var(--muted-foreground)", flexShrink: 0 }} />
+            <div className="maint-chips" style={{ display: 'flex', gap: 6, flex: 1, minWidth: 0, overflowX: 'auto', paddingBottom: 2 }}>
+              {statusFilters.map(status => (
+                <button
+                  key={status}
+                  onClick={() => setFilterStatus(status)}
+                  style={{
+                    padding: '6px 14px',
+                    borderRadius: 14,
+                    fontSize: 12,
+                    fontWeight: filterStatus === status ? 600 : 400,
+                    background: filterStatus === status ? '#0ea5e9' : 'var(--secondary)',
+                    color: filterStatus === status ? 'white' : 'var(--muted-foreground)',
+                    border: '1px solid var(--border)',
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                    flexShrink: 0,
+                  }}
+                >
+                  {status}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Main Content */}
-        <div className="flex-1 flex flex-col min-h-0">
+        <div className="flex flex-col gap-3 sm:gap-4">
           {tab === "workorders" ? (
             <>
-              {/* Work Orders Table - Now stretches smoothly with scrolling */}
-              <div className="rounded flex-1 flex flex-col min-h-0 overflow-hidden mb-3 sm:mb-4" style={{ border: "1px solid var(--border)", background: "var(--card)" }}>
+              {/* Work Orders: only as tall as the rows need (no big empty box); long lists scroll inside */}
+              <div className="rounded overflow-hidden" style={{ border: "1px solid var(--border)", background: "var(--card)" }}>
                 {isMobile ? (
-                  <div className="flex flex-col gap-2 p-2 overflow-y-auto antiscalant-scroll">
+                  <div className="flex flex-col gap-2 p-2">
                     {filteredOrders.length > 0 ? (
                       filteredOrders.map((w) => (
                         <div key={w.id} className="rounded p-3" style={{ background: "var(--muted)", border: "1px solid var(--border)" }}>
-                          <div className="flex items-center justify-between mb-1">
-                            <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "#0ea5e9", fontWeight: 600 }}>{w.id}</span>
-                            <StatusBadge status={w.status} />
+                          <div className="flex items-center justify-between mb-1 gap-2">
+                            <span style={{ fontSize: 12, fontFamily: "var(--font-mono)", color: "#0ea5e9", fontWeight: 600 }}>{w.id}</span>
+                            <StatusBadge status={w.status} large />
                           </div>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>{w.equipment}</div>
-                          <div style={{ fontSize: 10, color: "var(--muted-foreground)" }}>Asset: {w.assetId} • {w.type}</div>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--foreground)" }}>{w.equipment}</div>
+                          <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 1 }}>Asset: {w.assetId} • {w.type}</div>
                           <div className="flex items-center justify-between mt-2">
-                            <span style={{ fontSize: 10, color: "var(--muted-foreground)" }}>{w.technician}</span>
-                            <PriorityBadge priority={w.priority} />
+                            <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>{w.technician}</span>
+                            <PriorityBadge priority={w.priority} large />
                           </div>
-                          <div style={{ fontSize: 9, color: w.status === "Overdue" ? "#ef4444" : "var(--muted-foreground)", fontFamily: "var(--font-mono)", marginTop: 2 }}>
+                          <div style={{ fontSize: 11, color: w.status === "Overdue" ? "#ef4444" : "var(--muted-foreground)", fontFamily: "var(--font-mono)", marginTop: 4 }}>
                             Due: {w.dueDate}
                           </div>
                           {w.reason && (
-                            <div style={{ fontSize: 9, color: "var(--muted-foreground)", marginTop: 2 }}>{w.reason}</div>
+                            <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 3 }}>{w.reason}</div>
                           )}
                         </div>
                       ))
                     ) : (
-                      <div style={{ padding: "20px", textAlign: "center", color: "var(--muted-foreground)", fontSize: 11 }}>
+                      <div style={{ padding: "20px", textAlign: "center", color: "var(--muted-foreground)", fontSize: 12 }}>
                         No work orders found with status: {filterStatus}
                       </div>
                     )}
                   </div>
                 ) : (
-                  <div className="flex-1 overflow-auto antiscalant-scroll">
+                  <div className="overflow-auto antiscalant-scroll" style={{ maxHeight: 480 }}>
                     <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 700 }}>
                       <thead style={{ position: "sticky", top: 0, zIndex: 1 }}>
                         <tr style={{ background: "var(--muted)" }}>
@@ -469,7 +547,8 @@ export function MaintenanceManagement() {
                               color: "var(--muted-foreground)", 
                               letterSpacing: "0.08em", 
                               textTransform: "uppercase", 
-                              borderBottom: "1px solid var(--border)" 
+                              borderBottom: "1px solid var(--border)",
+                              background: "var(--muted)"
                             }}>
                               {h}
                             </th>
@@ -504,20 +583,20 @@ export function MaintenanceManagement() {
               </div>
 
               {/* Maintenance Hours Chart */}
-              <div className="rounded p-2 sm:p-3 shrink-0" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+              <div className="rounded p-3 shrink-0" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
                 <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 gap-1">
-                  <span style={{ fontSize: isMobile ? 10 : 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+                  <span style={{ fontSize: isMobile ? 12 : 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em" }}>
                     Maintenance Hours by Month
                   </span>
-                  <span style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)" }}>
+                  <span style={{ fontSize: isMobile ? 10 : 9, color: "var(--muted-foreground)" }}>
                     Based on real system data
                   </span>
                 </div>
-                <ResponsiveContainer width="100%" height={isMobile ? 150 : 180}>
+                <ResponsiveContainer width="100%" height={isMobile ? 190 : 180}>
                   <BarChart data={maintenanceHoursMonthly} margin={{ top: 4, right: 4, left: -10, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(14,165,233,0.06)" vertical={false} />
-                    <XAxis dataKey="month" tick={{ fontSize: isMobile ? 8 : 9, fill: "#4d7a9e" }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fontSize: isMobile ? 8 : 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} axisLine={false} tickLine={false} />
+                    <XAxis dataKey="month" tick={{ fontSize: isMobile ? 11 : 9, fill: "#4d7a9e" }} axisLine={false} tickLine={false} />
+                    <YAxis tick={{ fontSize: isMobile ? 11 : 9, fill: "#4d7a9e", fontFamily: "var(--font-mono)" }} axisLine={false} tickLine={false} />
                     <Tooltip content={<CustomTooltip />} />
                     <Bar dataKey="corrective" stackId="a" fill="#ef4444" name="Corrective" />
                     <Bar dataKey="preventive" stackId="a" fill="#0ea5e9" name="Preventive" />
@@ -528,14 +607,14 @@ export function MaintenanceManagement() {
             </>
           ) : (
             /* Calendar View */
-            <div className="rounded p-3 sm:p-4 flex-1 overflow-auto antiscalant-scroll" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-              <div style={{ fontSize: isMobile ? 10 : 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>
+            <div className="rounded p-3 sm:p-4" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
+              <div style={{ fontSize: isMobile ? 12 : 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>
                 {format(new Date(), 'MMMM yyyy')} — Maintenance Schedule
               </div>
-              <div className="grid gap-0.5 sm:gap-1" style={{ gridTemplateColumns: "repeat(7, 1fr)" }}>
+              <div className="grid gap-1" style={{ gridTemplateColumns: "repeat(7, 1fr)" }}>
                 {weekDays.map(d => (
-                  <div key={d} style={{ padding: isMobile ? "2px 0" : "4px 0", textAlign: "center", fontSize: isMobile ? 7 : 9, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.08em" }}>
-                    {isMobile ? d.charAt(0) : d}
+                  <div key={d} style={{ padding: isMobile ? "4px 0" : "4px 0", textAlign: "center", fontSize: isMobile ? 10 : 9, fontWeight: 600, color: "var(--muted-foreground)", letterSpacing: "0.04em" }}>
+                    {d}
                   </div>
                 ))}
                 {calendarDays.map((day, index) => {
@@ -544,8 +623,8 @@ export function MaintenanceManagement() {
                       <div 
                         key={`empty-${index}`} 
                         style={{ 
-                          minHeight: isMobile ? 36 : 52, 
-                          padding: isMobile ? "2px 3px" : "4px 5px", 
+                          minHeight: isMobile ? 50 : 52, 
+                          padding: isMobile ? "3px 4px" : "4px 5px", 
                           border: "1px solid var(--border)" 
                         }}
                       />
@@ -562,66 +641,105 @@ export function MaintenanceManagement() {
                       key={day} 
                       className="rounded flex flex-col gap-0.5 cursor-pointer transition-colors hover:border-cyan-500" 
                       style={{ 
-                        minHeight: isMobile ? 36 : 52, 
-                        padding: isMobile ? "2px 3px" : "4px 5px", 
+                        minHeight: isMobile ? 50 : 52, 
+                        padding: isMobile ? "3px 4px" : "4px 5px", 
                         background: isToday ? "rgba(14,165,233,0.12)" : "var(--muted)", 
                         border: isToday ? "1px solid #0ea5e9" : "1px solid var(--border)" 
                       }}
+                      title={events.map(e => `${e.label}: ${e.order?.reason || ''}`).join('\n')}
                     >
                       <span style={{ 
-                        fontSize: isMobile ? 8 : 10, 
+                        fontSize: isMobile ? 12 : 10, 
                         fontFamily: "var(--font-mono)", 
                         color: isToday ? "#0ea5e9" : "var(--muted-foreground)", 
                         fontWeight: isToday ? 700 : 400 
                       }}>
                         {day}
                       </span>
-                      {events.slice(0, isMobile ? 1 : 2).map((e, idx) => (
-                        <div 
-                          key={idx} 
-                          style={{ 
-                            fontSize: isMobile ? 6 : 7, 
-                            fontWeight: 600, 
-                            color: e.color, 
-                            background: `${e.color}18`, 
-                            borderRadius: 2, 
-                            padding: "1px 2px", 
-                            lineHeight: 2.0,
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis'
-                          }}
-                          title={e.order?.reason || e.label}
-                        >
-                          {isMobile ? e.label.replace('MEM-', '').replace('FLT-', '').replace('PMP-', '').replace('SYS-', '').replace('DOS-', '').replace('VAL-', '') : e.label}
-                        </div>
-                      ))}
-                      {events.length > (isMobile ? 1 : 2) && (
-                        <div style={{ fontSize: isMobile ? 5 : 6, color: "var(--muted-foreground)", textAlign: "center" }}>
-                          +{events.length - (isMobile ? 1 : 2)}
-                        </div>
+
+                      {isMobile ? (
+                        // phones: coloured dots (one per work order, colour = priority) are readable at this size
+                        events.length > 0 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, marginTop: 2 }}>
+                            {events.slice(0, 4).map((e, idx) => (
+                              <span key={idx} style={{ width: 8, height: 8, borderRadius: '50%', background: e.color, display: 'inline-block' }} />
+                            ))}
+                            {events.length > 4 && (
+                              <span style={{ fontSize: 9, color: "var(--muted-foreground)", lineHeight: 1 }}>+{events.length - 4}</span>
+                            )}
+                          </div>
+                        )
+                      ) : (
+                        <>
+                          {events.slice(0, 2).map((e, idx) => (
+                            <div 
+                              key={idx} 
+                              style={{ 
+                                fontSize: 7, 
+                                fontWeight: 600, 
+                                color: e.color, 
+                                background: `${e.color}18`, 
+                                borderRadius: 2, 
+                                padding: "1px 2px", 
+                                lineHeight: 2.0,
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis'
+                              }}
+                              title={e.order?.reason || e.label}
+                            >
+                              {e.label}
+                            </div>
+                          ))}
+                          {events.length > 2 && (
+                            <div style={{ fontSize: 6, color: "var(--muted-foreground)", textAlign: "center" }}>
+                              +{events.length - 2}
+                            </div>
+                          )}
+                        </>
                       )}
                     </div>
                   );
                 })}
               </div>
-              <div style={{ marginTop: 12, display: 'flex', gap: isMobile ? 8 : 12, flexWrap: 'wrap' }}>
-                <div className="flex items-center gap-1">
-                  <div style={{ width: 10, height: 3, background: "#ef4444", borderRadius: 1 }} />
-                  <span style={{ fontSize: isMobile ? 7 : 8, color: "var(--muted-foreground)" }}>Critical</span>
+
+              {/* On phones the calendar shows dots, so list this month's open work orders underneath */}
+              {isMobile && Object.keys(maintenanceDays).length > 0 && (
+                <div className="flex flex-col gap-2" style={{ marginTop: 14 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                    Due this month
+                  </div>
+                  {Object.keys(maintenanceDays)
+                    .map(Number)
+                    .sort((a, b) => a - b)
+                    .flatMap(day => maintenanceDays[day].map(e => ({ day, ...e })))
+                    .map((e, idx) => (
+                      <div key={idx} className="flex items-center gap-2 rounded p-2" style={{ background: "var(--muted)", border: "1px solid var(--border)" }}>
+                        <span style={{ width: 10, height: 10, borderRadius: '50%', background: e.color, flexShrink: 0 }} />
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>{e.order.equipment}</div>
+                          <div style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{e.order.reason}</div>
+                        </div>
+                        <span style={{ fontSize: 11, fontFamily: "var(--font-mono)", color: "var(--muted-foreground)", flexShrink: 0 }}>
+                          {format(new Date(currentYear, currentMonth - 1, e.day), 'd MMM')}
+                        </span>
+                      </div>
+                    ))}
                 </div>
-                <div className="flex items-center gap-1">
-                  <div style={{ width: 10, height: 3, background: "#f97316", borderRadius: 1 }} />
-                  <span style={{ fontSize: isMobile ? 7 : 8, color: "var(--muted-foreground)" }}>High</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <div style={{ width: 10, height: 3, background: "#eab308", borderRadius: 1 }} />
-                  <span style={{ fontSize: isMobile ? 7 : 8, color: "var(--muted-foreground)" }}>Medium</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <div style={{ width: 10, height: 3, background: "#22c55e", borderRadius: 1 }} />
-                  <span style={{ fontSize: isMobile ? 7 : 8, color: "var(--muted-foreground)" }}>Low</span>
-                </div>
+              )}
+
+              <div style={{ marginTop: 12, display: 'flex', gap: isMobile ? 12 : 12, flexWrap: 'wrap' }}>
+                {[
+                  ["Critical", "#ef4444"],
+                  ["High", "#f97316"],
+                  ["Medium", "#eab308"],
+                  ["Low", "#22c55e"],
+                ].map(([label, color]) => (
+                  <div key={label} className="flex items-center gap-1">
+                    <div style={{ width: 10, height: isMobile ? 10 : 3, background: color, borderRadius: isMobile ? "50%" : 1 }} />
+                    <span style={{ fontSize: isMobile ? 11 : 8, color: "var(--muted-foreground)" }}>{label}</span>
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -637,73 +755,55 @@ export function MaintenanceManagement() {
                 <h2 style={{ fontSize: isMobile ? 16 : 18, fontWeight: 700, color: "var(--foreground)" }}>Create New Work Order</h2>
                 <button 
                   onClick={() => setShowNewDrawer(false)} 
-                  style={{ padding: 8, borderRadius: 4, background: "var(--muted)", border: "none", cursor: "pointer" }}
+                  style={{ padding: 10, borderRadius: 6, background: "var(--muted)", border: "none", cursor: "pointer" }}
+                  aria-label="Close"
                 >
                   <X size={20} />
                 </button>
               </div>
 
-              <form onSubmit={handleSubmit} style={{ padding: isMobile ? 16 : 20, display: "flex", flexDirection: "column", gap: isMobile ? 12 : 16 }}>
+              <form
+                onSubmit={handleSubmit}
+                style={{
+                  padding: isMobile ? 16 : 20,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: isMobile ? 14 : 16,
+                  paddingBottom: isMobile ? 'calc(24px + env(safe-area-inset-bottom, 0px))' : 20,
+                }}
+              >
                 <div>
-                  <label style={{ fontSize: 10, color: "var(--muted-foreground)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 4 }}>Equipment</label>
-                  <input 
-                    name="equipment" 
-                    value={newWO.equipment} 
-                    onChange={handleInputChange} 
-                    required 
-                    style={{ 
-                      width: "100%", 
-                      background: "var(--muted)", 
-                      border: "1px solid var(--border)", 
-                      borderRadius: 4, 
-                      padding: "8px 12px", 
-                      fontSize: 12,
-                      color: "var(--foreground)",
-                      outline: "none"
-                    }} 
-                    placeholder="e.g. BH-003 Pump Assembly" 
+                  <label style={labelStyle}>Equipment</label>
+                  <input
+                    name="equipment"
+                    value={newWO.equipment}
+                    onChange={handleInputChange}
+                    required
+                    style={fieldStyle()}
+                    placeholder="e.g. BH-003 Pump Assembly"
                   />
                 </div>
 
                 <div>
-                  <label style={{ fontSize: 10, color: "var(--muted-foreground)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 4 }}>Asset ID</label>
-                  <input 
-                    name="assetId" 
-                    value={newWO.assetId} 
-                    onChange={handleInputChange} 
-                    required 
-                    style={{ 
-                      width: "100%", 
-                      background: "var(--muted)", 
-                      border: "1px solid var(--border)", 
-                      borderRadius: 4, 
-                      padding: "8px 12px", 
-                      fontSize: 12,
-                      fontFamily: "var(--font-mono)",
-                      color: "var(--foreground)",
-                      outline: "none"
-                    }} 
-                    placeholder="PMP-003" 
+                  <label style={labelStyle}>Asset ID</label>
+                  <input
+                    name="assetId"
+                    value={newWO.assetId}
+                    onChange={handleInputChange}
+                    required
+                    style={fieldStyle({ fontFamily: "var(--font-mono)" })}
+                    placeholder="PMP-003"
                   />
                 </div>
 
                 <div>
-                  <label style={{ fontSize: 10, color: "var(--muted-foreground)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 4 }}>Type</label>
-                  <select 
-                    name="type" 
-                    value={newWO.type} 
-                    onChange={handleInputChange} 
-                    required 
-                    style={{ 
-                      width: "100%", 
-                      background: "var(--muted)", 
-                      border: "1px solid var(--border)", 
-                      borderRadius: 4, 
-                      padding: "8px 12px", 
-                      fontSize: 12,
-                      color: "var(--foreground)",
-                      outline: "none"
-                    }}
+                  <label style={labelStyle}>Type</label>
+                  <select
+                    name="type"
+                    value={newWO.type}
+                    onChange={handleInputChange}
+                    required
+                    style={fieldStyle()}
                   >
                     <option value="">Select Type</option>
                     <option value="Corrective">Corrective</option>
@@ -715,43 +815,25 @@ export function MaintenanceManagement() {
                 </div>
 
                 <div>
-                  <label style={{ fontSize: 10, color: "var(--muted-foreground)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 4 }}>Technician</label>
-                  <input 
-                    name="technician" 
-                    value={newWO.technician} 
-                    onChange={handleInputChange} 
-                    required 
-                    style={{ 
-                      width: "100%", 
-                      background: "var(--muted)", 
-                      border: "1px solid var(--border)", 
-                      borderRadius: 4, 
-                      padding: "8px 12px", 
-                      fontSize: 12,
-                      color: "var(--foreground)",
-                      outline: "none"
-                    }} 
-                    placeholder="Peter Ochieng" 
+                  <label style={labelStyle}>Technician</label>
+                  <input
+                    name="technician"
+                    value={newWO.technician}
+                    onChange={handleInputChange}
+                    required
+                    style={fieldStyle()}
+                    placeholder="Peter Ochieng"
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-3 sm:gap-4">
                   <div>
-                    <label style={{ fontSize: 10, color: "var(--muted-foreground)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 4 }}>Priority</label>
-                    <select 
-                      name="priority" 
-                      value={newWO.priority} 
-                      onChange={handleInputChange} 
-                      style={{ 
-                        width: "100%", 
-                        background: "var(--muted)", 
-                        border: "1px solid var(--border)", 
-                        borderRadius: 4, 
-                        padding: "8px 12px", 
-                        fontSize: 12,
-                        color: "var(--foreground)",
-                        outline: "none"
-                      }}
+                    <label style={labelStyle}>Priority</label>
+                    <select
+                      name="priority"
+                      value={newWO.priority}
+                      onChange={handleInputChange}
+                      style={fieldStyle()}
                     >
                       <option value="Low">Low</option>
                       <option value="Medium">Medium</option>
@@ -760,23 +842,14 @@ export function MaintenanceManagement() {
                     </select>
                   </div>
                   <div>
-                    <label style={{ fontSize: 10, color: "var(--muted-foreground)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", display: "block", marginBottom: 4 }}>Due Date</label>
-                    <input 
-                      name="dueDate" 
-                      type="date" 
-                      value={newWO.dueDate} 
-                      onChange={handleInputChange} 
-                      required 
-                      style={{ 
-                        width: "100%", 
-                        background: "var(--muted)", 
-                        border: "1px solid var(--border)", 
-                        borderRadius: 4, 
-                        padding: "8px 12px", 
-                        fontSize: 12,
-                        color: "var(--foreground)",
-                        outline: "none"
-                      }} 
+                    <label style={labelStyle}>Due Date</label>
+                    <input
+                      name="dueDate"
+                      type="date"
+                      value={newWO.dueDate}
+                      onChange={handleInputChange}
+                      required
+                      style={fieldStyle()}
                     />
                   </div>
                 </div>
@@ -785,10 +858,10 @@ export function MaintenanceManagement() {
                   type="submit" 
                   style={{ 
                     width: "100%", 
-                    padding: isMobile ? "10px" : "12px", 
-                    borderRadius: 4, 
+                    padding: isMobile ? "13px" : "12px", 
+                    borderRadius: isMobile ? 8 : 4, 
                     fontWeight: 600, 
-                    fontSize: isMobile ? 12 : 13, 
+                    fontSize: isMobile ? 14 : 13, 
                     marginTop: 4,
                     background: "#0ea5e9", 
                     color: "#020810",

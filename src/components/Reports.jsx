@@ -56,22 +56,23 @@ const typeColors = {
 };
 
 // ===================== TOAST COMPONENT =====================
-function Toast({ toast }) {
+function Toast({ toast, isMobile }) {
   if (!toast) return null;
   
   return (
     <div
       style={{
         position: "fixed", 
-        bottom: 24, 
-        right: 24, 
+        bottom: isMobile ? 'calc(84px + env(safe-area-inset-bottom, 0px))' : 24,
+        right: isMobile ? 12 : 24,
+        ...(isMobile ? { left: 12 } : {}),
         zIndex: 9999,
         background: "var(--card)", 
         border: "1px solid var(--border)",
         borderRadius: 8, 
         padding: "12px 16px", 
         minWidth: 260, 
-        maxWidth: 320,
+        maxWidth: isMobile ? 'none' : 320,
         boxShadow: "0 4px 24px rgba(0,0,0,0.3)",
         display: "flex", 
         alignItems: "flex-start", 
@@ -218,7 +219,9 @@ export function Reports() {
   const [toast, setToast] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
-  const [viewMode, setViewMode] = useState('table');
+  const [viewMode, setViewMode] = useState(() =>
+    (typeof window !== 'undefined' && window.innerWidth < 768) ? 'cards' : 'table'
+  );
   const [isMobile, setIsMobile] = useState(false);
   
   const timerRef = useRef(null);
@@ -226,7 +229,11 @@ export function Reports() {
 
   // Mobile detection
   useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    const checkMobile = () => {
+      const narrow = window.innerWidth < 768;
+      const touchFirst = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+      setIsMobile(narrow || touchFirst);
+    };
     checkMobile();
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
@@ -546,6 +553,7 @@ export function Reports() {
     overflowY: isMobile ? 'auto' : 'hidden',
     overflowX: 'hidden',
     minHeight: 0,
+    ...(isMobile ? { paddingBottom: 'calc(20px + env(safe-area-inset-bottom, 0px))' } : {}),
   };
 
   const innerStyle = {
@@ -562,6 +570,9 @@ export function Reports() {
     ? {}
     : { flex: 1, minHeight: 0, overflowY: 'auto' };
 
+  // Phones always use the card list (a 7-column table is unreadable on a small screen)
+  const view = isMobile ? 'cards' : viewMode;
+
   return (
     <div className="flex flex-col p-2 sm:p-4 h-full min-h-0" style={pageStyle}>
       <div style={innerStyle}>
@@ -575,6 +586,9 @@ export function Reports() {
           0%, 100% { opacity: 1; }
           50% { opacity: 0.5; }
         }
+        /* category chips scroll sideways on phones, without a visible scrollbar */
+        .reports-chips { scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+        .reports-chips::-webkit-scrollbar { display: none; }
         /* keep the table header visible while the report list scrolls */
         .reports-table thead th {
           position: sticky;
@@ -585,37 +599,38 @@ export function Reports() {
       `}</style>
 
       {/* Header */}
-      <div className="flex-shrink-0 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-        <div>
-          <h2 style={{ fontSize: isMobile ? 14 : 16, fontWeight: 700, color: "var(--foreground)" }}>
+      <div className="flex-shrink-0 flex items-start sm:items-center justify-between gap-2">
+        <div style={{ minWidth: 0 }}>
+          <h2 style={{ fontSize: isMobile ? 18 : 16, fontWeight: 700, color: "var(--foreground)" }}>
             Reports & Analytics
           </h2>
-          <p style={{ fontSize: isMobile ? 10 : 11, color: "var(--muted-foreground)", marginTop: 2 }}>
+          <p style={{ fontSize: isMobile ? 12 : 11, color: "var(--muted-foreground)", marginTop: 2 }}>
             {generateReportsFromData.length} reports available • Last updated: {lastUpdate ? format(new Date(lastUpdate), 'HH:mm:ss') : '--'}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setViewMode(viewMode === 'table' ? 'cards' : 'table')}
-            style={{
-              padding: isMobile ? '4px 10px' : '6px 12px',
-              borderRadius: 4,
-              background: 'var(--secondary)',
-              border: '1px solid var(--border)',
-              color: 'var(--foreground)',
-              fontSize: isMobile ? 9 : 10,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-              width: isMobile ? '100%' : 'auto',
-              justifyContent: 'center'
-            }}
-          >
-            {viewMode === 'table' ? <EyeOff size={isMobile ? 12 : 14} /> : <Eye size={isMobile ? 12 : 14} />}
-            {viewMode === 'table' ? 'Cards' : 'Table'}
-          </button>
-        </div>
+        {!isMobile && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setViewMode(viewMode === 'table' ? 'cards' : 'table')}
+              style={{
+                padding: '6px 12px',
+                borderRadius: 4,
+                background: 'var(--secondary)',
+                border: '1px solid var(--border)',
+                color: 'var(--foreground)',
+                fontSize: 10,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                justifyContent: 'center'
+              }}
+            >
+              {viewMode === 'table' ? <EyeOff size={14} /> : <Eye size={14} />}
+              {viewMode === 'table' ? 'Cards' : 'Table'}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Quick Generate Buttons - Responsive */}
@@ -624,59 +639,74 @@ export function Reports() {
           <button
             key={r.label}
             onClick={() => handleGenerateReport(r.type, r.label)}
-            className="rounded p-2 sm:p-3 text-left transition-all hover:scale-[1.02]"
-            style={{ 
-              background: "var(--card)", 
-              border: "1px solid var(--border)", 
+            className="rounded p-3 text-left transition-all hover:scale-[1.02]"
+            style={{
+              background: "var(--card)",
+              border: "1px solid var(--border)",
               cursor: "pointer",
-              transition: "all 0.2s"
+              transition: "all 0.2s",
+              minHeight: isMobile ? 88 : undefined,
             }}
           >
-            <div className="flex items-center gap-2 mb-1 sm:mb-2">
-              <div className="rounded p-1 sm:p-1.5" style={{ background: `${r.color}15` }}>
-                <r.icon size={isMobile ? 12 : 14} style={{ color: r.color }} />
+            <div className="flex items-center gap-2 mb-2">
+              <div className="rounded p-1.5" style={{ background: `${r.color}15` }}>
+                <r.icon size={isMobile ? 16 : 14} style={{ color: r.color }} />
               </div>
-              <span style={{ fontSize: isMobile ? 10 : 12, fontWeight: 600, color: "var(--foreground)" }}>{r.label}</span>
+              <span style={{ fontSize: isMobile ? 13 : 12, fontWeight: 600, color: "var(--foreground)" }}>{r.label}</span>
             </div>
-            <div style={{ fontSize: isMobile ? 8 : 10, color: "var(--muted-foreground)" }}>{r.desc}</div>
-            <div className="mt-1 sm:mt-2 flex items-center gap-1" style={{ fontSize: isMobile ? 8 : 9, color: r.color }}>
-              <Download size={isMobile ? 8 : 10} /> Generate PDF
+            <div style={{ fontSize: isMobile ? 11 : 10, color: "var(--muted-foreground)" }}>{r.desc}</div>
+            <div className="mt-2 flex items-center gap-1" style={{ fontSize: isMobile ? 11 : 9, color: r.color }}>
+              <Download size={isMobile ? 12 : 10} /> Generate PDF
             </div>
           </button>
         ))}
       </div>
 
       {/* Filters - Responsive */}
-      <div className="flex-shrink-0 flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-3">
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <Filter size={isMobile ? 12 : 14} style={{ color: "var(--muted-foreground)" }} />
-          <span style={{ fontSize: isMobile ? 9 : 10, color: "var(--muted-foreground)", fontWeight: 500 }}>
-            Category:
-          </span>
+      <div className="flex-shrink-0 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-2" style={{ minWidth: 0 }}>
+          <Filter size={isMobile ? 14 : 14} style={{ color: "var(--muted-foreground)", flexShrink: 0 }} />
+          {!isMobile && (
+            <span style={{ fontSize: 10, color: "var(--muted-foreground)", fontWeight: 500 }}>
+              Category:
+            </span>
+          )}
+          <div
+            className="reports-chips"
+            style={{
+              display: 'flex',
+              gap: 6,
+              flex: 1,
+              minWidth: 0,
+              flexWrap: isMobile ? 'nowrap' : 'wrap',
+              overflowX: isMobile ? 'auto' : 'visible',
+              paddingBottom: isMobile ? 2 : 0,
+            }}
+          >
+            {categories.map(cat => (
+              <button
+                key={cat}
+                onClick={() => setSelectedCategory(cat)}
+                style={{
+                  padding: isMobile ? '6px 14px' : '3px 12px',
+                  borderRadius: 14,
+                  background: selectedCategory === cat ? '#0ea5e9' : 'var(--secondary)',
+                  color: selectedCategory === cat ? 'white' : 'var(--muted-foreground)',
+                  border: '1px solid var(--border)',
+                  fontSize: isMobile ? 12 : 9,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                }}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="flex items-center gap-1 flex-wrap">
-          {categories.map(cat => (
-            <button
-              key={cat}
-              onClick={() => setSelectedCategory(cat)}
-              style={{
-                padding: isMobile ? '2px 8px' : '3px 12px',
-                borderRadius: 12,
-                background: selectedCategory === cat ? '#0ea5e9' : 'var(--secondary)',
-                color: selectedCategory === cat ? 'white' : 'var(--muted-foreground)',
-                border: '1px solid var(--border)',
-                fontSize: isMobile ? 8 : 9,
-                cursor: 'pointer',
-                transition: 'all 0.2s',
-                whiteSpace: 'nowrap'
-              }}
-            >
-              {isMobile && cat !== 'All' ? cat.charAt(0) : cat}
-            </button>
-          ))}
-        </div>
-        
-        <div style={{ flex: 1, minWidth: isMobile ? '100%' : 150, position: 'relative' }}>
+
+        <div style={{ flex: isMobile ? 'none' : 1, minWidth: isMobile ? 0 : 150, position: 'relative' }}>
           <input
             type="text"
             placeholder="Search reports..."
@@ -684,24 +714,25 @@ export function Reports() {
             onChange={(e) => setSearchQuery(e.target.value)}
             style={{
               width: '100%',
-              padding: isMobile ? '4px 8px' : '4px 10px',
-              borderRadius: 4,
+              padding: isMobile ? '10px 12px' : '4px 10px',
+              borderRadius: isMobile ? 8 : 4,
               background: 'var(--secondary)',
               border: '1px solid var(--border)',
               color: 'var(--foreground)',
-              fontSize: isMobile ? 9 : 10,
+              // 16px on phones also stops iOS from zooming in when the field is focused
+              fontSize: isMobile ? 16 : 10,
               outline: 'none'
             }}
           />
         </div>
-        
-        <span style={{ fontSize: isMobile ? 9 : 10, color: 'var(--muted-foreground)' }}>
+
+        <span style={{ fontSize: isMobile ? 12 : 10, color: 'var(--muted-foreground)', alignSelf: isMobile ? 'flex-start' : 'center' }}>
           {filteredReports.length} reports
         </span>
       </div>
 
       {/* Report List: fills the remaining height and scrolls inside itself (desktop) */}
-      {viewMode === 'table' ? (
+      {view === 'table' ? (
         <div
           className="rounded"
           style={{
@@ -855,8 +886,8 @@ export function Reports() {
           className="grid gap-2 sm:gap-3"
           style={{
             gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fill, minmax(280px, 1fr))",
-            // desktop: card rows stretch to fill the box height
-            alignContent: 'stretch',
+            // desktop: card rows stretch to fill the box height; phones: natural height
+            alignContent: isMobile ? 'start' : 'stretch',
             gridAutoRows: isMobile ? 'auto' : 'minmax(min-content, 1fr)',
             ...listRegionStyle,
           }}
@@ -868,75 +899,84 @@ export function Reports() {
               <div
                 key={r.id}
                 className="rounded p-3 sm:p-4 transition-all hover:scale-[1.02]"
-                style={{ 
-                  background: "var(--card)", 
+                style={{
+                  background: "var(--card)",
                   border: "1px solid var(--border)",
-                  cursor: "pointer",
+                  cursor: isMobile ? "default" : "pointer",
                   transition: "all 0.2s"
                 }}
-                onClick={() => handleDownload(r)}
+                // on phones only the buttons download, so scrolling with a finger never starts a download by accident
+                onClick={isMobile ? undefined : () => handleDownload(r)}
               >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="rounded p-1.5 sm:p-2" style={{ background: `${tc.color}15` }}>
-                      <Icon size={isMobile ? 14 : 16} style={{ color: tc.color }} />
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2" style={{ minWidth: 0 }}>
+                    <div className="rounded p-2" style={{ background: `${tc.color}15`, flexShrink: 0 }}>
+                      <Icon size={isMobile ? 18 : 16} style={{ color: tc.color }} />
                     </div>
-                    <div>
-                      <div style={{ fontSize: isMobile ? 11 : 12, fontWeight: 600, color: "var(--foreground)" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: isMobile ? 14 : 12, fontWeight: 600, color: "var(--foreground)" }}>
                         {r.title}
                       </div>
-                      <div style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)" }}>
+                      <div style={{ fontSize: isMobile ? 11 : 9, color: "var(--muted-foreground)" }}>
                         {r.id} • {r.date}
                       </div>
                     </div>
                   </div>
-                  <span style={{ 
-                    fontSize: isMobile ? 7 : 8, 
-                    fontWeight: 600, 
-                    color: tc.color, 
-                    background: tc.bg, 
-                    borderRadius: 3, 
-                    padding: "1px 6px" 
+                  <span style={{
+                    fontSize: isMobile ? 10 : 8,
+                    fontWeight: 600,
+                    color: tc.color,
+                    background: tc.bg,
+                    borderRadius: 3,
+                    padding: "2px 7px",
+                    flexShrink: 0
                   }}>
                     {r.type.toUpperCase()}
                   </span>
                 </div>
-                
-                <div style={{ 
-                  fontSize: isMobile ? 9 : 10, 
-                  color: "var(--muted-foreground)", 
-                  marginTop: 8,
-                  padding: 6,
+
+                <div style={{
+                  fontSize: isMobile ? 12 : 10,
+                  lineHeight: 1.5,
+                  color: "var(--muted-foreground)",
+                  marginTop: 10,
+                  padding: isMobile ? 10 : 6,
                   background: "var(--muted)",
-                  borderRadius: 4
+                  borderRadius: 6,
+                  wordBreak: 'break-word'
                 }}>
                   {r.summary}
                 </div>
-                
-                <div className="flex items-center justify-between mt-3">
-                  <span style={{ fontSize: isMobile ? 8 : 9, color: "var(--muted-foreground)" }}>
+
+                <div className="flex items-center justify-between gap-2 mt-3">
+                  <span style={{ fontSize: isMobile ? 11 : 9, color: "var(--muted-foreground)" }}>
                     {r.category} • {r.size}
                   </span>
-                  <div style={{ display: "flex", gap: 6 }}>
+                  <div style={{ display: "flex", gap: 8 }}>
                     <button
                       className="flex items-center gap-1 px-2 py-1 rounded transition-colors hover:bg-cyan-500/20"
-                      style={{ 
-                        fontSize: isMobile ? 8 : 9, 
-                        color: "#0ea5e9", 
-                        background: "rgba(14,165,233,0.08)", 
-                        border: "1px solid rgba(14,165,233,0.15)", 
-                        cursor: "pointer" 
+                      style={{
+                        fontSize: isMobile ? 12 : 9,
+                        color: "#0ea5e9",
+                        background: "rgba(14,165,233,0.08)",
+                        border: "1px solid rgba(14,165,233,0.15)",
+                        cursor: "pointer",
+                        ...(isMobile ? { padding: '9px 16px', minHeight: 38 } : {})
                       }}
                       onClick={(e) => {
                         e.stopPropagation();
                         handleDownload(r);
                       }}
                     >
-                      <Download size={isMobile ? 8 : 10} /> PDF
+                      <Download size={isMobile ? 14 : 10} /> PDF
                     </button>
                     <button
                       className="flex items-center gap-1 px-2 py-1 rounded"
-                      style={secondaryBtnStyle}
+                      style={{
+                        ...secondaryBtnStyle,
+                        fontSize: isMobile ? 12 : 9,
+                        ...(isMobile ? { padding: '9px 16px', minHeight: 38 } : {})
+                      }}
                       onClick={(e) => {
                         e.stopPropagation();
                         handleDownloadCsv(r);
@@ -962,7 +1002,7 @@ export function Reports() {
       )}
 
       {/* Toast Notification */}
-      <Toast toast={toast} />
+      <Toast toast={toast} isMobile={isMobile} />
     </div>
     </div>
   );
