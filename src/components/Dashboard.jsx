@@ -1428,10 +1428,11 @@ export function Dashboard({ onViewAllAlerts } = {}) {
       {/* Scrollable Content Area */}
       <div className="flex-1 overflow-auto p-3 sm:p-4">
         <div style={{ maxWidth: CONTENT_MAX_WIDTH, width: '100%', margin: '0 auto' }}>
+          {activeTab === 'Visualization' && canSeeMimic && <MimicEditor />}
           {activeTab === 'overview' && renderOverviewTab()}
           {activeTab === 'system' && renderSystemTab()}
           {activeTab === 'analytics' && renderAnalyticsTab()}
-          {activeTab === 'Visualization' && canSeeMimic && <MimicEditor />}
+          
 
           {/* Footer */}
           <div style={{
