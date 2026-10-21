@@ -504,7 +504,7 @@ export function MimicEditor() {
   const { sensorData: rawSensorData = {} } = useData();
   const sensorData = useMemo(() => withDerived(rawSensorData), [rawSensorData]);
   const { user } = useAuth();
-  const canEdit = user?.role === 'admin';
+  const canEdit = !!user?.isSuperAdmin; // only a super admin can edit the Visualization
 
   const [layouts, setLayouts] = useState(() => ({ land: loadLayout(), port: loadPortrait() }));
   const [editing, setEditing] = useState(false);

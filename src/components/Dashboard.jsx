@@ -5,7 +5,7 @@ import {
   CheckCircle, Gauge, Zap, Filter, TrendingUp, TrendingDown,
   Minus, RefreshCw, Power, AlertCircle, Settings,
   Wrench, LayoutDashboard, LineChart as LineChartIcon,
-  SlidersHorizontal, Bell, Clock, Network
+  SlidersHorizontal, Bell, Clock, Network, Tags
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip,
@@ -33,6 +33,7 @@ import {
 import { rawToPercent } from './dashboardComponents/feedTankCalibration';
 import { useDailySummary } from './dashboardComponents/useDailySummary';
 import { MimicEditor } from './MimicEditor';
+import { TagMapEditor } from './TagMapEditor';
 
 // ── Page layout: maximum content width (px) on wide screens ──────────────────
 // Used for the tab pills and the page content so they line up.
@@ -555,7 +556,9 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     refresh,
   } = useData();
 
-  const [activeTab, setActiveTab] = useState('overview');
+  // Landing page: Visualization is the first thing seen after login (falls back to Overview for a user who isn't allowed it).
+  const [activeTab, setActiveTab] = useState('Visualization');
+  const [showTagEditor, setShowTagEditor] = useState(false);
   const [selectedSensors, setSelectedSensors] = useState(['RO5-Permeateflow']);
   const [isMobile, setIsMobile] = useState(false);
   const [productionSummary, setProductionSummary] = useState(null);
@@ -598,6 +601,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const { isExpired, user: authUser, canAccess } = useAuth();
   // Mimic tab: admins always; everyone else only if the admin ticked "mimic" for them.
   const canSeeMimic = authUser?.role === 'admin' || (typeof canAccess === 'function' ? canAccess('mimic') : true);
+  const tab = activeTab === 'Visualization' && !canSeeMimic ? 'overview' : activeTab;
 
   const handleRefresh = () => {
     refresh();
@@ -1395,12 +1399,12 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           }}
         >
           {[
+            ...(canSeeMimic ? [{ id: 'Visualization', label: 'Visualization', Icon: Network }] : []),
             { id: 'overview', label: 'Overview', Icon: LayoutDashboard },
             { id: 'system', label: 'System & Alerts', Icon: SlidersHorizontal, badge: activeAlarmsList.length },
             { id: 'analytics', label: 'Trends & Analytics', Icon: LineChartIcon },
-            ...(canSeeMimic ? [{ id: 'Visualization', label: 'Visualization', Icon: Network }] : []),
           ].map(({ id, label, Icon, badge }) => {
-            const on = activeTab === id;
+            const on = tab === id;
             return (
               <button
                 key={id}
@@ -1422,16 +1426,31 @@ export function Dashboard({ onViewAllAlerts } = {}) {
               </button>
             );
           })}
+          {authUser?.isSuperAdmin && (
+            <button
+              onClick={() => setShowTagEditor(true)}
+              title="Match this client's tag names to the dashboard"
+              style={{
+                padding: '9px 16px', fontSize: 12, fontWeight: 800, letterSpacing: '0.04em', cursor: 'pointer', borderRadius: 999, whiteSpace: 'nowrap',
+                background: 'var(--secondary)', color: 'var(--muted-foreground)', border: '1px solid var(--border)',
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}
+            >
+              <Tags size={14} /> Edit tags
+            </button>
+          )}
         </div>
       </div>
+
+      {showTagEditor && <TagMapEditor liveTags={Object.keys(sensorData || {})} onClose={() => setShowTagEditor(false)} />}
 
       {/* Scrollable Content Area */}
       <div className="flex-1 overflow-auto p-3 sm:p-4">
         <div style={{ maxWidth: CONTENT_MAX_WIDTH, width: '100%', margin: '0 auto' }}>
-          {activeTab === 'overview' && renderOverviewTab()}
-          {activeTab === 'system' && renderSystemTab()}
-          {activeTab === 'analytics' && renderAnalyticsTab()}
-          {activeTab === 'Visualization' && canSeeMimic && <MimicEditor />}
+          {tab === 'overview' && renderOverviewTab()}
+          {tab === 'system' && renderSystemTab()}
+          {tab === 'analytics' && renderAnalyticsTab()}
+          {tab === 'Visualization' && canSeeMimic && <MimicEditor />}
 
           {/* Footer */}
           <div style={{
