@@ -34,6 +34,7 @@ import { rawToPercent } from './dashboardComponents/feedTankCalibration';
 import { useDailySummary } from './dashboardComponents/useDailySummary';
 import { MimicEditor } from './MimicEditor';
 import { TagMapEditor } from './TagMapEditor';
+import { getActiveTenantId } from '../tenantFetch';
 
 // ── Page layout: maximum content width (px) on wide screens ──────────────────
 // Used for the tab pills and the page content so they line up.
@@ -1426,7 +1427,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
               </button>
             );
           })}
-          {authUser?.isSuperAdmin && (
+          {authUser?.isSuperAdmin && (Number(getActiveTenantId()) || 1) !== 1 && (
             <button
               onClick={() => setShowTagEditor(true)}
               title="Match this client's tag names to the dashboard"

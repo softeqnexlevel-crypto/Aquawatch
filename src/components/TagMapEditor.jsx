@@ -88,6 +88,18 @@ export function TagMapEditor({ liveTags = [], onClose }) {
     } catch (e) { setMsg({ ok: false, text: e.message }); } finally { setBusy(false); }
   };
 
+  if (tid === 1) {
+    return (
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 12 }}>
+        <div onClick={(e) => e.stopPropagation()} style={{ maxWidth: 420, background: "var(--card)", border: "1px solid var(--border)", borderRadius: 18, padding: 22, color: "var(--foreground)" }}>
+          <div style={{ fontWeight: 800, fontSize: 16, marginBottom: 8 }}>Main plant</div>
+          <div style={{ fontSize: 13.5, color: "var(--muted-foreground)" }}>The main plant's tag names are fixed and can't be changed. Switch to a client in the top bar to edit its tags.</div>
+          <button onClick={onClose} style={{ ...pill("var(--secondary)", "var(--foreground)", { border: "1px solid var(--border)" }), marginTop: 16 }}>Close</button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 12 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 760, maxHeight: "92vh", display: "flex", flexDirection: "column", background: "var(--card)", border: "1px solid var(--border)", borderRadius: 18 }}>
