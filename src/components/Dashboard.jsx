@@ -555,7 +555,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     refresh,
   } = useData();
 
-  const [activeTab, setActiveTab] = useState('visualization');
+  const [activeTab, setActiveTab] = useState('overview');
   const [selectedSensors, setSelectedSensors] = useState(['RO5-Permeateflow']);
   const [isMobile, setIsMobile] = useState(false);
   const [productionSummary, setProductionSummary] = useState(null);
@@ -1395,10 +1395,10 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           }}
         >
           {[
-             ...(canSeeMimic ? [{ id: 'Visualization', label: 'Visualization', Icon: Network }] : []),
             { id: 'overview', label: 'Overview', Icon: LayoutDashboard },
             { id: 'system', label: 'System & Alerts', Icon: SlidersHorizontal, badge: activeAlarmsList.length },
             { id: 'analytics', label: 'Trends & Analytics', Icon: LineChartIcon },
+            ...(canSeeMimic ? [{ id: 'Visualization', label: 'Visualization', Icon: Network }] : []),
           ].map(({ id, label, Icon, badge }) => {
             const on = activeTab === id;
             return (
@@ -1428,11 +1428,10 @@ export function Dashboard({ onViewAllAlerts } = {}) {
       {/* Scrollable Content Area */}
       <div className="flex-1 overflow-auto p-3 sm:p-4">
         <div style={{ maxWidth: CONTENT_MAX_WIDTH, width: '100%', margin: '0 auto' }}>
-          {activeTab === 'Visualization' && canSeeMimic && <MimicEditor />}
           {activeTab === 'overview' && renderOverviewTab()}
           {activeTab === 'system' && renderSystemTab()}
           {activeTab === 'analytics' && renderAnalyticsTab()}
-          
+          {activeTab === 'Visualization' && canSeeMimic && <MimicEditor />}
 
           {/* Footer */}
           <div style={{
