@@ -555,7 +555,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
     refresh,
   } = useData();
 
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState('visualization');
   const [selectedSensors, setSelectedSensors] = useState(['RO5-Permeateflow']);
   const [isMobile, setIsMobile] = useState(false);
   const [productionSummary, setProductionSummary] = useState(null);
