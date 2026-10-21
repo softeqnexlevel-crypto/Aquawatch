@@ -1395,10 +1395,10 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           }}
         >
           {[
+             ...(canSeeMimic ? [{ id: 'Visualization', label: 'Visualization', Icon: Network }] : []),
             { id: 'overview', label: 'Overview', Icon: LayoutDashboard },
             { id: 'system', label: 'System & Alerts', Icon: SlidersHorizontal, badge: activeAlarmsList.length },
             { id: 'analytics', label: 'Trends & Analytics', Icon: LineChartIcon },
-            ...(canSeeMimic ? [{ id: 'Visualization', label: 'Visualization', Icon: Network }] : []),
           ].map(({ id, label, Icon, badge }) => {
             const on = activeTab === id;
             return (
