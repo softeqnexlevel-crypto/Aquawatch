@@ -7,29 +7,29 @@ import {
   Receipt,
   UserPenIcon
 } from "lucide-react";
-import { useAuth } from "../contexts/AuthContext";
+import { usePageAccess } from "../pageAccess";
 
 
 const navItems = [
   { id: "dashboard",    label: "Dashboard",    icon: LayoutDashboard, group: "Operations",    page: "dashboard" },
-  { id: "boreholes",    label: "Tank level",    icon: Droplets,        group: "Operations",    page: "borehole" },
-  { id: "production",   label: "Production",    icon: Activity,        group: "Operations",    page: "dashboard" },
-  { id: "antiscalant",  label: "Antiscalant",   icon: FlaskConical,    group: "Operations",    page: "chemical" },
-  { id: "filtration",   label: "Filtration",    icon: Filter,          group: "Operations",    page: "dashboard" },
-  { id: "recovery",     label: "System Recovery",      icon: RotateCcw,       group: "Operations",    page: "dashboard" },
+  { id: "boreholes",    label: "Tank level",    icon: Droplets,        group: "Operations",    page: "tank level" },
+  { id: "production",   label: "Production",    icon: Activity,        group: "Operations",    page: "production" },
+  { id: "antiscalant",  label: "Antiscalant",   icon: FlaskConical,    group: "Operations",    page: "antiscalant" },
+  { id: "filtration",   label: "Filtration",    icon: Filter,          group: "Operations",    page: "filtration" },
+  { id: "recovery",     label: "System Recovery",      icon: RotateCcw,       group: "Operations",    page: "system recovery" },
   { id: "maintenance",  label: "Maintenance",   icon: Wrench,          group: "Management",    page: "maintenance" },
   { id: "analytics",    label: "Analytics",     icon: BarChart3,       group: "Management",    page: "analytics" },
   { id: "reports",      label: "Reports",       icon: FileText,        group: "Management",    page: "reports" },
-  { id: "alerts",       label: "Alerts",        icon: Bell,            group: "System",         page: "dashboard" },
+  { id: "alerts",       label: "Alerts",        icon: Bell,            group: "System",         page: "alerts" },
   { id: "settings",     label: "Settings",      icon: Settings,        group: "System",         page: "settings" },
-  { id: "Tagmanager",   label: "Tag Manager",   icon: Tags,            group: "Configuration", page: "settings" },
-  { id: "billing",      label: "Billing",       icon: Receipt,         group: "Configuration", page: "settings" },
+  { id: "Tagmanager",   label: "Tag Manager",   icon: Tags,            group: "Configuration", page: "tag manager" },
+  { id: "billing",      label: "Billing",       icon: Receipt,         group: "Configuration", page: "billing" },
   { id: "user",         label: "User",          icon: UserPenIcon,     group: "Configuration", page: "user-management" },
 ];
 
 export function Sidebar({ activePage, onNavigate, alertCount = 0 }) {
   const [collapsed, setCollapsed] = useState(false);
-  const { canAccess } = useAuth(); // 🔑 this was missing before
+  const { can: canAccess } = usePageAccess(); // follows the pages ticked in User Management
 
   const groups = ["Operations", "Management", "System", "Configuration"];
 

@@ -5,6 +5,7 @@ import { useState, useEffect } from "react";
 import { DataProvider } from "./contexts/DataContext";
 import { AlertsProvider, useAlerts } from "./contexts/AlertsContext";
 import { useAuth } from "./contexts/AuthContext";
+import { usePageAccess } from "./pageAccess";
 import { ScrollContainer } from "./components/ScrollContainer";
 import { TrialBanner } from "./components/TrialBanner";
 // import { AIAssistant } from "./components/ai/AIAssistant"; // ✅ ADDED — Aqua AI floating chat widget
@@ -142,12 +143,19 @@ function DashboardLayoutInner() {
 
   const alertCount = activeAlerts.length;
   const currentPage = pathToPage[location.pathname] || "dashboard";
+  // Page guard: a page that isn't ticked for this user can't be opened, even by typing its address.
+  const { user: accessUser, can: canPage } = usePageAccess();
+  const PAGE_KEY = { dashboard: "dashboard", boreholes: "tank level", Tagmanager: "tag manager", production: "production", antiscalant: "antiscalant", filtration: "filtration", recovery: "system recovery", maintenance: "maintenance", analytics: "analytics", reports: "reports", alerts: "alerts", settings: "settings", billing: "billing", user: "user-management" };
+  const firstAllowed = Object.keys(PAGE_KEY).find((p) => canPage(PAGE_KEY[p]));
+  const blocked = accessUser && !canPage(PAGE_KEY[currentPage] || "dashboard");
   const title = pageTitles[location.pathname] || "AquaSystemTech";
 
   const handleNavigate = (page) => {
     const path = pageToPath[page];
     if (path) navigate(path);
   };
+
+  if (blocked && firstAllowed && pageToPath[firstAllowed] !== location.pathname) return <Navigate to={pageToPath[firstAllowed]} replace />;
 
   return (
     <div

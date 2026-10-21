@@ -1,3 +1,4 @@
+import { usePageAccess } from "../pageAccess";
 import { useState } from "react";
 import { LayoutDashboard, Droplets, Activity, FlaskConical, MoreHorizontal, Filter, RotateCcw, Wrench, BarChart3, FileText, Bell, Settings, Tags, Receipt, UserPenIcon, X } from "lucide-react";
 import { useNavigate } from "react-router";
@@ -14,17 +15,17 @@ const TENANT_PAGE = { dashboard: "dashboard", boreholes: "tank level", productio
 // Main 4 tabs shown on the bar (same order as the client's app)
 const MAIN = [
   { id: "dashboard",   label: "Dashboard",   icon: LayoutDashboard, page: "dashboard" },
-  { id: "boreholes",   label: "Tanks",       icon: Droplets,        page: "borehole" },
-  { id: "production",  label: "Production",  icon: Activity,        page: "dashboard" },
-  { id: "antiscalant", label: "Antiscalant", icon: FlaskConical,    page: "chemical" },
+  { id: "boreholes",   label: "Tanks",       icon: Droplets,        page: "tank level" },
+  { id: "production",  label: "Production",  icon: Activity,        page: "production" },
+  { id: "antiscalant", label: "Antiscalant", icon: FlaskConical,    page: "antiscalant" },
 ];
 
 // Everything else lives under "More", grouped like the client's app
 const MORE_GROUPS = [
   { title: "Operations", items: [
-    //{ id: "antiscalant", label: "Antiscalant",     icon: FlaskConical, page: "chemical" },
-    { id: "filtration",  label: "Filtration",      icon: Filter,       page: "dashboard" },
-    { id: "recovery",    label: "System Recovery", icon: RotateCcw,    page: "dashboard" },
+    { id: "antiscalant", label: "Antiscalant",     icon: FlaskConical, page: "antiscalant" },
+    { id: "filtration",  label: "Filtration",      icon: Filter,       page: "filtration" },
+    { id: "recovery",    label: "System Recovery", icon: RotateCcw,    page: "system recovery" },
   ]},
   { title: "Management", items: [
     { id: "maintenance", label: "Maintenance",     icon: Wrench,       page: "maintenance" },
@@ -33,18 +34,19 @@ const MORE_GROUPS = [
     { id: "user",        label: "User Management", icon: UserPenIcon,  page: "user-management" },
   ]},
   { title: "System", items: [
-    { id: "alerts",      label: "Alerts",          icon: Bell,         page: "dashboard", color: "#ffb938" },
+    { id: "alerts",      label: "Alerts",          icon: Bell,         page: "alerts", color: "#ffb938" },
     { id: "settings",    label: "Settings",        icon: Settings,     page: "settings" },
   ]},
   { title: "Configuration", items: [
-    { id: "Tagmanager",  label: "Tag Manager",     icon: Tags,         page: "settings" },
-    { id: "billing",     label: "Billing",         icon: Receipt,      page: "settings" },
+    { id: "Tagmanager",  label: "Tag Manager",     icon: Tags,         page: "tag manager" },
+    { id: "billing",     label: "Billing",         icon: Receipt,      page: "billing" },
   ]},
 ];
 
 export function BottomNav({ activePage, onNavigate, alertCount = 0 }) {
   const [open, setOpen] = useState(false);
-  const { canAccess, user, logout } = useAuth();
+  const { user, logout } = useAuth();
+  const { can: canAccess } = usePageAccess(); // follows the pages ticked in User Management
   const navigate = useNavigate();
   const tcfg = useTenantConfig();
   // The active client's dashboard only shows the pages they were set up with.
