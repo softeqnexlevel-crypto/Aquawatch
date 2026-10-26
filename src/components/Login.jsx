@@ -45,7 +45,10 @@ const getFieldStyles = (isMobile) => ({
   },
   input: {
     width: "100%",
-    padding: isMobile ? "10px 12px" : "12px 14px",
+    paddingTop: isMobile ? 10 : 12,
+    paddingBottom: isMobile ? 10 : 12,
+    paddingLeft: isMobile ? 12 : 14,
+    paddingRight: isMobile ? 12 : 14,
     background: "var(--secondary)",
     border: "1px solid var(--border)",
     borderRadius: 8,
