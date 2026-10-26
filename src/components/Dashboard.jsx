@@ -877,38 +877,9 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   // Shared visual height for the pressure dial and the tank bar.
   const gaugeVisual = isMobile ? GAUGE_VISUAL_MOBILE : GAUGE_VISUAL_DESKTOP;
 
-  if (contextLoading && !dataInitialized) {
-    return (
-      <div className="flex items-center justify-center h-full p-8">
-        <div style={{ color: "var(--muted-foreground)", textAlign: "center" }}>
-          <RefreshCw size={24} className="animate-spin" style={{ margin: "0 auto 12px", color: COLORS.primary }} />
-          <p>Connecting to backend...</p>
-          <p style={{ fontSize: 12, marginTop: 8, opacity: 0.7 }}>Fetching real-time data...</p>
-        </div>
-      </div>
-    );
-  }
+  // The page always opens. When the plant is offline the status bar at the top says so and the
+  // readings show "--"; it no longer blocks on a "Connecting to backend..." screen.
 
-  if (contextError && !dataInitialized) {
-    return (
-      <div className="flex items-center justify-center h-full p-8">
-        <div style={{ color: COLORS.danger, textAlign: "center", maxWidth: 500 }}>
-          <AlertTriangle size={48} style={{ margin: "0 auto 16px" }} />
-          <p style={{ fontWeight: 600, fontSize: 18, marginBottom: 8 }}>No Data Available</p>
-          <p style={{ fontSize: 14, opacity: 0.8, marginBottom: 16 }}>{contextError}</p>
-          <p style={{ fontSize: 12, color: 'var(--muted-foreground)', marginBottom: 16 }}>Make sure the backend server is running at {API_BASE_URL}</p>
-          <div className="flex gap-3 justify-center">
-            <button onClick={handleRefresh} style={{ padding: "10px 24px", borderRadius: 6, background: COLORS.primary, border: "none", color: "white", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 8, fontWeight: 600 }}>
-              <RefreshCw size={16} /> Retry Connection
-            </button>
-            <button onClick={() => window.location.reload()} style={{ padding: "10px 24px", borderRadius: 6, background: "var(--card)", border: "1px solid var(--border)", color: "var(--foreground)", cursor: "pointer" }}>
-              Reload Page
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   // --- RENDER TAB CONTENT ---
 
