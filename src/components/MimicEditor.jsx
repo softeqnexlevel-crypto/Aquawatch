@@ -389,14 +389,17 @@ function TwoStageVessel({ w, v1, v2, v3 }) {
 
 function DataPill({ w, v }) {
   const { status, color } = useColors(w, v);
+  const text = `${w.label} ${v === null ? '–' : fmtU(v, w.unit)} ${w.unit}`.trim();
+  // shrink the letters so the whole text always sits inside the pill
+  const fs = Math.max(8, Math.min(11, (w.w - 26) / (text.length * 0.66)));
   return (
     <div style={{
       width: '100%', height: '100%', boxSizing: 'border-box', borderRadius: 999, border: `2.5px solid ${color}`, color,
-      background: '#050a14', display: 'flex', alignItems: 'center', justifyContent: 'center', whiteSpace: 'nowrap',
-      filter: glowOf(color, 5), fontFamily: 'Inter, system-ui, sans-serif', fontSize: 13.5, fontWeight: 800, letterSpacing: '0.01em',
-      animation: pulse(status),
+      background: '#050a14', display: 'flex', alignItems: 'center', justifyContent: 'center', whiteSpace: 'nowrap', overflow: 'hidden',
+      filter: glowOf(color, 5), fontFamily: 'Inter, system-ui, sans-serif', fontSize: fs, fontWeight: 700, letterSpacing: '0.01em',
+      animation: pulse(status), padding: '0 8px',
     }}>
-      {w.label} {v === null ? '–' : fmtU(v, w.unit)} {w.unit}
+      {text}
     </div>
   );
 }
