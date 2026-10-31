@@ -20,7 +20,9 @@ const WATER_GRADIENTS = {
   '#22c55e': 'linear-gradient(180deg, #4ade80 0%, #15803d 100%)',
 };
 
-export function TankLevelGauge({ value, height = 200, width = 120 }) {
+// value   = fill level in % (0-100), drives the water height and colour
+// display = optional text to print inside (e.g. "6.5 m³"); falls back to the percentage
+export function TankLevelGauge({ value, height = 200, width = 120, display }) {
   const hasValue = Number.isFinite(value);
   const clamped = hasValue ? Math.max(0, Math.min(100, value)) : 0;
   const band = hasValue ? classifyTankLevel(clamped) : null;
@@ -28,11 +30,9 @@ export function TankLevelGauge({ value, height = 200, width = 120 }) {
   const fillColor = band?.color || '#64748b';
   const fillGradient = WATER_GRADIENTS[fillColor] || WATER_GRADIENTS['#ef4444'];
 
-  // Font scales with bar width so it always fits.
-  // width 84  → ~22px
-  // width 100 → ~26px
-  // width 120 → ~31px
-  const valueFontSize = Math.max(12, Math.round(width * 0.26));
+  const text = hasValue ? (display ?? `${clamped.toFixed(1)}%`) : '--';
+  // Font scales with bar width; longer text (e.g. "10.0 m³") shrinks to fit.
+  const valueFontSize = Math.max(11, Math.min(Math.round(width * 0.26), Math.floor((width - 8) / (text.length * 0.62))));
 
   return (
     <div style={{
@@ -77,7 +77,7 @@ export function TankLevelGauge({ value, height = 200, width = 120 }) {
         whiteSpace: 'nowrap',
         overflow: 'hidden',
       }}>
-        {hasValue ? `${clamped.toFixed(1)}%` : '--'}
+        {text}
       </div>
     </div>
   );

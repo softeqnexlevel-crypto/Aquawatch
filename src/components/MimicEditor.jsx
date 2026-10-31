@@ -9,16 +9,16 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Pencil, Eye, Trash2, Copy, Download, Upload, LayoutTemplate, RotateCcw } from 'lucide-react';
 import { useData } from '../contexts/DataContext';
 import { useAuth } from '../contexts/AuthContext';
-import { rawToPercent } from './dashboardComponents/feedTankCalibration';
+import { DATA_FRESHNESS_WINDOW_MS } from './dashboardComponents/instrumentUtils';
 
-const STORAGE_KEY = 'mimic-layout-v2';
-const STORAGE_KEY_P = 'mimic-layout-portrait-v1';   // phone (vertical) layout
+const STORAGE_KEY = 'mimic-layout-v3';
+const STORAGE_KEY_P = 'mimic-layout-portrait-v2';   // phone (vertical) layout
 const PORTRAIT_BELOW = 640;                           // px of available width
 const PAD = 24;
 const CANVAS_W = 1340;
 const CANVAS_H = 560;
-const CANVAS_PW = 400;
-const CANVAS_PH = 1060;
+const CANVAS_PW = 360;
+const CANVAS_PH = 824;
 
 const NEON = {
   cyan: '#00e5ff',
@@ -56,22 +56,27 @@ function readNumber(sensorData, tag) {
   return Number.isFinite(n) ? n : null;
 }
 
+function readText(sensorData, tag) {
+  const v = sensorData?.[tag]?.value;
+  return v === undefined || v === null ? '' : String(v).trim().toUpperCase();
+}
+
 /**
  * Same numbers the Dashboard shows, built from the same MQTT tags:
- *  - RO5-FeedTankLevel  = calibrated % from the raw transmitter (RO5-FeedTankLevelRaw, 4.9 = 0 %, 10.0 = 100 %)
+ *  - RO5-FeedTankLevel  = feed tank VOLUME in m3, shown exactly as the PLC sends it
  *  - RO5-FlushTankPct   = % from RO5-FlushTank (0 = 0 %, 126 = 100 %)
  *  - MIMIC-Running      = 1 when the feed pump, HP pump, backwash or the SystemActive bit is on
+ *  - MIMIC-Fresh        = 1 when we are connected and the data is recent (drives the operation-mode box)
  */
 const FLUSH_FULL_RAW = 126;
-function withDerived(sensorData) {
+function withDerived(sensorData, fresh) {
   const out = { ...sensorData };
-  const raw = readNumber(sensorData, 'RO5-FeedTankLevelRaw');
-  if (raw !== null) out['RO5-FeedTankLevel'] = { ...(sensorData['RO5-FeedTankLevelRaw'] || {}), value: rawToPercent(raw) };
   const fl = readNumber(sensorData, 'RO5-FlushTank');
   if (fl !== null) out['RO5-FlushTankPct'] = { value: clamp((fl / FLUSH_FULL_RAW) * 100, 0, 100) };
   const bits = ['RO5-Feedpump', 'RO5-HPPpump', 'RO5-SystemActive', 'RO5-PrefilterBackwash', 'RO5-PrefilterBackwashing']
     .map((t) => readNumber(sensorData, t));
   if (bits.some((b) => b !== null)) out['MIMIC-Running'] = { value: bits.some((b) => (b || 0) > 0) ? 1 : 0 };
+  out['MIMIC-Fresh'] = { value: fresh ? 1 : 0 };
   return out;
 }
 
@@ -91,23 +96,33 @@ function fmt(v, digits = 1) {
   return Number.isInteger(v) ? String(v) : v.toFixed(digits);
 }
 
+// Decimal rules: pressures 2 dp, flows and volumes 1 dp.
+function fmtU(v, unit) {
+  if (v === null || v === undefined) return '--';
+  const u = String(unit || '').toLowerCase();
+  if (u === 'bar') return v.toFixed(2);
+  if (u === 'm³/h' || u === 'm³' || u === 'm3/h' || u === 'm3') return v.toFixed(1);
+  return fmt(v);
+}
+
 /* ------------------------------------------------------------------ defaults */
 
 const DEFAULTS = {
   tank:   { w: 125, h: 214, label: 'Tank',       unit: '%',    min: 0, max: 100, color: 'cyan' },
   vessel: { w: 91,  h: 152, label: 'Vessel',     unit: 'bar',  min: 0, max: 20,  color: 'white' },
-  ro2:    { w: 212, h: 208, label: 'Two Stage RO System\n(Concentrate Staging)', unit: 'bar', min: 0, max: 25, color: 'white', tag: 'RO5-ROPressure', tag2: 'RO5-InterstagePress', tag3: 'RO5-ConcetratePress' },
+  ro2:    { w: 212, h: 208, label: '', unit: 'bar', min: 0, max: 25, color: 'white', tag: 'RO5-ROPressure', tag2: 'RO5-InterstagePress', tag3: 'RO5-ConcetratePress' },
   pump:   { w: 80,  h: 100, label: 'Pump',       unit: '',     min: 0, max: 1,   color: 'lime', pumpAnim: 'rotate' },
   gauge:  { w: 140, h: 130, label: 'Pressure',   unit: 'bar',  min: 0, max: 20,  color: 'amber' },
   data:   { w: 170, h: 32,  label: 'FLOW',       unit: 'm³/h', min: 0, max: 100, color: 'cyan' },
   pipe:   { w: 140, h: 14,  label: '',           unit: '',     min: 0, max: 1,   color: 'blue' },
   pill:   { w: 150, h: 32,  label: 'Status',     unit: '',     min: 0, max: 1,   color: 'lime' },
   text:   { w: 200, h: 24,  label: 'Label',      unit: '',     min: 0, max: 1,   color: 'cyan' },
+  mode:   { w: 125, h: 80,  label: 'Operation',  unit: '',     min: 0, max: 1,   color: 'cyan' },
 };
 
 const PALETTE = [
   ['tank', 'Tank'], ['vessel', 'Vessel'], ['ro2', 'Two-stage RO'], ['pump', 'Pump'], ['gauge', 'Gauge'],
-  ['data', 'Data pill'], ['pipe', 'Pipe'], ['pill', 'Status'], ['text', 'Text'],
+  ['data', 'Data pill'], ['pipe', 'Pipe'], ['pill', 'Status'], ['mode', 'Mode box'], ['text', 'Text'],
 ];
 
 function makeWidget(type, x = 40, y = 40, over = {}) {
@@ -120,41 +135,55 @@ function roTemplate() {
   return [
     // pipes first so equipment draws on top of them
     W('pipe', 156, 263, { w: 705, h: 14, color: 'blue', tag: 'MIMIC-Running' }),
-    W('pipe', 899, 113, { w: 137, h: 10, color: 'teal', tag: 'RO5-Permeateflow' }),
-    W('pipe', 960, 396, { w: 10, h: 44, color: 'magenta', tag: 'RO5-ConcetrateFlow' }),
+    W('pipe', 898, 396, { w: 8, h: 42, color: 'teal', tag: 'RO5-Permeateflow' }),      // permeate line: RO vessel -> PERM
+    W('pipe', 1031, 396, { w: 10, h: 42, color: 'magenta', tag: 'RO5-ConcetrateFlow' }), // concentrate line: RO vessel -> CONC
     W('pipe', 331, 275, { w: 11, h: 210, color: 'olive', tag: 'RO5-AntiscalantDosingActive' }),
 
-    W('tank', 34, 167, { w: 125, h: 214, label: 'Feed tank', tag: 'RO5-FeedTankLevel', unit: '%', lo: 20 }),
+    W('mode', 34, 50, { w: 125, h: 80, label: 'Operation' }),
+    W('tank', 34, 167, { w: 125, h: 214, label: 'Feed tank', tag: 'RO5-FeedTankLevel', unit: 'm³', min: 0, max: 10, lo: 2 }),
     W('pump', 223, 230, { w: 80, h: 100, label: 'Feed pump', tag: 'RO5-Feedpump', color: 'lime' }),
+    W('data', 198, 186, { w: 130, h: 30, label: 'FEED FLOW', tag: 'RO5-FEEDFlow', unit: 'm³/h', color: 'cyan' }),
     W('vessel', 368, 179, { w: 91, h: 152, label: 'Media filter', tag: 'RO5-MediaFilterInPress', unit: 'bar', max: 10 }),
     W('vessel', 524, 190, { w: 58, h: 130, label: 'Cartridge', unit: '' }),
     W('pump', 655, 225, { w: 96, h: 112, label: 'HP pump', tag: 'RO5-HPPpump', color: 'amber' }),
-    W('gauge', 770, 20, { w: 140, h: 150, label: '', tag: 'RO5-ROPressure', unit: 'bar', max: 20, hi: 18, color: 'amber' }),
+    // three pressure gauges, each above its equipment
+    W('gauge', 348, 20, { w: 130, h: 150, label: 'Media in', tag: 'RO5-MediaFilterInPress', unit: 'bar', max: 10, color: 'amber' }),
+    W('gauge', 488, 20, { w: 130, h: 150, label: 'Media out', tag: 'RO5-MediaFilterOutPress', unit: 'bar', max: 10, color: 'amber' }),
+    W('gauge', 638, 20, { w: 130, h: 150, label: 'RO feed', tag: 'RO5-ROPressure', unit: 'bar', max: 20, hi: 18, color: 'amber' }),
     W('ro2', 859, 190, { w: 212, h: 208 }),
-    W('data', 1036, 96, { w: 170, h: 32, label: 'PERM', tag: 'RO5-Permeateflow', unit: 'm³/h', color: 'cyan' }),
-    W('data', 870, 436, { w: 191, h: 32, label: 'CONC → DRAIN', tag: 'RO5-ConcetrateFlow', unit: 'm³/h', color: 'magenta' }),
+    W('data', 840, 436, { w: 124, h: 32, label: 'PERM', tag: 'RO5-Permeateflow', unit: 'm³/h', color: 'cyan' }),
+    W('data', 974, 436, { w: 124, h: 32, label: 'CONC', tag: 'RO5-ConcetrateFlow', unit: 'm³/h', color: 'magenta' }),
     W('tank', 246, 391, { w: 67, h: 113, label: 'Antiscalant', tag: 'RO5-AntiscalantDaily', unit: 'ml', min: 0, max: 5000, color: 'lime' }),
   ];
 }
 
-/** Same plant, stacked top-to-bottom for phones. */
+/** Same plant, stacked top-to-bottom for phones (360 x 824, same as the mobile app). */
 function roTemplatePortrait() {
   const W = (type, x, y, over) => makeWidget(type, x, y, over);
   return [
-    W('pipe', 193, 170, { w: 14, h: 610, color: 'blue', tag: 'MIMIC-Running' }),
-    W('pipe', 90, 380, { w: 106, h: 11, color: 'olive', tag: 'RO5-AntiscalantDosingActive' }),
-    W('pipe', 195, 970, { w: 10, h: 42, color: 'magenta', tag: 'RO5-ConcetrateFlow' }),
+    W('pipe', 175, 98, { w: 10, h: 40, color: 'blue', tag: 'MIMIC-Running' }),
+    W('pipe', 175, 230, { w: 10, h: 26, color: 'blue', tag: 'MIMIC-Running' }),
+    W('pipe', 175, 352, { w: 10, h: 22, color: 'blue', tag: 'MIMIC-Running' }),
+    W('pipe', 175, 458, { w: 10, h: 24, color: 'blue', tag: 'MIMIC-Running' }),
+    W('pipe', 175, 584, { w: 10, h: 34, color: 'blue', tag: 'MIMIC-Running' }),
+    W('pipe', 80, 358, { w: 100, h: 8, color: 'olive', tag: 'RO5-AntiscalantDosingActive' }),
+    W('pipe', 79, 744, { w: 8, h: 42, color: 'teal', tag: 'RO5-Permeateflow' }),
+    W('pipe', 262, 744, { w: 10, h: 42, color: 'magenta', tag: 'RO5-ConcetrateFlow' }),
 
-    W('tank', 145, 10, { w: 110, h: 170, label: 'Feed tank', tag: 'RO5-FeedTankLevel', unit: '%', lo: 20 }),
-    W('pump', 160, 205, { w: 80, h: 100, label: 'Feed pump', tag: 'RO5-Feedpump', color: 'lime' }),
-    W('vessel', 155, 320, { w: 91, h: 130, label: 'Media filter', tag: 'RO5-MediaFilterInPress', unit: 'bar', max: 10 }),
-    W('tank', 14, 350, { w: 72, h: 120, label: 'Antiscalant', tag: 'RO5-AntiscalantDaily', unit: 'ml', min: 0, max: 5000, color: 'lime' }),
-    W('vessel', 171, 470, { w: 58, h: 110, label: 'Cartridge', unit: '' }),
-    W('pump', 152, 600, { w: 96, h: 112, label: 'HP pump', tag: 'RO5-HPPpump', color: 'amber' }),
-    W('gauge', 262, 585, { w: 130, h: 150, label: '', tag: 'RO5-ROPressure', unit: 'bar', max: 20, hi: 18, color: 'amber' }),
-    W('ro2', 80, 770, { w: 240, h: 200 }),
-    W('data', 215, 718, { w: 170, h: 30, label: 'PERM', tag: 'RO5-Permeateflow', unit: 'm³/h', color: 'cyan' }),
-    W('data', 105, 1012, { w: 191, h: 32, label: 'CONC → DRAIN', tag: 'RO5-ConcetrateFlow', unit: 'm³/h', color: 'magenta' }),
+    W('mode', 2, 10, { w: 84, h: 62, label: 'Operation' }),
+    W('tank', 90, 6, { w: 180, h: 92, label: 'Feed tank', tag: 'RO5-FeedTankLevel', unit: 'm³', min: 0, max: 10, lo: 2 }),
+    W('pump', 145, 138, { w: 70, h: 92, label: 'Feed pump', tag: 'RO5-Feedpump', color: 'lime' }),
+    W('data', 2, 168, { w: 140, h: 32, label: 'FEED FLOW', tag: 'RO5-FEEDFlow', unit: 'm³/h', color: 'cyan' }),
+    W('vessel', 120, 256, { w: 120, h: 96, label: 'Media filter', tag: 'RO5-MediaFilterInPress', unit: 'bar', max: 10 }),
+    W('vessel', 135, 374, { w: 90, h: 84, label: 'Cartridge', unit: '' }),
+    W('pump', 140, 482, { w: 80, h: 102, label: 'HP pump', tag: 'RO5-HPPpump', color: 'amber' }),
+    W('gauge', 234, 226, { w: 126, h: 126, label: 'Media in', tag: 'RO5-MediaFilterInPress', unit: 'bar', max: 10, color: 'amber' }),
+    W('gauge', 234, 354, { w: 126, h: 126, label: 'Media out', tag: 'RO5-MediaFilterOutPress', unit: 'bar', max: 10, color: 'amber' }),
+    W('gauge', 234, 482, { w: 126, h: 126, label: 'RO feed', tag: 'RO5-ROPressure', unit: 'bar', max: 20, hi: 18, color: 'amber' }),
+    W('ro2', 40, 616, { w: 280, h: 128 }),
+    W('data', 8, 784, { w: 150, h: 32, label: 'PERM', tag: 'RO5-Permeateflow', unit: 'm³/h', color: 'cyan' }),
+    W('data', 192, 784, { w: 150, h: 32, label: 'CONC', tag: 'RO5-ConcetrateFlow', unit: 'm³/h', color: 'magenta' }),
+    W('tank', 2, 290, { w: 78, h: 140, label: 'Antiscalant', tag: 'RO5-AntiscalantDaily', unit: 'ml', min: 0, max: 5000, color: 'lime' }),
   ];
 }
 
@@ -185,7 +214,7 @@ function Tank({ w, v }) {
   const range = (Number(w.max) - Number(w.min)) || 1;
   const pct = v === null ? 0 : clamp(((v - Number(w.min)) / range) * 100, 0, 100);
   const showPct = w.unit === '%' || w.unit === '';
-  const big = v === null ? '--' : showPct ? `${Math.round(pct)}%` : (Math.abs(v) >= 100 ? String(Math.round(v)) : fmt(v));
+  const big = v === null ? '--' : showPct ? `${Math.round(pct)}%` : (Math.abs(v) >= 100 ? String(Math.round(v)) : fmtU(v, w.unit));
   const unitLine = v !== null && !showPct ? w.unit : '';
   const gid = `tg-${w.id}`;
   const fillH = ((H - 8) * pct) / 100;
@@ -219,7 +248,7 @@ function Vessel({ w, v }) {
   const gid = `vg-${w.id}`;
   const lines = [];
   for (let y = 22; y < H - 26; y += 15.5) lines.push(y);
-  const text = v === null ? `– ${w.unit}` : `${fmt(v)} ${w.unit}`;
+  const text = v === null ? `– ${w.unit}` : `${fmtU(v, w.unit)} ${w.unit}`;
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Label style={{ height: 16, marginBottom: 0 }}>{w.label}</Label>
@@ -250,8 +279,13 @@ function Pump({ w, v, anim }) {
   const area = w.h - 22;
   const r = Math.min(w.w, area) / 2 - 4;
   const cx = w.w / 2, cy = area / 2;
-  // triangle drawn around its own centre so it turns on the spot
-  const tri = `0,${-r * 0.61} ${r * 0.47},${r * 0.31} ${-r * 0.47},${r * 0.31}`;
+  // four curved fan blades drawn around the centre so the fan turns on the spot
+  const L = r * 0.82, bw = L * 0.34;
+  const rot = (x, y, deg) => {
+    const a = (deg * Math.PI) / 180;
+    return `${(x * Math.cos(a) - y * Math.sin(a)).toFixed(2)} ${(x * Math.sin(a) + y * Math.cos(a)).toFixed(2)}`;
+  };
+  const blade = (deg) => `M ${rot(0, 0, deg)} C ${rot(-bw, -L * 0.2, deg)} ${rot(-bw * 1.1, -L * 0.85, deg)} ${rot(0, -L, deg)} C ${rot(bw * 1.1, -L * 0.85, deg)} ${rot(bw, -L * 0.2, deg)} ${rot(0, 0, deg)} Z`;
   return (
     <div style={{ width: '100%', height: '100%' }}>
       <svg width={w.w} height={area} viewBox={`0 0 ${w.w} ${area}`} style={{ display: 'block', filter: glowOf(color, 6), animation: pulse(status), overflow: 'visible' }}>
@@ -259,7 +293,10 @@ function Pump({ w, v, anim }) {
           style={{ animation: on && mode === 'blink' ? 'neon-run 2.4s ease-in-out infinite' : 'none' }} />
         <g transform={`translate(${cx} ${cy})`}>
           <g>
-            <polygon points={tri} fill={color} />
+            {[0, 90, 180, 270].map((k) => (
+              <path key={k} d={blade(k + 20)} fill={color} fillOpacity="0.9" stroke="#050a10" strokeWidth="1" />
+            ))}
+            <circle cx="0" cy="0" r={Math.max(2.5, r * 0.09)} fill="#050a10" stroke={color} strokeWidth="1.5" />
             {on && mode === 'rotate' && (
               <animateTransform attributeName="transform" type="rotate" from="0 0 0" to="360 0 0" dur="1.6s" repeatCount="indefinite" />
             )}
@@ -274,7 +311,7 @@ function Pump({ w, v, anim }) {
 // Dark neon arc dial (0 - max), orange danger zone near the top end, white needle.
 function Gauge({ w, v }) {
   const { status } = useColors(w, v);
-  const size = Math.max(60, Math.min(w.w, w.h));
+  const size = Math.max(60, Math.min(w.w, w.h - (w.label ? 16 : 0)));
   const min = Number(w.min) || 0;
   const max = Number(w.max) > min ? Number(w.max) : 20;
   const frac = (x) => clamp((x - min) / (max - min), 0, 1);
@@ -310,7 +347,7 @@ function Gauge({ w, v }) {
         })}
         <line x1={C} y1={C} x2={nx} y2={ny} stroke="#e8eef8" strokeWidth="3" strokeLinecap="round" />
         <circle cx={C} cy={C} r="6" fill={NEON.amber} style={{ filter: `drop-shadow(0 0 5px ${NEON.amber})` }} />
-        <text x={C} y="150" textAnchor="middle" fontSize="30" fontWeight="800" fill={valueColor} fontFamily="Inter, system-ui, sans-serif" style={{ filter: `drop-shadow(0 0 5px ${valueColor}88)` }}>{v === null ? '--' : fmt(v)}</text>
+        <text x={C} y="150" textAnchor="middle" fontSize="30" fontWeight="800" fill={valueColor} fontFamily="Inter, system-ui, sans-serif" style={{ filter: `drop-shadow(0 0 5px ${valueColor}88)` }}>{v === null ? '--' : fmtU(v, w.unit || 'bar')}</text>
         <text x={C} y="168" textAnchor="middle" fontSize="11" fontWeight="800" fill={NEON.magenta} fontFamily="Inter, system-ui, sans-serif">{String(w.unit || 'bar').toUpperCase()}</text>
       </svg>
       {w.label ? <Label>{w.label}</Label> : null}
@@ -324,14 +361,14 @@ function TwoStageVessel({ w, v1, v2, v3 }) {
   const gid = `rg-${w.id}`;
   const lines = [];
   for (let y = 18; y < H - 12; y += 15.5) lines.push(y);
-  const [l1, l2] = String(w.label || '').split('\n');
+  const y0 = H / 2 - 18;
   const d = (a, b) => (a === null || b === null ? null : Math.max(0, a - b));
   const stage = (x, title, a, b) => (
     <g>
-      <text x={x} y={H * 0.58} textAnchor="middle" fontSize="11" fontWeight="800" fill={LABEL_COLOR} fontFamily="Inter, system-ui, sans-serif">{title}</text>
-      <text x={x} y={H * 0.58 + 22} textAnchor="middle" fontSize="15" fontWeight="800" fill="#ffffff" fontFamily="Inter, system-ui, sans-serif">{a === null ? '--' : fmt(a)} → {b === null ? '--' : fmt(b)}</text>
-      <text x={x} y={H * 0.58 + 38} textAnchor="middle" fontSize="10.5" fontWeight="700" fill="#8fa3bd" fontFamily="Inter, system-ui, sans-serif">bar</text>
-      <text x={x} y={H * 0.58 + 56} textAnchor="middle" fontSize="12" fontWeight="800" fill={NEON.cyan} fontFamily="Inter, system-ui, sans-serif">ΔP {d(a, b) === null ? '--' : d(a, b).toFixed(2)}</text>
+      <text x={x} y={y0} textAnchor="middle" fontSize="11" fontWeight="800" fill={LABEL_COLOR} fontFamily="Inter, system-ui, sans-serif">{title}</text>
+      <text x={x} y={y0 + 20} textAnchor="middle" fontSize="15" fontWeight="800" fill="#ffffff" fontFamily="Inter, system-ui, sans-serif">{a === null ? '--' : a.toFixed(2)} → {b === null ? '--' : b.toFixed(2)}</text>
+      <text x={x} y={y0 + 33} textAnchor="middle" fontSize="10.5" fontWeight="700" fill="#8fa3bd" fontFamily="Inter, system-ui, sans-serif">bar</text>
+      <text x={x} y={y0 + 49} textAnchor="middle" fontSize="12" fontWeight="800" fill={NEON.cyan} fontFamily="Inter, system-ui, sans-serif">ΔP {d(a, b) === null ? '--' : d(a, b).toFixed(2)}</text>
     </g>
   );
   return (
@@ -343,10 +380,7 @@ function TwoStageVessel({ w, v1, v2, v3 }) {
       </defs>
       <rect x="2" y="2" width={W - 4} height={H - 4} rx="16" fill={`url(#${gid})`} stroke="#e8eef8" strokeWidth="2.5" />
       {lines.map((y) => <line key={y} x1="10" y1={y} x2={W - 10} y2={y} stroke="#566074" strokeOpacity="0.55" strokeWidth="1.1" />)}
-      <rect x="10" y="16" width={W - 20} height="50" rx="8" fill="#0a0f18" fillOpacity="0.82" />
-      <text x={W / 2} y="38" textAnchor="middle" fontSize="15.5" fontWeight="800" fill="#ffc400" fontFamily="Inter, system-ui, sans-serif" style={{ filter: 'drop-shadow(0 0 5px #ff8c0099)' }}>{l1}</text>
-      {l2 ? <text x={W / 2} y="57" textAnchor="middle" fontSize="12.5" fontWeight="700" fill="#ff9a1f" fontFamily="Inter, system-ui, sans-serif">{l2}</text> : null}
-      <line x1={W / 2} y1={H * 0.5} x2={W / 2} y2={H - 14} stroke="#566074" strokeWidth="1.2" />
+      <line x1={W / 2} y1="16" x2={W / 2} y2={H - 16} stroke="#566074" strokeWidth="1.2" />
       {stage(W * 0.25, 'STAGE-1', v1, v2)}
       {stage(W * 0.75, 'STAGE-2', v2, v3)}
     </svg>
@@ -362,7 +396,38 @@ function DataPill({ w, v }) {
       filter: glowOf(color, 5), fontFamily: 'Inter, system-ui, sans-serif', fontSize: 12.5, fontWeight: 800, letterSpacing: '0.02em',
       animation: pulse(status),
     }}>
-      {w.label} {v === null ? '–' : fmt(v)} {w.unit}
+      {w.label} {v === null ? '–' : fmtU(v, w.unit)} {w.unit}
+    </div>
+  );
+}
+
+function ModeBox({ w, sensorData }) {
+  const fresh = readNumber(sensorData, 'MIMIC-Fresh') === 1;
+  const op = readText(sensorData, 'RO5-SystemOperation');
+  const on = (t) => (readNumber(sensorData, t) ?? 0) > 0;
+  const backwashBit = on('RO5-PrefilterBackwash') || on('RO5-PrefilterBackwashing');
+  const pumpBit = on('RO5-Feedpump') || on('RO5-HPPpump');
+  const FILTERING = { text: 'FILTERING', color: NEON.green };
+  const BACKWASH = { text: 'BACKWASH', color: NEON.amber };
+  const STANDBY = { text: 'STANDBY', color: NEON.amber };
+  const mode = !fresh ? { text: 'NO DATA', color: NEON.grey }
+    : op.includes('FILTER') ? FILTERING
+    : op.includes('BACKWASH') || op.includes('BACK WASH') ? BACKWASH
+    : op.includes('STANDBY') || op.includes('STAND BY') ? STANDBY
+    : op === 'OFF' || op === 'STOP' || op === 'STOPPED' ? { text: 'OFF', color: NEON.red }
+    : backwashBit ? BACKWASH
+    : pumpBit ? FILTERING
+    : STANDBY;
+  const fs = Math.max(9, Math.min(15, (w.w - 14) / (mode.text.length * 0.7)));
+  return (
+    <div style={{
+      width: '100%', height: '100%', boxSizing: 'border-box', borderRadius: 12, border: `2.5px solid ${mode.color}`, background: '#050a14',
+      filter: glowOf(mode.color, 5), display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
+      fontFamily: 'Inter, system-ui, sans-serif',
+    }}>
+      <div style={{ fontSize: 9, fontWeight: 700, color: LABEL_COLOR, letterSpacing: '0.05em', textTransform: 'uppercase' }}>{w.label}</div>
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: mode.color, boxShadow: `0 0 8px ${mode.color}` }} />
+      <div style={{ fontSize: fs, fontWeight: 800, color: mode.color, whiteSpace: 'nowrap' }}>{mode.text}</div>
     </div>
   );
 }
@@ -414,7 +479,7 @@ function ValueCard({ w, v }) {
     }}>
       <div style={{ fontSize: 11, color: LABEL_COLOR, fontWeight: 700, textTransform: 'uppercase', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{w.label}</div>
       <div style={{ fontSize: 22, fontWeight: 800, lineHeight: 1.1 }}>
-        {fmt(v)}<span style={{ fontSize: 11, marginLeft: 4 }}>{v !== null ? w.unit : ''}</span>
+        {fmtU(v, w.unit)}<span style={{ fontSize: 11, marginLeft: 4 }}>{v !== null ? w.unit : ''}</span>
       </div>
     </div>
   );
@@ -445,6 +510,7 @@ function WidgetBody({ w, sensorData }) {
     case 'pipe': return <Pipe w={w} v={v} anim={anim} />;
     case 'pill': return <ValueStatusPill w={w} v={v} />;
     case 'text': return <TextLabel w={w} />;
+    case 'mode': return <ModeBox w={w} sensorData={sensorData} />;
     default: return null;
   }
 }
@@ -463,31 +529,7 @@ const btn = {
 function loadLayout() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const arr = JSON.parse(raw);
-      if (Array.isArray(arr)) {
-        const mapped = arr.map((w) => {
-          if (w.type === 'tank' && /antiscalant/i.test(w.label || '') && !w.tag) return { ...w, tag: 'RO5-AntiscalantDaily', unit: 'ml', max: 5000 };
-          // older layouts drove everything from SystemActive; use the real pump bits like the Dashboard
-          if (w.type === 'gauge' && w.w === 140 && w.h === 130) return { ...w, x: 742, y: 27, w: 180, h: 206 };
-          if (w.type === 'pump' && w.tag === 'RO5-SystemActive' && /feed/i.test(w.label || '')) return { ...w, tag: 'RO5-Feedpump' };
-          if (w.type === 'pump' && w.tag === 'RO5-SystemActive' && /hp|high/i.test(w.label || '')) return { ...w, tag: 'RO5-HPPpump' };
-          if (w.type === 'pipe' && w.tag === 'RO5-SystemActive') return { ...w, tag: 'MIMIC-Running' };
-          if (w.type === 'pump' && !w.pumpAnim) return { ...w, pumpAnim: 'rotate' };
-          return w;
-        });
-        const s1 = mapped.find((w) => w.type === 'vessel' && /stage-?\s*1/i.test(w.label || ''));
-        const s2 = mapped.find((w) => w.type === 'vessel' && /stage-?\s*2/i.test(w.label || ''));
-        if (s1 && s2) {
-          // two separate stage vessels -> one "Two Stage RO System" vessel showing both stages
-          const left = Math.min(s1.x, s2.x);
-          const out = mapped.filter((w) => w !== s1 && w !== s2 && !(w.type === 'text' && /two stage/i.test(w.label || '')));
-          out.push(makeWidget('ro2', left, Math.max(190, Math.min(s1.y, s2.y)), { w: 212, h: Math.max(s1.h, 208) }));
-          return out.map((w) => (w.type === 'gauge' ? { ...w, max: 20, ...(w.w === 180 && w.h === 206 ? { x: 770, y: 20, w: 140, h: 150 } : {}) } : w));
-        }
-        return mapped;
-      }
-    }
+    if (raw) { const arr = JSON.parse(raw); if (Array.isArray(arr) && arr.length) return arr; }
   } catch { /* ignore */ }
   return roTemplate();
 }
@@ -495,14 +537,21 @@ function loadLayout() {
 function loadPortrait() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_P);
-    if (raw) { const arr = JSON.parse(raw); if (Array.isArray(arr) && arr.length) return arr.some((w) => w.type === 'vessel' && /stage-?\s*[12]/i.test(w.label || '')) ? roTemplatePortrait() : arr; }
+    if (raw) { const arr = JSON.parse(raw); if (Array.isArray(arr) && arr.length) return arr; }
   } catch { /* ignore */ }
   return roTemplatePortrait();
 }
 
 export function MimicEditor() {
-  const { sensorData: rawSensorData = {} } = useData();
-  const sensorData = useMemo(() => withDerived(rawSensorData), [rawSensorData]);
+  const { sensorData: rawSensorData = {}, connected, lastUpdate } = useData();
+  const [tick, setTick] = useState(0);                 // re-check data freshness every 10 s
+  useEffect(() => { const t = setInterval(() => setTick((n) => n + 1), 10000); return () => clearInterval(t); }, []);
+  const sensorData = useMemo(() => {
+    const active = Object.keys(rawSensorData).filter((k) => rawSensorData[k]?.value !== undefined && rawSensorData[k]?.value !== null).length;
+    const recent = Boolean(lastUpdate && (Date.now() - new Date(lastUpdate).getTime()) < DATA_FRESHNESS_WINDOW_MS);
+    return withDerived(rawSensorData, Boolean(connected) && active > 0 && recent);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rawSensorData, connected, lastUpdate, tick]);
   const { user } = useAuth();
   const canEdit = !!user?.isSuperAdmin; // only a super admin can edit the Visualization
 
@@ -721,7 +770,7 @@ export function MimicEditor() {
                 ))}
               </>
             )}
-            {selected.type !== 'text' && selected.type !== 'ro2' && (
+            {!['text', 'ro2', 'mode'].includes(selected.type) && (
               <>
                 <label style={{ fontSize: 11, color: 'var(--muted-foreground)' }}>Tag (live value)
                   <input style={field} list="mimic-tags" value={selected.tag} onChange={(e) => patch(selected.id, { tag: e.target.value.trim() })} placeholder="e.g. RO5-ROPressure" />

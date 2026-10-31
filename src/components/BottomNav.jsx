@@ -23,7 +23,7 @@ const MAIN = [
 // Everything else lives under "More", grouped like the client's app
 const MORE_GROUPS = [
   { title: "Operations", items: [
-    { id: "antiscalant", label: "Antiscalant",     icon: FlaskConical, page: "antiscalant" },
+   // { id: "antiscalant", label: "Antiscalant",     icon: FlaskConical, page: "antiscalant" },
     { id: "filtration",  label: "Filtration",      icon: Filter,       page: "filtration" },
     { id: "recovery",    label: "System Recovery", icon: RotateCcw,    page: "system recovery" },
   ]},
