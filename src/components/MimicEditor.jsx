@@ -142,7 +142,7 @@ function roTemplate() {
     W('mode', 34, 50, { w: 125, h: 80, label: 'Operation' }),
     W('tank', 34, 167, { w: 125, h: 214, label: 'Feed tank', tag: 'RO5-FeedTankLevel', unit: 'm³', min: 0, max: 10, lo: 2 }),
     W('pump', 223, 230, { w: 80, h: 100, label: 'Feed pump', tag: 'RO5-Feedpump', color: 'lime' }),
-    W('data', 198, 186, { w: 130, h: 30, label: 'FEED FLOW', tag: 'RO5-FEEDFlow', unit: 'm³/h', color: 'cyan' }),
+    W('data', 173, 182, { w: 180, h: 36, label: 'FEED FLOW', tag: 'RO5-FEEDFlow', unit: 'm³/h', color: 'cyan' }),
     W('vessel', 368, 179, { w: 91, h: 152, label: 'Media filter', tag: 'RO5-MediaFilterInPress', unit: 'bar', max: 10 }),
     W('vessel', 524, 190, { w: 58, h: 130, label: 'Cartridge', unit: '' }),
     W('pump', 655, 225, { w: 96, h: 112, label: 'HP pump', tag: 'RO5-HPPpump', color: 'amber' }),
@@ -153,7 +153,7 @@ function roTemplate() {
     W('ro2', 859, 190, { w: 212, h: 208 }),
     W('data', 840, 436, { w: 124, h: 32, label: 'PERM', tag: 'RO5-Permeateflow', unit: 'm³/h', color: 'cyan' }),
     W('data', 974, 436, { w: 124, h: 32, label: 'CONC', tag: 'RO5-ConcetrateFlow', unit: 'm³/h', color: 'magenta' }),
-    W('tank', 246, 391, { w: 67, h: 113, label: 'Antiscalant', tag: 'RO5-AntiscalantDaily', unit: 'ml', min: 0, max: 5000, color: 'lime' }),
+    W('tank', 236, 391, { w: 90, h: 140, label: 'Antiscalant', tag: 'RO5-AntiscalantDaily', unit: 'ml', min: 0, max: 5000, color: 'lime' }),
   ];
 }
 
@@ -173,7 +173,7 @@ function roTemplatePortrait() {
     W('mode', 2, 10, { w: 84, h: 62, label: 'Operation' }),
     W('tank', 90, 6, { w: 180, h: 92, label: 'Feed tank', tag: 'RO5-FeedTankLevel', unit: 'm³', min: 0, max: 10, lo: 2 }),
     W('pump', 145, 138, { w: 70, h: 92, label: 'Feed pump', tag: 'RO5-Feedpump', color: 'lime' }),
-    W('data', 2, 168, { w: 140, h: 32, label: 'FEED FLOW', tag: 'RO5-FEEDFlow', unit: 'm³/h', color: 'cyan' }),
+    W('data', 2, 164, { w: 150, h: 36, label: 'FEED FLOW', tag: 'RO5-FEEDFlow', unit: 'm³/h', color: 'cyan' }),
     W('vessel', 120, 256, { w: 120, h: 96, label: 'Media filter', tag: 'RO5-MediaFilterInPress', unit: 'bar', max: 10 }),
     W('vessel', 135, 374, { w: 90, h: 84, label: 'Cartridge', unit: '' }),
     W('pump', 140, 482, { w: 80, h: 102, label: 'HP pump', tag: 'RO5-HPPpump', color: 'amber' }),
@@ -183,7 +183,7 @@ function roTemplatePortrait() {
     W('ro2', 40, 616, { w: 280, h: 128 }),
     W('data', 8, 784, { w: 150, h: 32, label: 'PERM', tag: 'RO5-Permeateflow', unit: 'm³/h', color: 'cyan' }),
     W('data', 192, 784, { w: 150, h: 32, label: 'CONC', tag: 'RO5-ConcetrateFlow', unit: 'm³/h', color: 'magenta' }),
-    W('tank', 2, 290, { w: 78, h: 140, label: 'Antiscalant', tag: 'RO5-AntiscalantDaily', unit: 'ml', min: 0, max: 5000, color: 'lime' }),
+    W('tank', 0, 280, { w: 82, h: 150, label: 'Antiscalant', tag: 'RO5-AntiscalantDaily', unit: 'ml', min: 0, max: 5000, color: 'lime' }),
   ];
 }
 
@@ -331,6 +331,7 @@ function Gauge({ w, v }) {
   const valueColor = status === 'alarm' ? NEON.red : NEON.amber;
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', animation: pulse(status) }}>
+      {w.label ? <Label style={{ marginBottom: 2 }}>{w.label}</Label> : null}
       <svg width={size} height={size} viewBox="0 0 200 200" style={{ display: 'block', overflow: 'visible' }}>
         <path d={arc(min, max)} fill="none" stroke="#151c2a" strokeWidth="13" strokeLinecap="round" />
         <path d={arc(zoneFrom, max)} fill="none" stroke={NEON.amber} strokeWidth="13" strokeLinecap="round" style={{ filter: `drop-shadow(0 0 4px ${NEON.amber})` }} />
@@ -350,7 +351,6 @@ function Gauge({ w, v }) {
         <text x={C} y="150" textAnchor="middle" fontSize="30" fontWeight="800" fill={valueColor} fontFamily="Inter, system-ui, sans-serif" style={{ filter: `drop-shadow(0 0 5px ${valueColor}88)` }}>{v === null ? '--' : fmtU(v, w.unit || 'bar')}</text>
         <text x={C} y="168" textAnchor="middle" fontSize="11" fontWeight="800" fill={NEON.magenta} fontFamily="Inter, system-ui, sans-serif">{String(w.unit || 'bar').toUpperCase()}</text>
       </svg>
-      {w.label ? <Label>{w.label}</Label> : null}
     </div>
   );
 }
@@ -393,7 +393,7 @@ function DataPill({ w, v }) {
     <div style={{
       width: '100%', height: '100%', boxSizing: 'border-box', borderRadius: 999, border: `2.5px solid ${color}`, color,
       background: '#050a14', display: 'flex', alignItems: 'center', justifyContent: 'center', whiteSpace: 'nowrap',
-      filter: glowOf(color, 5), fontFamily: 'Inter, system-ui, sans-serif', fontSize: 12.5, fontWeight: 800, letterSpacing: '0.02em',
+      filter: glowOf(color, 5), fontFamily: 'Inter, system-ui, sans-serif', fontSize: 13.5, fontWeight: 800, letterSpacing: '0.01em',
       animation: pulse(status),
     }}>
       {w.label} {v === null ? '–' : fmtU(v, w.unit)} {w.unit}
