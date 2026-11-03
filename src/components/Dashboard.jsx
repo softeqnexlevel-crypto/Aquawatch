@@ -869,7 +869,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
 
   const isStartingUp = systemActiveOn && feedPumpOn && !highPressurePumpOn && operationMode === 'FILTER';
 
-  const dailyProdDisplay = summaryLoading ? '...' : Math.round(dailyProduction).toLocaleString();
+  const dailyProdDisplay = summaryLoading ? '...' : Number(dailyProduction).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
   const roHealthScore = computeHealthScore(activeAlarmsList, hasFreshData);
 
@@ -993,7 +993,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             color={pureWaterEC > 150 ? COLORS.danger : pureWaterEC > 0 ? COLORS.success : COLORS.primary} statusText={pureWaterEC > 150 ? "High" : pureWaterEC > 0 ? "Within limits" : "—"} statusOk={pureWaterEC <= 150 && pureWaterEC > 0} />
           <KPICardV2 label="Daily Production" unit="m³" icon={TrendingUp} value={dailyProdDisplay}
             color={dailyProduction > 0 ? COLORS.success : COLORS.primary} statusText={summaryLoading ? "Loading" : `${safeFormat(permeateFlow, 1)} m³/h now`} statusOk={true} />
-          <KPICardV2 label="Feed Tank Raw" unit="" icon={Droplets} value={hasRawTankReading ? feedTankLevelRawNum.toFixed(3) : '--'}
+          <KPICardV2 label="Feed Tank Raw" unit="" icon={Droplets} value={hasRawTankReading ? feedTankLevelRawNum.toFixed(2) : '--'}
             color={COLORS.muted}
             statusText={hasRawTankReading ? 'Raw signal' : 'No reading'}
             statusOk={hasRawTankReading} />

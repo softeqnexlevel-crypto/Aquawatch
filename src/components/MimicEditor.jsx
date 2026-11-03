@@ -102,6 +102,7 @@ function fmtU(v, unit) {
   const u = String(unit || '').toLowerCase();
   if (u === 'bar') return v.toFixed(2);
   if (u === 'm³/h' || u === 'm³' || u === 'm3/h' || u === 'm3') return v.toFixed(1);
+  if (u === 'ml') return v.toFixed(2);          // antiscalant: 2 decimals
   return fmt(v);
 }
 
@@ -214,7 +215,7 @@ function Tank({ w, v }) {
   const range = (Number(w.max) - Number(w.min)) || 1;
   const pct = v === null ? 0 : clamp(((v - Number(w.min)) / range) * 100, 0, 100);
   const showPct = w.unit === '%' || w.unit === '';
-  const big = v === null ? '--' : showPct ? `${Math.round(pct)}%` : (Math.abs(v) >= 100 ? String(Math.round(v)) : fmtU(v, w.unit));
+  const big = v === null ? '--' : showPct ? `${Math.round(pct)}%` : fmtU(v, w.unit);
   const unitLine = v !== null && !showPct ? w.unit : '';
   const gid = `tg-${w.id}`;
   const fillH = ((H - 8) * pct) / 100;
