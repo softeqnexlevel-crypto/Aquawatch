@@ -11,8 +11,8 @@ import { useData } from '../contexts/DataContext';
 import { useAuth } from '../contexts/AuthContext';
 import { DATA_FRESHNESS_WINDOW_MS } from './dashboardComponents/instrumentUtils';
 
-const STORAGE_KEY = 'mimic-layout-v9';
-const STORAGE_KEY_P = 'mimic-layout-portrait-v6';   // phone (vertical) layout
+const STORAGE_KEY = 'mimic-layout-v10';
+const STORAGE_KEY_P = 'mimic-layout-portrait-v7';   // phone (vertical) layout
 const PORTRAIT_BELOW = 640;                           // px of available width
 const PAD = 24;
 const CANVAS_W = 1340;
@@ -295,8 +295,8 @@ function Vessel({ w, v }) {
           <line key={y} x1="10" y1={y} x2={W - 10} y2={y} stroke="#566074" strokeOpacity="0.7" strokeWidth="1.2" />
         ))}
         {bigDp && (<>
-          <text x={W / 2} y={H / 2 + 6} textAnchor="middle" fontSize={Math.min(34, W / 3)} fontWeight="800" fill="#ffffff" fontFamily="Inter, system-ui, sans-serif">{dpText}</text>
-          <text x={W / 2} y={H / 2 + 24} textAnchor="middle" fontSize="11" fontWeight="700" fill={color} fontFamily="Inter, system-ui, sans-serif">{w.unit}</text>
+          <text x={W / 2} y={H / 2 + 2} textAnchor="middle" fontSize="18" fontWeight="800" fill="#ffffff" fontFamily="Inter, system-ui, sans-serif">{dpText}</text>
+          <text x={W / 2} y={H / 2 + 15} textAnchor="middle" fontSize="9" fontWeight="700" fill="#00e5ff" fontFamily="Inter, system-ui, sans-serif">ΔP {w.unit}</text>
         </>)}
         {!bigDp && w.unit !== '' && (
           <text x={W / 2} y={H - 10} textAnchor="middle" fontSize="11" fontWeight="800" fill="#ffffff" fontFamily="Inter, system-ui, sans-serif">{text}</text>
