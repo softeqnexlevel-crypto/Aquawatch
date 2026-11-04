@@ -353,7 +353,8 @@ function SectionTitle({ children }) {
   );
 }
 
-function CircularGauge({ value, size = 88, strokeWidth = 7, color, label, statusLabel, noData = false }) {
+// display / unit = optional text inside the ring instead of the percentage (e.g. 90.0 over m³); the ring still fills by `value` (0-100).
+function CircularGauge({ value, size = 88, strokeWidth = 7, color, label, statusLabel, noData = false, display, unit }) {
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const clamped = noData ? 0 : Math.max(0, Math.min(100, value));
@@ -376,9 +377,14 @@ function CircularGauge({ value, size = 88, strokeWidth = 7, color, label, status
           />
         </svg>
         <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <span style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: actualSize * 0.22, color: displayColor }}>
-            {noData ? '—' : `${Math.round(clamped)}%`}
-          </span>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", lineHeight: 1.1 }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontWeight: 700, fontSize: actualSize * 0.22, color: displayColor }}>
+              {noData ? '—' : display !== undefined ? display : `${Math.round(clamped)}%`}
+            </span>
+            {!noData && display !== undefined && unit ? (
+              <span style={{ fontFamily: "var(--font-mono)", fontWeight: 600, fontSize: actualSize * 0.13, color: displayColor, opacity: 0.85 }}>{unit}</span>
+            ) : null}
+          </div>
         </div>
       </div>
       <div style={{ fontSize: isMobile ? 8 : 10, color: "var(--muted-foreground)", textAlign: "center" }}>{label}</div>
@@ -1081,9 +1087,11 @@ export function Dashboard({ onViewAllAlerts } = {}) {
           <div className="flex justify-around" style={{ marginTop: 8 }}>
             <CircularGauge
               value={tankHasData ? feedTankLevel : 0}
-              color={!tankHasData ? COLORS.muted : feedTankLevel === 0 ? COLORS.danger : !feedTankLow ? COLORS.success : COLORS.warning}
+              display={tankHasData ? feedTankVolume.toFixed(1) : undefined}
+              unit="m³"
+              color={!tankHasData ? COLORS.muted : tankBand?.key === 'top' ? COLORS.success : tankBand?.key === 'mid' ? COLORS.warning : COLORS.danger}
               label="Feed Tank"
-              statusLabel={!tankHasData ? "No Data" : tankEmpty ? "Empty" : !feedTankLow ? "Normal" : "Low"}
+              statusLabel={!tankHasData ? "No Data" : tankEmpty ? "Empty" : tankBand?.statusLabel ?? "Normal"}
               noData={!tankHasData}
             />
             <CircularGauge
