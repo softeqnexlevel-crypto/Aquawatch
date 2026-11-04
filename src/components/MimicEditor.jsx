@@ -11,14 +11,13 @@ import { useData } from '../contexts/DataContext';
 import { useAuth } from '../contexts/AuthContext';
 import { DATA_FRESHNESS_WINDOW_MS } from './dashboardComponents/instrumentUtils';
 
-const STORAGE_KEY = 'mimic-layout-v3';
-const STORAGE_KEY_P = 'mimic-layout-portrait-v2';   // phone (vertical) layout
+const STORAGE_KEY = 'mimic-layout-v9';
+const STORAGE_KEY_P = 'mimic-layout-portrait-v6';   // phone (vertical) layout
 const PORTRAIT_BELOW = 640;                           // px of available width
 const PAD = 24;
 const CANVAS_W = 1340;
 const CANVAS_H = 560;
 const CANVAS_PW = 360;
-const CANVAS_PH = 824;
 
 const NEON = {
   cyan: '#00e5ff',
@@ -63,7 +62,7 @@ function readText(sensorData, tag) {
 
 /**
  * Same numbers the Dashboard shows, built from the same MQTT tags:
- *  - RO5-FeedTankLevel  = feed tank VOLUME in m3, shown exactly as the PLC sends it
+ *  - RO5-FeedTankLevel  = feed tank level 0-100 from the PLC; shown as m3 with full = 300 m3 (widget scale 3)
  *  - RO5-FlushTankPct   = % from RO5-FlushTank (0 = 0 %, 126 = 100 %)
  *  - MIMIC-Running      = 1 when the feed pump, HP pump, backwash or the SystemActive bit is on
  *  - MIMIC-Fresh        = 1 when we are connected and the data is recent (drives the operation-mode box)
@@ -119,11 +118,12 @@ const DEFAULTS = {
   pill:   { w: 150, h: 32,  label: 'Status',     unit: '',     min: 0, max: 1,   color: 'lime' },
   text:   { w: 200, h: 24,  label: 'Label',      unit: '',     min: 0, max: 1,   color: 'cyan' },
   mode:   { w: 125, h: 80,  label: 'Operation',  unit: '',     min: 0, max: 1,   color: 'cyan' },
+  badge:  { w: 100, h: 56,  label: 'RO5',        unit: '',     min: 0, max: 1,   color: 'cyan' },
 };
 
 const PALETTE = [
   ['tank', 'Tank'], ['vessel', 'Vessel'], ['ro2', 'Two-stage RO'], ['pump', 'Pump'], ['gauge', 'Gauge'],
-  ['data', 'Data pill'], ['pipe', 'Pipe'], ['pill', 'Status'], ['mode', 'Mode box'], ['text', 'Text'],
+  ['data', 'Data pill'], ['pipe', 'Pipe'], ['pill', 'Status'], ['mode', 'Mode box'], ['badge', 'Plant badge'], ['text', 'Text'],
 ];
 
 function makeWidget(type, x = 40, y = 40, over = {}) {
@@ -141,10 +141,10 @@ function roTemplate() {
     W('pipe', 331, 275, { w: 11, h: 210, color: 'olive', tag: 'RO5-AntiscalantDosingActive' }),
 
     W('mode', 34, 50, { w: 125, h: 80, label: 'Operation' }),
-    W('tank', 34, 167, { w: 125, h: 214, label: 'Feed tank', tag: 'RO5-FeedTankLevel', unit: 'm³', min: 0, max: 10, lo: 2 }),
+    W('tank', 34, 167, { w: 125, h: 214, label: 'Feed tank', tag: 'RO5-FeedTankLevel', unit: 'm³', min: 0, max: 100, scale: 3, warn: 50, lo: 25 }),
     W('pump', 223, 230, { w: 80, h: 100, label: 'Feed pump', tag: 'RO5-Feedpump', color: 'lime' }),
     W('data', 173, 182, { w: 180, h: 36, label: 'FEED FLOW', tag: 'RO5-FEEDFlow', unit: 'm³/h', color: 'cyan' }),
-    W('vessel', 368, 179, { w: 91, h: 152, label: 'Media filter', tag: 'RO5-MediaFilterInPress', unit: 'bar', max: 10 }),
+    W('vessel', 368, 179, { w: 91, h: 152, label: 'Media filter ΔP', tag: 'RO5-MediaFilterDeltaP', unit: 'bar', max: 1, hi: 0.4, big: true }),
     W('vessel', 524, 190, { w: 58, h: 130, label: 'Cartridge', unit: '' }),
     W('pump', 655, 225, { w: 96, h: 112, label: 'HP pump', tag: 'RO5-HPPpump', color: 'amber' }),
     // three pressure gauges, each above its equipment
@@ -154,37 +154,62 @@ function roTemplate() {
     W('ro2', 859, 190, { w: 212, h: 208 }),
     W('data', 840, 436, { w: 124, h: 32, label: 'PERM', tag: 'RO5-Permeateflow', unit: 'm³/h', color: 'cyan' }),
     W('data', 974, 436, { w: 124, h: 32, label: 'CONC', tag: 'RO5-ConcetrateFlow', unit: 'm³/h', color: 'magenta' }),
+    W('data', 859, 476, { w: 220, h: 44, label: 'RECOVERY', tag: 'RO5-SystemRecovery', unit: '%', lo: 50, color: 'green', big: true }),
+    W('badge', 981, 20, { w: 90, h: 44, label: 'RO5' }),
     W('tank', 236, 391, { w: 90, h: 140, label: 'Antiscalant', tag: 'RO5-AntiscalantDaily', unit: 'ml', min: 0, max: 5000, color: 'lime' }),
   ];
 }
 
-/** Same plant, stacked top-to-bottom for phones (360 x 824, same as the mobile app). */
+/**
+ * Same plant, stacked top-to-bottom for phones. This is the same layout as the mobile app (360 wide).
+ * PIPE_LEN = visible length of EVERY connecting pipe; change it and all equipment is re-spaced so the pipes stay equal.
+ */
+const PIPE_LEN = 14;
+const P = (() => {
+  const Y_TANK = 4, H_TANK = 80;
+  const Y_PUMP = Y_TANK + H_TANK + PIPE_LEN - 4;       // pump circle starts 4 px inside its box
+  const Y_FILTER = Y_PUMP + 76 + PIPE_LEN;             // vessel caption row sits at the top of its box
+  const B_FILTER = Y_FILTER + 62 - 2;
+  const Y_CART = B_FILTER + PIPE_LEN;
+  const B_CART = Y_CART + 54 - 2;
+  const Y_HP = B_CART + PIPE_LEN - 4;
+  const Y_RO = Y_HP + 76 + PIPE_LEN - 2;
+  const B_RO = Y_RO + 112 - 2;
+  const Y_OUT = B_RO + PIPE_LEN;
+  const Y_REC = Y_OUT + 28 + 8;
+  return { Y_TANK, H_TANK, Y_PUMP, Y_FILTER, B_FILTER, Y_CART, B_CART, Y_HP, Y_RO, B_RO, Y_OUT, Y_REC, Y_GAUGE: Y_FILTER - 54, H: Y_REC + 30 + 8 };
+})();
+const CANVAS_PH = P.H;
+
 function roTemplatePortrait() {
   const W = (type, x, y, over) => makeWidget(type, x, y, over);
+  const run = { color: 'blue', tag: 'MIMIC-Running' };
   return [
-    W('pipe', 175, 98, { w: 10, h: 40, color: 'blue', tag: 'MIMIC-Running' }),
-    W('pipe', 175, 230, { w: 10, h: 26, color: 'blue', tag: 'MIMIC-Running' }),
-    W('pipe', 175, 352, { w: 10, h: 22, color: 'blue', tag: 'MIMIC-Running' }),
-    W('pipe', 175, 458, { w: 10, h: 24, color: 'blue', tag: 'MIMIC-Running' }),
-    W('pipe', 175, 584, { w: 10, h: 34, color: 'blue', tag: 'MIMIC-Running' }),
-    W('pipe', 80, 358, { w: 100, h: 8, color: 'olive', tag: 'RO5-AntiscalantDosingActive' }),
-    W('pipe', 79, 744, { w: 8, h: 42, color: 'teal', tag: 'RO5-Permeateflow' }),
-    W('pipe', 262, 744, { w: 10, h: 42, color: 'magenta', tag: 'RO5-ConcetrateFlow' }),
+    W('pipe', 175, P.Y_TANK + P.H_TANK, { w: 10, h: PIPE_LEN + 2, ...run }),
+    W('pipe', 175, P.Y_PUMP + 76, { w: 10, h: PIPE_LEN, ...run }),
+    W('pipe', 175, P.B_FILTER, { w: 10, h: PIPE_LEN, ...run }),
+    W('pipe', 175, P.B_CART, { w: 10, h: PIPE_LEN + 2, ...run }),
+    W('pipe', 175, P.Y_HP + 76, { w: 10, h: PIPE_LEN + 2, ...run }),
+    W('pipe', 84, P.B_FILTER + PIPE_LEN / 2 - 4, { w: 96, h: 8, color: 'olive', tag: 'RO5-AntiscalantDosingActive' }),
+    W('pipe', 79, P.B_RO, { w: 8, h: PIPE_LEN + 2, color: 'teal', tag: 'RO5-Permeateflow' }),          // permeate line: RO vessel -> PERM
+    W('pipe', 262, P.B_RO, { w: 10, h: PIPE_LEN + 2, color: 'magenta', tag: 'RO5-ConcetrateFlow' }),   // concentrate line: RO vessel -> CONC
 
-    W('mode', 2, 10, { w: 84, h: 62, label: 'Operation' }),
-    W('tank', 90, 6, { w: 180, h: 92, label: 'Feed tank', tag: 'RO5-FeedTankLevel', unit: 'm³', min: 0, max: 10, lo: 2 }),
-    W('pump', 145, 138, { w: 70, h: 92, label: 'Feed pump', tag: 'RO5-Feedpump', color: 'lime' }),
-    W('data', 2, 164, { w: 150, h: 36, label: 'FEED FLOW', tag: 'RO5-FEEDFlow', unit: 'm³/h', color: 'cyan' }),
-    W('vessel', 120, 256, { w: 120, h: 96, label: 'Media filter', tag: 'RO5-MediaFilterInPress', unit: 'bar', max: 10 }),
-    W('vessel', 135, 374, { w: 90, h: 84, label: 'Cartridge', unit: '' }),
-    W('pump', 140, 482, { w: 80, h: 102, label: 'HP pump', tag: 'RO5-HPPpump', color: 'amber' }),
-    W('gauge', 234, 226, { w: 126, h: 126, label: 'Media in', tag: 'RO5-MediaFilterInPress', unit: 'bar', max: 10, color: 'amber' }),
-    W('gauge', 234, 354, { w: 126, h: 126, label: 'Media out', tag: 'RO5-MediaFilterOutPress', unit: 'bar', max: 10, color: 'amber' }),
-    W('gauge', 234, 482, { w: 126, h: 126, label: 'RO feed', tag: 'RO5-ROPressure', unit: 'bar', max: 20, hi: 18, color: 'amber' }),
-    W('ro2', 40, 616, { w: 280, h: 128 }),
-    W('data', 8, 784, { w: 150, h: 32, label: 'PERM', tag: 'RO5-Permeateflow', unit: 'm³/h', color: 'cyan' }),
-    W('data', 192, 784, { w: 150, h: 32, label: 'CONC', tag: 'RO5-ConcetrateFlow', unit: 'm³/h', color: 'magenta' }),
-    W('tank', 0, 280, { w: 82, h: 150, label: 'Antiscalant', tag: 'RO5-AntiscalantDaily', unit: 'ml', min: 0, max: 5000, color: 'lime' }),
+    W('mode', 2, 6, { w: 80, h: 52, label: 'Operation' }),
+    W('badge', 281, 6, { w: 77, h: 52, label: 'RO5' }),
+    W('tank', 92, P.Y_TANK, { w: 185, h: P.H_TANK, label: 'Feed tank', tag: 'RO5-FeedTankLevel', unit: 'm³', min: 0, max: 100, scale: 3, warn: 50, lo: 25 }),
+    W('pump', 145, P.Y_PUMP, { w: 70, h: 76, label: 'Feed pump', tag: 'RO5-Feedpump', color: 'lime' }),
+    W('data', 2, P.Y_PUMP + 12, { w: 128, h: 30, label: 'FEED FLOW', tag: 'RO5-FEEDFlow', unit: 'm³/h', color: 'cyan' }),
+    W('vessel', 125, P.Y_FILTER, { w: 110, h: 62, label: 'Media filter', tag: 'RO5-MediaFilterDeltaP', unit: 'bar', max: 1, hi: 0.4, big: true, color: 'white' }),
+    W('vessel', 140, P.Y_CART, { w: 80, h: 54, label: 'Cartridge', unit: '' }),
+    W('pump', 145, P.Y_HP, { w: 70, h: 76, label: 'HP pump', tag: 'RO5-HPPpump', color: 'amber' }),
+    W('gauge', 262, P.Y_GAUGE, { w: 90, h: 92, label: 'Media in', tag: 'RO5-MediaFilterInPress', unit: 'bar', max: 10, color: 'amber' }),
+    W('gauge', 262, P.Y_GAUGE + 92, { w: 90, h: 92, label: 'Media out', tag: 'RO5-MediaFilterOutPress', unit: 'bar', max: 10, color: 'amber' }),
+    W('gauge', 262, P.Y_GAUGE + 184, { w: 90, h: 92, label: 'RO feed', tag: 'RO5-ROPressure', unit: 'bar', max: 20, hi: 18, color: 'amber' }),
+    W('ro2', 30, P.Y_RO, { w: 300, h: 112 }),
+    W('data', 8, P.Y_OUT, { w: 150, h: 28, label: 'PERM', tag: 'RO5-Permeateflow', unit: 'm³/h', color: 'cyan' }),
+    W('data', 192, P.Y_OUT, { w: 150, h: 28, label: 'CONC', tag: 'RO5-ConcetrateFlow', unit: 'm³/h', color: 'magenta' }),
+    W('data', 90, P.Y_REC, { w: 170, h: 30, label: 'RECOVERY', tag: 'RO5-SystemRecovery', unit: '%', lo: 50, color: 'green', big: true }),
+    W('tank', 0, P.B_FILTER + PIPE_LEN / 2 - 4 - 70, { w: 84, h: 104, label: 'Antiscalant', tag: 'RO5-AntiscalantDaily', unit: 'ml', min: 0, max: 5000, color: 'lime' }),
   ];
 }
 
@@ -193,7 +218,8 @@ function roTemplatePortrait() {
 function useColors(w, v) {
   const status = statusOf(w, v);
   const base = NEON[w.color] || NEON.cyan;
-  const color = status === 'alarm' ? NEON.red : base;
+  const warn = w.warn !== undefined && w.warn !== '' && v !== null && v !== undefined && v < Number(w.warn);
+  const color = status === 'alarm' ? NEON.red : warn ? NEON.amber : base;
   return { status, color, base };
 }
 const glowOf = (c, r = 6) => `drop-shadow(0 0 ${r}px ${c}) drop-shadow(0 0 ${r * 2.2}px ${c}55)`;
@@ -215,7 +241,8 @@ function Tank({ w, v }) {
   const range = (Number(w.max) - Number(w.min)) || 1;
   const pct = v === null ? 0 : clamp(((v - Number(w.min)) / range) * 100, 0, 100);
   const showPct = w.unit === '%' || w.unit === '';
-  const big = v === null ? '--' : showPct ? `${Math.round(pct)}%` : fmtU(v, w.unit);
+  const shown = v === null ? null : v * (Number(w.scale) || 1);
+  const big = v === null ? '--' : showPct ? `${Math.round(pct)}%` : fmtU(shown, w.unit);
   const unitLine = v !== null && !showPct ? w.unit : '';
   const gid = `tg-${w.id}`;
   const fillH = ((H - 8) * pct) / 100;
@@ -250,6 +277,8 @@ function Vessel({ w, v }) {
   const lines = [];
   for (let y = 22; y < H - 26; y += 15.5) lines.push(y);
   const text = v === null ? `– ${w.unit}` : `${fmtU(v, w.unit)} ${w.unit}`;
+  const bigDp = !!w.big && w.unit !== '';
+  const dpText = v === null ? '--' : Number(v).toFixed(2);
   return (
     <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Label style={{ height: 16, marginBottom: 0 }}>{w.label}</Label>
@@ -262,10 +291,14 @@ function Vessel({ w, v }) {
           </linearGradient>
         </defs>
         <rect x="2" y="2" width={W - 4} height={H - 4} rx={Math.min(14, W / 3)} fill={`url(#${gid})`} stroke={color} strokeWidth="2.5" />
-        {lines.map((y) => (
+        {!bigDp && lines.map((y) => (
           <line key={y} x1="10" y1={y} x2={W - 10} y2={y} stroke="#566074" strokeOpacity="0.7" strokeWidth="1.2" />
         ))}
-        {w.unit !== '' && (
+        {bigDp && (<>
+          <text x={W / 2} y={H / 2 + 6} textAnchor="middle" fontSize={Math.min(34, W / 3)} fontWeight="800" fill="#ffffff" fontFamily="Inter, system-ui, sans-serif">{dpText}</text>
+          <text x={W / 2} y={H / 2 + 24} textAnchor="middle" fontSize="11" fontWeight="700" fill={color} fontFamily="Inter, system-ui, sans-serif">{w.unit}</text>
+        </>)}
+        {!bigDp && w.unit !== '' && (
           <text x={W / 2} y={H - 10} textAnchor="middle" fontSize="11" fontWeight="800" fill="#ffffff" fontFamily="Inter, system-ui, sans-serif">{text}</text>
         )}
       </svg>
@@ -392,12 +425,12 @@ function DataPill({ w, v }) {
   const { status, color } = useColors(w, v);
   const text = `${w.label} ${v === null ? '–' : fmtU(v, w.unit)} ${w.unit}`.trim();
   // shrink the letters so the whole text always sits inside the pill
-  const fs = Math.max(8, Math.min(11, (w.w - 26) / (text.length * 0.66)));
+  const fs = Math.max(8, Math.min(w.big ? 16 : 11, (w.w - 34) / (text.length * 0.66)));
   return (
     <div style={{
       width: '100%', height: '100%', boxSizing: 'border-box', borderRadius: 999, border: `2.5px solid ${color}`, color,
       background: '#050a14', display: 'flex', alignItems: 'center', justifyContent: 'center', whiteSpace: 'nowrap', overflow: 'hidden',
-      filter: glowOf(color, 5), fontFamily: 'Inter, system-ui, sans-serif', fontSize: fs, fontWeight: 700, letterSpacing: '0.01em',
+      filter: glowOf(color, 5), fontFamily: 'Inter, system-ui, sans-serif', fontSize: fs, fontWeight: w.big ? 800 : 700, letterSpacing: '0.01em',
       animation: pulse(status), padding: '0 8px',
     }}>
       {text}
@@ -432,6 +465,22 @@ function ModeBox({ w, sensorData }) {
       <div style={{ fontSize: 9, fontWeight: 700, color: LABEL_COLOR, letterSpacing: '0.05em', textTransform: 'uppercase' }}>{w.label}</div>
       <span style={{ width: 7, height: 7, borderRadius: '50%', background: mode.color, boxShadow: `0 0 8px ${mode.color}` }} />
       <div style={{ fontSize: fs, fontWeight: 800, color: mode.color, whiteSpace: 'nowrap' }}>{mode.text}</div>
+    </div>
+  );
+}
+
+// Plant name box (same size and style as the Operation box). The big text is the widget's label.
+function PlantBadge({ w }) {
+  const c = NEON[w.color] || NEON.cyan;
+  const fs = Math.max(10, Math.min(15, (w.w - 24) / (Math.max(1, String(w.label).length) * 0.7)));
+  return (
+    <div style={{
+      width: '100%', height: '100%', boxSizing: 'border-box', borderRadius: 12, border: `2.5px solid ${c}`, background: '#050a14',
+      filter: glowOf(c, 5), display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4,
+      fontFamily: 'Inter, system-ui, sans-serif',
+    }}>
+      <div style={{ fontSize: 8, fontWeight: 700, color: LABEL_COLOR, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Plant</div>
+      <div style={{ fontSize: fs, fontWeight: 800, color: c, whiteSpace: 'nowrap' }}>{w.label}</div>
     </div>
   );
 }
@@ -515,6 +564,7 @@ function WidgetBody({ w, sensorData }) {
     case 'pill': return <ValueStatusPill w={w} v={v} />;
     case 'text': return <TextLabel w={w} />;
     case 'mode': return <ModeBox w={w} sensorData={sensorData} />;
+    case 'badge': return <PlantBadge w={w} />;
     default: return null;
   }
 }
@@ -530,10 +580,19 @@ const btn = {
   background: 'var(--secondary)', color: 'var(--foreground)', border: '1px solid var(--border)', fontSize: 12,
 };
 
+// Keeps a single plant badge: extra copies (from tapping "Plant badge" more than once) are dropped on load.
+function onePlantBadge(arr) {
+  let seen = false;
+  return arr.filter((w) => {
+    if (w && w.type === 'badge') { if (seen) return false; seen = true; }
+    return true;
+  });
+}
+
 function loadLayout() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) { const arr = JSON.parse(raw); if (Array.isArray(arr) && arr.length) return arr; }
+    if (raw) { const arr = JSON.parse(raw); if (Array.isArray(arr) && arr.length) return onePlantBadge(arr); }
   } catch { /* ignore */ }
   return roTemplate();
 }
@@ -541,7 +600,7 @@ function loadLayout() {
 function loadPortrait() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_P);
-    if (raw) { const arr = JSON.parse(raw); if (Array.isArray(arr) && arr.length) return arr; }
+    if (raw) { const arr = JSON.parse(raw); if (Array.isArray(arr) && arr.length) return onePlantBadge(arr); }
   } catch { /* ignore */ }
   return roTemplatePortrait();
 }
@@ -603,7 +662,10 @@ export function MimicEditor() {
     const y1 = Math.max(...widgets.map((w) => w.y + w.h)) + PAD;
     return { x: Math.max(0, x0), y: Math.max(0, y0), w: x1 - Math.max(0, x0), h: y1 - Math.max(0, y0) };
   }, [widgets, editingOn, fullW, fullH]);
-  const scale = Math.min(portrait ? 1.25 : 1.5, wrapW / view.w) || 1;
+  // Phone: fit the whole diagram on the screen (width AND height), like the mobile app. Laptop: fill the width.
+  const viewportH = typeof window !== 'undefined' ? window.innerHeight : 800;
+  const fitH = portrait && !editingOn ? Math.max(0.55, (viewportH - 230) / view.h) : Infinity;
+  const scale = Math.min(portrait ? 1.6 : 1.5, wrapW / view.w, fitH) || 1;
   const selected = widgets.find((w) => w.id === selId) || null;
   const tagNames = useMemo(() => Object.keys(sensorData).sort(), [sensorData]);
 
@@ -718,7 +780,7 @@ export function MimicEditor() {
         </div>
       )}
 
-      <div className="grid gap-3" style={{ gridTemplateColumns: editingOn && selected ? 'minmax(0,1fr) 260px' : 'minmax(0,1fr)' }}>
+      <div className="grid gap-3" style={{ gridTemplateColumns: editingOn && selected && !portrait ? 'minmax(0,1fr) 260px' : 'minmax(0,1fr)' }}>
         {/* canvas */}
         <div ref={wrapRef} style={{ width: '100%', overflow: 'hidden', borderRadius: 18, border: '1px solid #17253d', background: 'radial-gradient(900px 520px at 25% 0%, #0a1733 0%, #050913 55%, #03050a 100%)' }}>
           <div style={{ width: view.w * scale, height: view.h * scale, position: 'relative', margin: '0 auto' }}>

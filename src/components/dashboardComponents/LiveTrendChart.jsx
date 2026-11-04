@@ -3,15 +3,20 @@ import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { API_BASE_URL } from '../../config';
 import { ComposedChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, ReferenceArea } from "recharts";
 import { Play, Pause, Maximize2, Minimize2 } from "lucide-react";
-import { format, subHours, subDays, subWeeks } from 'date-fns';
+import { format, subDays, subWeeks } from 'date-fns';
 import { COLORS, SENSOR_MAP } from '../Dashboard';
 
 // config.js already ends with /api, so strip it before adding our own.
 const API_ROOT = String(API_BASE_URL || '').replace(/\/api\/?$/, '');
 
+// Only these ranges are offered (1h and 6h removed).
+const TIME_RANGES = ['24h', '7d'];
+const DEFAULT_RANGE = '24h';
+const HOURS_BY_RANGE = { '24h': 24, '7d': 168 };
+
 export const LiveTrendChart = ({ data, sensorKey, height = 200, showControls = true }) => {
   const [isPlaying, setIsPlaying] = useState(true);
-  const [timeRange, setTimeRange] = useState('1h');
+  const [timeRange, setTimeRange] = useState(DEFAULT_RANGE);
   const [showAnnotations, setShowAnnotations] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -25,13 +30,12 @@ export const LiveTrendChart = ({ data, sensorKey, height = 200, showControls = t
     color: COLORS.primary,
   };
 
-  // ---- Stored history from the database (so 6h / 24h / 7d show real data) ----
+  // ---- Stored history from the database (so 24h / 7d show real data) ----
   const [serverPoints, setServerPoints] = useState([]);
 
   useEffect(() => {
     let stop = false;
-    const hoursByRange = { '1h': 1, '6h': 6, '24h': 24, '7d': 168 };
-    const hours = hoursByRange[timeRange] || 1;
+    const hours = HOURS_BY_RANGE[timeRange] || 24;
 
     const load = async () => {
       try {
@@ -81,24 +85,13 @@ export const LiveTrendChart = ({ data, sensorKey, height = 200, showControls = t
     let start;
     let tickFormat;
     switch (timeRange) {
-      case '1h':
-        start = subHours(now, 1);
-        tickFormat = 'HH:mm';
-        break;
-      case '6h':
-        start = subHours(now, 6);
-        tickFormat = 'HH:mm';
-        break;
-      case '24h':
-        start = subDays(now, 1);
-        tickFormat = 'HH:mm';
-        break;
       case '7d':
         start = subWeeks(now, 1);
         tickFormat = 'dd MMM';
         break;
+      case '24h':
       default:
-        start = subHours(now, 1);
+        start = subDays(now, 1);
         tickFormat = 'HH:mm';
     }
     return { startMs: start.getTime(), endMs: now.getTime(), tickFormat };
@@ -268,7 +261,7 @@ export const LiveTrendChart = ({ data, sensorKey, height = 200, showControls = t
           )}
           {showControls && (
             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-              {['1h', '6h', '24h', '7d'].map((range) => (
+              {TIME_RANGES.map((range) => (
                 <button
                   key={range}
                   onClick={() => setTimeRange(range)}
