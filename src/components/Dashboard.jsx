@@ -266,7 +266,7 @@ export const SENSOR_MAP = {
   // ---- Non-pressure sensors ----
   'RO5-SystemRecovery': { label: 'System Recovery', unit: '%', icon: Activity, color: COLORS.success, shortName: 'SystemRecovery' },
   'RO5-PureWaterEc': { label: 'Product Water EC', unit: 'µS/cm', icon: FlaskConical, color: COLORS.purple, shortName: 'PureWaterEC' },
-  'RO5-FeedTankLevel': { label: 'Feed Tank Volume', unit: 'm³', icon: Droplets, color: '#14b8a6', shortName: 'FeedTankLevel' },
+  'RO5-FeedTankLevel': { label: 'Feed Tank Volume', unit: '%', icon: Droplets, color: '#14b8a6', shortName: 'FeedTankLevel' },
   'RO5-FeedTankLevelRaw': { label: 'Feed Tank Raw', unit: '', icon: Droplets, color: COLORS.muted, shortName: 'FeedTankRaw' },
   'RO5-FlushTank': { label: 'Flush Tank', unit: '', icon: Droplets, color: COLORS.muted, shortName: 'FlushTankRaw' },
 
@@ -599,6 +599,8 @@ export function Dashboard({ onViewAllAlerts } = {}) {
 
   const { activeAlerts: activeAlarmsList, counts: alertCounts } = useAlerts();
   const { isExpired, user: authUser, canAccess } = useAuth();
+  // Feed Tank Raw and Flush Tank are service values: only administrators see them.
+  const isAdminUser = !!authUser && (authUser.isSuperAdmin === true || /admin/i.test(String(authUser.role || '')));
   // Mimic tab: admins always; everyone else only if the admin ticked "mimic" for them.
   const canSeeMimic = authUser?.role === 'admin' || (typeof canAccess === 'function' ? canAccess('mimic') : true);
   const tab = activeTab === 'Visualization' && !canSeeMimic ? 'overview' : activeTab;
@@ -667,17 +669,18 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const dosingPumpOn       = isDosingOn;
 
   // ── LIVE FEED TANK (VOLUME) ─────────────────────────────────────────────
-  // RO5-FeedTankLevel now carries the tank VOLUME in m³ (0–10 m³, low alarm at 2 m³).
-  // It is shown exactly as received; the percentage below only drives the gauge fill.
-  const FEED_TANK_MAX_M3 = 10;
-  const FEED_TANK_LOW_M3 = 2;
-  const feedTankVolRaw = getValue('RO5-FeedTankLevel');
-  const feedTankVolNum =
-    feedTankVolRaw === undefined || feedTankVolRaw === null || feedTankVolRaw === ''
+  // The PLC sends RO5-FeedTankLevel as 0–100 (100 = full). It is shown in m³ with full = 300 m³.
+  // Low (red) at or below 20 % = 60 m³.
+  const FEED_TANK_CAPACITY_M3 = 300;
+  const FEED_TANK_LOW_PCT = 25; // red below 25 %, same bands as the app gauge
+  const feedTankLevelRaw0to100 = getValue('RO5-FeedTankLevel');
+  const feedTankLevelNum =
+    feedTankLevelRaw0to100 === undefined || feedTankLevelRaw0to100 === null || feedTankLevelRaw0to100 === ''
       ? NaN
-      : typeof feedTankVolRaw === 'number' ? feedTankVolRaw : parseFloat(feedTankVolRaw);
-  const feedTankVolume = Number.isFinite(feedTankVolNum) ? feedTankVolNum : null;
-  const feedTankLow = feedTankVolume !== null && feedTankVolume <= FEED_TANK_LOW_M3;
+      : typeof feedTankLevelRaw0to100 === 'number' ? feedTankLevelRaw0to100 : parseFloat(feedTankLevelRaw0to100);
+  const feedTankPctValue = Number.isFinite(feedTankLevelNum) ? Math.min(100, Math.max(0, feedTankLevelNum)) : null;
+  const feedTankVolume = feedTankPctValue === null ? null : (feedTankPctValue / 100) * FEED_TANK_CAPACITY_M3;
+  const feedTankLow = feedTankPctValue !== null && feedTankPctValue < FEED_TANK_LOW_PCT;
 
   // Raw transmitter value, only used by the "Feed Tank Raw" card.
   const feedTankLevelRawValue = getValue('RO5-FeedTankLevelRaw');
@@ -690,9 +693,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   // IMPORTANT:
   // Tank level is a physical instrument reading.
   // It must NOT become 0 just because SystemActive is OFF.
-  const feedTankLevel = feedTankVolume === null
-    ? null
-    : Math.min(100, Math.max(0, (feedTankVolume / FEED_TANK_MAX_M3) * 100));
+  const feedTankLevel = feedTankPctValue;
 
   // ── LIVE RO PRESSURE ───────────────────────────────────────────────────
   // Pressure is also a physical instrument reading.
@@ -960,7 +961,8 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             <div style={INSTRUMENT_BODY_STYLE(isMobile)}>
               <TankLevelGauge
                 value={tankHasData ? feedTankLevel : undefined}
-                display={tankHasData ? `${feedTankVolume.toFixed(1)} m³` : undefined}
+                display={tankHasData ? feedTankVolume.toFixed(1) : undefined}
+                unit="m³"
                 height={gaugeVisual}
                 width={isMobile ? 56 : 84}
               />
@@ -993,6 +995,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             color={pureWaterEC > 150 ? COLORS.danger : pureWaterEC > 0 ? COLORS.success : COLORS.primary} statusText={pureWaterEC > 150 ? "High" : pureWaterEC > 0 ? "Within limits" : "—"} statusOk={pureWaterEC <= 150 && pureWaterEC > 0} />
           <KPICardV2 label="Daily Production" unit="m³" icon={TrendingUp} value={dailyProdDisplay}
             color={dailyProduction > 0 ? COLORS.success : COLORS.primary} statusText={summaryLoading ? "Loading" : `${safeFormat(permeateFlow, 1)} m³/h now`} statusOk={true} />
+          {isAdminUser && (<>
           <KPICardV2 label="Feed Tank Raw" unit="" icon={Droplets} value={hasRawTankReading ? feedTankLevelRawNum.toFixed(2) : '--'}
             color={COLORS.muted}
             statusText={hasRawTankReading ? 'Raw signal' : 'No reading'}
@@ -1001,6 +1004,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
             color={COLORS.muted}
             statusText={hasFlushRawReading ? 'Raw signal' : 'No reading'}
             statusOk={hasFlushRawReading} />
+          </>)}
           {/* Service run hours: PLC-reported (RO5-SystemRunhrs), next to Feed Tank Raw */}
           <TopStatusCard
             icon={Clock}
