@@ -45,7 +45,7 @@ export function isBackwashMode(getValue) {
 
 // ── Alert 1: the backwash mode state itself ────────────────────────────────
 export const BACKWASH_MODE_ALERT_ID = 'derived-backwash-mode';
-export const BACKWASH_MODE_ALERT_TYPE = 'System in Backwash Mode';
+export const BACKWASH_MODE_ALERT_TYPE = 'R05 Plant in Backwash Mode';
 
 export function evaluateBackwashModeAlert(getValue) {
   const active = isBackwashMode(getValue);
@@ -63,8 +63,8 @@ export function evaluateBackwashModeAlert(getValue) {
     // "Area - Signal" format: RecentAlarmItem shows the part after " - "
     equipment: 'RO5 - System Mode',
     message: active
-      ? 'System is in backwash mode — normal during the media filter backwash cycle'
-      : 'System is not in backwash mode',
+      ? 'RO5 Plant is in backwash mode — normal during the media filter backwash cycle'
+      : 'R05 Plant is not in backwash mode',
     value: mode || undefined,
   };
 }
@@ -81,7 +81,7 @@ export function evaluateBackwashFilterDpAlert(getValue) {
   const plcHighDpBit = isOn(getValue('RO5-HighPrefilterDeltaP'));
 
   const trigger = plcHighDpBit
-    ? 'PLC high filter ΔP bit is set'
+    ? 'System high filter ΔP bit is set'
     : dpKnown && dp >= FILTER_DP_LIMIT_BAR
       ? `Filter ΔP at or above ${FILTER_DP_LIMIT_BAR.toFixed(2)} bar`
       : 'Backwash cycle running';
@@ -95,7 +95,7 @@ export function evaluateBackwashFilterDpAlert(getValue) {
     active,
     source: 'derived',
     equipment: 'Media Filter - Delta P',
-    message: `System in backwash mode — ${trigger}`,
+    message: `R05 Plant in backwash mode — ${trigger}`,
     value: dpKnown ? `${dp.toFixed(2)} bar` : undefined,
   };
 }

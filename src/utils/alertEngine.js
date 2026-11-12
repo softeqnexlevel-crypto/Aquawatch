@@ -155,12 +155,12 @@
 
   const BIT_ALARMS = [
     { key: 'RO5-HighPrefilterDeltaP', message: 'High Prefilter Delta P', equipment: 'RO5 - Prefilter', severity: 'High', description: 'Prefilter is clogged and needs backwashing or replacement.' },
-    { key: 'RO5-PowerProblem', message: 'Power Problem', equipment: 'RO5 - Power Supply', severity: 'Critical', description: 'PLC reports a power supply fault. Check incoming power and control panel.' },
+    { key: 'RO5-PowerProblem', message: 'Power Problem', equipment: 'RO5 - Power Supply', severity: 'Critical', description: 'The system reports a power supply problem. Check incoming power and the control panel.' },
     { key: 'RO5-HighMediaDeltaP', message: 'High Media Filter Delta P', equipment: 'RO5 - Media Filter', severity: 'High', description: 'Media filter differential pressure is high — filter may need backwashing.' },
-    { key: 'RO5-S2DeltaHigh', message: 'High Differential Pressure - Stage 2', equipment: 'RO5 - Stage 2', severity: 'High', description: 'Stage 2 membrane differential pressure has exceeded the PLC-set limit.' },
-    { key: 'RO5-S1DeltaHigh', message: 'High Differential Pressure - Stage 1', equipment: 'RO5 - Stage 1', severity: 'Critical', description: 'Stage 1 membrane differential pressure has exceeded the PLC-set limit.' },
-    { key: 'RO5-HighROPressure', message: 'High RO Pressure', equipment: 'RO5 - RO Pressure', severity: 'Critical', description: 'RO system pressure has exceeded the PLC-set limit.' },
-    { key: 'RO5-FeedTankLow', message: 'Feed Tank Low Signal', equipment: 'RO5 - Feed Tank', severity: 'Critical', description: 'PLC reports the feed tank low bit is ON.', levelKey: 'RO5-FeedTankLevel' },
+    { key: 'RO5-S2DeltaHigh', message: 'High Differential Pressure - Stage 2', equipment: 'RO5 - Stage 2', severity: 'High', description: 'Stage 2 membrane differential pressure has exceeded the safe limit.' },
+    { key: 'RO5-S1DeltaHigh', message: 'High Differential Pressure - Stage 1', equipment: 'RO5 - Stage 1', severity: 'Critical', description: 'Stage 1 membrane differential pressure has exceeded the safe limit.' },
+    { key: 'RO5-HighROPressure', message: 'High RO Pressure', equipment: 'RO5 - RO Pressure', severity: 'Critical', description: 'RO5 system pressure has exceeded the safe limit.' },
+    { key: 'RO5-FeedTankLow', message: 'Feed Tank Low Signal', equipment: 'RO5 - Feed Tank', severity: 'Critical', description: 'System reports the tank is low.', levelKey: 'RO5-FeedTankLevel' },
     // { key: 'RO5-FeedTankLow', message: 'Low Feed Tank Level', equipment: 'RO5 - Feed Tank', severity: 'Critical', description: 'Feed tank level is low — feed pump may stop soon to prevent dry-run.' },
   ];
 
@@ -261,11 +261,11 @@
       push('RO5-SystemOperation:backwash', inBackwash, {
         sensorKey: 'RO5-SystemOperation',
         severity: 'Info',
-        message: 'System in Backwash Mode',
+        message: 'RO5 Plant in Backwash Mode',
         equipment: 'RO5 - Prefilter',
         value: 'BACKWASH',
         threshold: 'Informational',
-        description: 'The plant has entered backwash mode. Filtering is paused until the cycle finishes.',
+        description: 'RO5 plant has switched to backwash mode. Filtering is paused until the cycle finishes.',
       });
     }
 
