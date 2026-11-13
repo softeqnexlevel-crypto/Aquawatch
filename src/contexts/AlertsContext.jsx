@@ -8,9 +8,6 @@ import {
 } from '../utils/backwashAlert';
 import { API_BASE_URL } from '../config';
 
-// config.js already ends with /api, so strip it before adding our own.
-const API_ROOT = String(API_BASE_URL || '').replace(/\/api\/?$/, '');
-
 const AlertsContext = createContext();
 
 // History is kept until an operator clears it by hand, so the cap is generous.
@@ -46,8 +43,8 @@ function saveHistory(history) {
 // Only the alert types listed here are shown. Everything else is suppressed,
 // including any new rules added to alertEngine later, until added here.
 // Matched against the candidate's `message` (the text shown as the alert type).
-const ALLOWED_ALERT_TYPES = ['Power Problem', 'Feed Tank Low Signal', 'PLC Data Lost']
-const SERVER_TYPES = ['power problem', 'feed tank low signal', 'plc data lost'];
+const ALLOWED_ALERT_TYPES = ['Power Problem', 'Feed Tank Low Signal', 'System Data Lost']
+const SERVER_TYPES = ['power problem', 'feed tank low signal', 'system data lost', 'plc data lost'];
 const SEVERITY_RANK = { Critical: 0, High: 1, Medium: 2, Low: 3, Info: 4 };
 
 const norm = (s) => String(s ?? '').trim().toLowerCase();
@@ -62,11 +59,7 @@ export function AlertsProvider({ children }) {
     let stop = false;
     const load = async () => {
       try {
-        const token = (() => { try { return localStorage.getItem('accessToken'); } catch { return null; } })();
-        if (!token) return; // not signed in
-        const r = await fetch(`${API_ROOT}/api/alert-events`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const r = await fetch(`${API_BASE_URL}/api/alert-events`);
         if (!r.ok) return;
         const rows = await r.json();
         if (!stop) {
@@ -78,7 +71,7 @@ export function AlertsProvider({ children }) {
       } catch { /* ignore */ }
     };
     load();
-    const t = setInterval(load, 5000);
+    const t = setInterval(load, 15000);
     return () => { stop = true; clearInterval(t); };
   }, []);
 
@@ -207,20 +200,20 @@ export function AlertsProvider({ children }) {
   const reportRef = useRef(reportExtraAlerts);
   reportRef.current = reportExtraAlerts;
 
-  // PLC Data Lost follows the server's record: the newest event decides.
+  // System Data Lost follows the server's record: the newest event decides.
   useEffect(() => {
-    const newest = serverHistory.find((e) => norm(e.type) === 'plc data lost');
+    const newest = serverHistory.find((e) => ['system data lost', 'plc data lost'].includes(norm(e.type)));
     const open = !!newest && newest.kind === 'triggered';
     reportRef.current('plc-data-lost', [{
       id: 'derived-plc-data-lost',
       active: open,
       source: 'derived',
       severity: 'Critical',
-      message: 'PLC Data Lost',
-      equipment: 'RO5 - MQTT Link',
-      value: 'No data from PLC',
+      message: 'System Data Lost',
+      equipment: 'RO5 - Data Link',
+      value: 'No data received',
       threshold: '',
-      description: 'The backend is receiving no data from the PLC/ABox. Check its power and network.',
+      description: 'The plant has stopped sending data. Please check power and internet at the plant.',
     }]);
   }, [serverHistory]);
 

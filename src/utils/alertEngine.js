@@ -1,4 +1,4 @@
-  // utils/alertEngine.js
+// utils/alertEngine.js
   //
   // Single source of truth for alarm/alert logic. Plain functions only —
   // no React, no state of its own. Callers (AlertsContext) own the state
@@ -284,7 +284,6 @@
         if (Number.isFinite(lvl)) {
           value = `${lvl.toFixed(1)}%`;
           threshold = '';
-          desc = `${description} Current tank level: ${lvl.toFixed(1)}%.`;
         }
       }
 

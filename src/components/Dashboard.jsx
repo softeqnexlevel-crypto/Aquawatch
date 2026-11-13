@@ -756,7 +756,7 @@ export function Dashboard({ onViewAllAlerts } = {}) {
   const standbyReason = tankEmpty
     ? 'Feed tank empty'
     : operationMode === 'STANDBY'
-      ? 'PLC reports standby'
+      ? 'RO5 Plant on standby'
       : null;
 
   useEffect(() => {
